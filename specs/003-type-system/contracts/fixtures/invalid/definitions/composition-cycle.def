@@ -1,0 +1,7 @@
+# expect: CompositionCycle{path=[metrics_all, metrics_recent, metrics_all]}
+# Harness precondition: metrics_recent is a union whose members include metrics_all.
+namespace       = tenant-a
+name            = metrics_all
+type            = union
+compose.kind    = union
+compose.members = metrics,metrics_recent

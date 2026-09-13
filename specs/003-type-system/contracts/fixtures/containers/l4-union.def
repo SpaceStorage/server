@@ -1,0 +1,7 @@
+# L4 composition: read-only union of two union-compatible members (Clarification Q3).
+namespace       = tenant-a
+name            = metrics_all
+type            = union
+compose.kind    = union
+compose.members = metrics,metrics_archive
+compose.rule.order = metrics,metrics_archive

@@ -1,0 +1,7 @@
+# expect: KeyUnresolvable{key_ref=kv-rambler/data/ss/absent}
+# Nothing is created and no data is ever written unencrypted for this container.
+namespace            = tenant-a
+name                 = secrets
+type                 = kv_store
+encryption.algorithm = aes-256-gcm
+encryption.key       = kv-rambler/data/ss/absent

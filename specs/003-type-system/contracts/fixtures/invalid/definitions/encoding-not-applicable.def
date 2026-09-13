@@ -1,0 +1,7 @@
+# expect: EncodingNotApplicable{encoding=gorilla, data_kind=string, applicable=[plain, dictionary, rle]}
+# Nothing is applied partially: the whole definition is refused.
+namespace       = tenant-a
+name            = names
+type            = relational_table
+schema          = {"fields":[{"name":"id","domain":"i64","nullable":false},{"name":"name","domain":"string","nullable":true}],"key":{"kind":"primary","fields":["id"]}}
+encoding.name   = gorilla

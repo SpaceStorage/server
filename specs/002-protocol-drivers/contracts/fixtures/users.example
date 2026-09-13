@@ -1,0 +1,7 @@
+# SpaceStorage interim users file (feature 02, replaced by the role system in feature 07).
+# Mode must be 0600. Fields: name secret namespace [schema=public] [roles=a,b]
+# For S3, `name` is the access key id and `secret` is the secret access key.
+
+app-a     s3cr3t-a       tenant-a
+app-b     s3cr3t-b       tenant-b     schema=analytics
+ops       "very secret"  -            roles=admin

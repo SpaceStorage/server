@@ -1,0 +1,4 @@
+# expect: SchemaRequired{elements=[columns, key]}
+namespace = tenant-a
+name      = orders
+type      = relational_table

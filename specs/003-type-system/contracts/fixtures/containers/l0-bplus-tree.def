@@ -1,0 +1,8 @@
+# L0 data structure created directly as a container (Clarification Q1).
+# spacestorage create tenant-a.index_by_id <these options>
+namespace   = tenant-a
+name        = index_by_id
+type        = bplus_tree
+mode        = persistent
+compression = lz4
+encoding.key = delta

@@ -1,0 +1,15 @@
+# L3 storage model: hybrid time series with per-field encodings and time partitioning.
+namespace                            = tenant-a
+name                                 = metrics
+type                                 = timeseries
+mode                                 = hybrid
+hybrid.window                        = 7d
+schema                               = {"fields":[{"name":"ts","domain":"timestamp","nullable":false},{"name":"host","domain":"string","nullable":false},{"name":"value","domain":"f64","nullable":false}],"key":{"kind":"partition_clustering","partition":["host"],"clustering":[["ts","asc"]]},"params":{"retention":"30d"}}
+encoding.ts                          = delta
+encoding.value                       = gorilla
+encoding.host                        = dictionary
+compression                          = zstd
+capability.partitioning.scheme       = time
+capability.partitioning.key          = ts
+capability.partitioning.interval     = 1d
+capability.replication.factor        = 3

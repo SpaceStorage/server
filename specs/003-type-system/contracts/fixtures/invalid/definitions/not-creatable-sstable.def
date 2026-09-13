@@ -1,0 +1,5 @@
+# expect: NotCreatable{type=sstable}
+# Message must list the types whose layouts use sstable.
+namespace = tenant-a
+name      = raw
+type      = sstable

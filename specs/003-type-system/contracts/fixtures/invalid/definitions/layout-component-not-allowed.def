@@ -1,0 +1,5 @@
+# expect: LayoutComponentNotAllowed{type=kv_store, primitive=hnsw}
+namespace    = tenant-a
+name         = cache
+type         = kv_store
+layout.index = hnsw

@@ -1,0 +1,2 @@
+# expect: users_file_no_namespace
+nobody   secret   -

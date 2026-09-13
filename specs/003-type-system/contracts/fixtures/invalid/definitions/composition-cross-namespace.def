@@ -1,0 +1,6 @@
+# expect: CompositionCrossNamespace{member=tenant-b.metrics}
+namespace       = tenant-a
+name            = metrics_all
+type            = union
+compose.kind    = union
+compose.members = metrics,tenant-b.metrics

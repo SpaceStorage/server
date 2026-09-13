@@ -1,0 +1,15 @@
+# L2 abstraction with a required schema, hybrid mode and an ANN layout.
+namespace          = tenant-a
+name               = embeddings
+type               = vector_collection
+mode               = hybrid
+layout.graph       = hnsw
+layout.primary     = lsm_tree
+schema             = {"fields":[{"name":"id","domain":"uuid","nullable":false},{"name":"embed","domain":"vector(f32,768)","nullable":false},{"name":"payload","domain":"json","nullable":true}],"key":{"kind":"primary","fields":["id"]},"params":{"metric":"cosine","m":16,"ef_construction":200}}
+compression        = zstd
+compression.level  = 3
+encryption.algorithm = aes-256-gcm
+encryption.key       = kv-rambler/data/ss/tenant-a
+encryption.scope     = drives
+capability.replication.factor        = 3
+capability.replication.anti_affinity = az

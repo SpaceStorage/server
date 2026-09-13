@@ -1,0 +1,7 @@
+# expect: CompositionUnionIncompatible{a=orders (relational_table), b=embeddings (vector_collection)}
+# The message points at `federated` as the kind that accepts heterogeneous members.
+namespace       = tenant-a
+name            = everything
+type            = union
+compose.kind    = union
+compose.members = orders,embeddings

@@ -1,0 +1,5 @@
+# expect: CapabilityUnsupported{type=ring_buffer, capability=sharding, supported=[replication, node_placement, labels, consistency, quorum]}
+namespace                 = tenant-a
+name                      = events
+type                      = ring_buffer
+capability.sharding.key   = id

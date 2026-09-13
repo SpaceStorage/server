@@ -1,0 +1,5 @@
+# expect: UnsupportedStorageMode{primitive=ring_buffer, requested=persistent, supported=[memory, hybrid]}
+namespace = tenant-a
+name      = events
+type      = ring_buffer
+mode      = persistent

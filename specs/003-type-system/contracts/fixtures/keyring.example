@@ -1,0 +1,9 @@
+# Interim key authority file (feature 003, replaced by feature 07).
+# Mode must be 0600. Format: <key-name> <base64 32-byte key> [version=N]
+# The key name is what a container's `encryption.key` option references.
+# Example keys below are test material only — never reuse them.
+
+kv-rambler/data/ss/tenant-a   b3RoaW5nLXRvLXNlZS1oZXJlLTMyLWJ5dGVzLWtleQ==   version=1
+kv-rambler/data/ss/tenant-b   YW5vdGhlci0zMi1ieXRlLXRlc3Qta2V5LWZvci1kZW1v   version=1
+kv-rambler/data/ss/rotated    cm90YXRlZC10ZXN0LWtleS12ZXJzaW9uLXR3by1oZXJl   version=2
+kv-rambler/data/ss/rotated    cm90YXRlZC10ZXN0LWtleS12ZXJzaW9uLW9uZS1oZXJl   version=1

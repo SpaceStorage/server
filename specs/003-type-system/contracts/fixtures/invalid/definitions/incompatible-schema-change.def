@@ -1,0 +1,6 @@
+# expect: IncompatibleSchemaChange{change=narrow(value: f64 -> f32), transform_hint=...}
+# Applied with `spacestorage alter tenant-a.metrics schema=@this` against the fixture
+# created from containers/l3-timeseries.def.
+namespace = tenant-a
+name      = metrics
+schema    = {"fields":[{"name":"ts","domain":"timestamp","nullable":false},{"name":"host","domain":"string","nullable":false},{"name":"value","domain":"f32","nullable":false}],"key":{"kind":"partition_clustering","partition":["host"],"clustering":[["ts","asc"]]}}
