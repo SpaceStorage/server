@@ -44,6 +44,8 @@ Storage layouts / engines:
 
 Foundation primitives MUST support **memory, persistent storage, or hybrid storage** depending on their implementation.
 
+Memory mode is a **volatile tier**: after a process restart on that node, container **definitions and options** MUST come back and **content MUST NOT**, unless replication (`04`) re-populates it. Persistent and hybrid content MUST come back from drives (`13`). Hybrid policy (what stays in memory vs on disk) is per type in the catalog.
+
 Foundation primitives MUST be able to use different data encodings, compression algorithms, and encryption mechanisms.
 
 Data encodings:
@@ -61,8 +63,23 @@ Compression:
 
 Encryption:
 
-- Different algorithms
-- Different keys
+- AES-256-GCM (default)
+- ChaCha20-Poly1305
+- Different keys (by **reference**; authority and master key / KEKs are `14`)
+
+## Value domains (scalars)
+
+L0–L4 name **structures and models**. Writes also need **value domains**. The catalog MUST include at least:
+
+- bool, int32, int64, uint64, float32, float64, decimal
+- utf8, bytes, uuid
+- timestamp (UTC, microsecond precision), date
+- jsonb
+- null
+
+**Null** (typed empty), **missing field**, and **tombstone** (deleted, `13`) are three different states. Default collation is Unicode; a container MAY request binary comparison. Vector types MUST declare dimension and distance metric (`l2`, `cosine`, `inner_product`).
+
+Schema-required vs schema-optional vs schema-free is per type in the catalog. Additive schema evolution applies in place; incompatible changes are transforms (`10`).
 
 ## L1 — Shared (distributed capabilities)
 
@@ -162,3 +179,5 @@ Users pick the type that matches the workload (table, document, vector, object, 
 - Label/disk/memory topology details (`04`)
 - MapReduce engines (`05`)
 - Metric names per datatype (`08`)
+- WAL/fsync/ack contract, tombstone retention, backup (`13`)
+- Key authority / KMS (`14`)

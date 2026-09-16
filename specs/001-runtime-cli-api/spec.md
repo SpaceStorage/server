@@ -18,6 +18,12 @@
 - Q: When an administrator changes thread count, buffer sizes, or entrypoints, should the change apply only after a restart or live? → A: Buffers live, structure on restart. Buffer capacities and the drain timeout can be reloaded on a running node via the admin API and CLI; thread count and entrypoints require a restart.
 - Q: How should the node pick its default number of worker threads from the machine's core count when the administrator does not set one? → A: One worker thread per available core (threads = cores), minimum 1.
 
+### Session 2026-09-15
+
+- Q: May an entrypoint omit transport encryption configuration and silently accept plaintext? → A: No. Every enabled entrypoint MUST declare either `tls { ... }` (certificate material referenced, never inlined) or `plaintext;`. Omitted transport is a startup error. TLS is not globally mandatory; plaintext is an explicit operator choice per port, not an accidental default.
+- Q: Do `internode` and `replication` listen only when the node has peers? → A: They always listen, even on a single node with no peers. Those handlers are registered by the internode-and-time feature (`12`); this feature owns the entrypoint model they plug into. Documented default bind is loopback; a cluster address must be bound before joining remotes (`11`/`12`).
+- Q: Besides finishing in-flight work, what else must drain prevent? → A: A stop signal moves the node to `draining`: no new tenant-protocol connections, and the node MUST NOT be chosen for new replica placements (`11`). Blocking durability syscalls (fsync and equivalent) MUST NOT run on worker threads (`13`).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Start a node sized to the machine (Priority: P1)
@@ -34,7 +40,7 @@ A cluster administrator installs SpaceStorage on a server, writes a node configu
 2. **Given** a configuration that sets the thread count explicitly to K, **When** the node starts, **Then** the node reports exactly K worker threads regardless of the machine's core count.
 3. **Given** a configuration that sets an invalid thread count (zero, negative, or non-numeric), **When** the node starts, **Then** startup fails before any entrypoint is opened and the error names the offending setting and the accepted range.
 4. **Given** a running node, **When** one request performs a long-running operation while many short requests arrive, **Then** the short requests complete without waiting for the long-running one to finish.
-5. **Given** a running node with in-flight requests, **When** a stop signal is received, **Then** the node stops accepting new connections, enters the `draining` state, completes in-flight requests up to the configured drain timeout, and exits with a success status.
+5. **Given** a running node with in-flight requests, **When** a stop signal is received, **Then** the node stops accepting new tenant-protocol connections, enters the `draining` state, is not chosen for new replica placements, completes in-flight requests up to the configured drain timeout, and exits with a success status.
 6. **Given** a node in `draining` state whose in-flight requests exceed the drain timeout, **When** the timeout elapses, **Then** the node terminates the remaining requests, records that the drain timed out, and exits.
 
 ---
@@ -60,7 +66,8 @@ A cluster administrator decides which ports a node listens on and what each port
 9. **Given** a running node with a protocol entrypoint (for example handler `cassandra`) and an `admin` entrypoint, **When** a client sends an administrative request to the protocol entrypoint or a data request to the `admin` entrypoint, **Then** the request is rejected by that entrypoint's handler; each port speaks only its declared handler.
 10. **Given** an `admin-http` entrypoint declared with TLS and a reference to valid certificate material, **When** the node starts and an administrator connects, **Then** the connection is encrypted, a plaintext connection attempt to that entrypoint is refused, and the effective configuration flags the entrypoint as encrypted.
 11. **Given** an admin entrypoint declared with TLS whose referenced certificate material is missing, unreadable, or expired, **When** the node starts, **Then** startup fails and the error names the entrypoint and the certificate reference; no plaintext fallback listener is opened.
-12. **Given** an admin entrypoint declared without TLS, **When** the node starts, **Then** the entrypoint accepts plaintext connections and the effective configuration flags it as plaintext.
+12. **Given** an admin entrypoint declared with `plaintext;`, **When** the node starts, **Then** the entrypoint accepts plaintext connections and the effective configuration flags it as plaintext.
+13. **Given** an enabled entrypoint that declares neither `tls { ... }` nor `plaintext;`, **When** the node starts, **Then** startup fails and the error names the entrypoint and states that transport must be declared.
 
 ---
 
@@ -128,6 +135,9 @@ A cluster administrator tunes memory use per node by setting the size of each na
 - Reload changes the drain timeout while a drain is not in progress: the new timeout applies to the next stop request.
 - CLI targets a node whose admin entrypoint is up but whose node state is `starting` or `draining`: the CLI receives the state and does not treat it as a connection failure.
 - Identical requests arriving at an `admin` entrypoint and an `admin-http` entrypoint: both return the same information; neither handler exposes information the other cannot.
+- Enabled entrypoint with neither `tls { ... }` nor `plaintext;`: startup fails; there is no silent plaintext fallback.
+- `internode` or `replication` omitted from a build that has registered those handlers: startup fails; those two handlers always listen once registered (`12`).
+- Drain while the node is a replica target: it remains a replica for existing placements until decommission (`11`) but MUST NOT receive new replica placements.
 
 ## Requirements *(mandatory)*
 
@@ -138,9 +148,9 @@ A cluster administrator tunes memory use per node by setting the size of each na
 - **FR-001**: Each SpaceStorage node MUST run as exactly one operating-system process that serves all of the node's entrypoints, handlers, and data work.
 - **FR-002**: The node MUST run a pool of worker threads and, when no thread count is configured, MUST size it to one worker thread per core available to the process (threads = available cores, minimum 1).
 - **FR-003**: The administrator MUST be able to override the worker thread count with an explicit value; the node MUST reject values below one and MUST report the effective count.
-- **FR-004**: Work performed for one request MUST NOT block progress of unrelated requests on the same node; waiting on network, disk, timers, or other requests MUST yield capacity to other work.
+- **FR-004**: Work performed for one request MUST NOT block progress of unrelated requests on the same node; waiting on network, disk, timers, or other requests MUST yield capacity to other work. Blocking durability syscalls (fsync and equivalent) MUST run off the worker pool (`13`); they MUST NOT occupy a worker thread.
 - **FR-005**: The node MUST expose its lifecycle state as one of at least `starting`, `ready`, `draining`, `failed`; state names MUST match the node-state vocabulary of the observability intent.
-- **FR-006**: On a stop request the node MUST stop accepting new connections, complete in-flight requests within a configurable drain timeout, then exit; requests still running after the timeout MUST be terminated and the timeout MUST be recorded.
+- **FR-006**: On a stop request the node MUST enter `draining`, MUST stop accepting new tenant-protocol connections, MUST NOT be chosen for new replica placements (`11`), MUST complete in-flight requests within a configurable drain timeout, then exit; requests still running after the timeout MUST be terminated and the timeout MUST be recorded. Existing replicas remain until rebalancing or decommission removes them.
 - **FR-007**: A stop request received before the node is `ready` MUST abort startup, release any opened listener, and exit without entering `ready`.
 
 **Configuration**
@@ -157,7 +167,7 @@ A cluster administrator tunes memory use per node by setting the size of each na
 **Entrypoints and handlers**
 
 - **FR-016**: Every listening port of a node MUST be declared as an entrypoint consisting of a port, an optional listen address, and exactly one handler (for example `entrypoint { port 9042; handler cassandra; }`). The node MUST NOT open any listener that is not declared as an entrypoint.
-- **FR-017**: The node MUST keep an inventory of known handler names. This feature defines the handlers `admin` (TCP administrative API) and `admin-http` (HTTP administrative API). Other features register additional handlers (for example `postgresql`, `cassandra`, `clickhouse`, `elasticsearch`, `redis`, `s3`, `webdav`, `replication`, `syslog`); the inventory is expandable and MUST be listed in the node's documentation and effective configuration.
+- **FR-017**: The node MUST keep an inventory of known handler names. This feature defines the handlers `admin` (TCP administrative API) and `admin-http` (HTTP administrative API). Other features register additional handlers (for example `postgresql`, `cassandra`, `clickhouse`, `elasticsearch`, `redis`, `s3`, `webdav`, `internode`, `replication`, `syslog`); the inventory is expandable and MUST be listed in the node's documentation and effective configuration. Once `internode` and `replication` are registered (`12`), they MUST listen even when the node has no peers; documented default listen address is loopback.
 - **FR-018**: An entrypoint whose handler is not in the inventory, has no handler, or has more than one handler MUST fail startup with an error naming the entrypoint and listing the known handlers.
 - **FR-019**: Each entrypoint MUST speak only its declared handler; requests for another handler arriving at that port MUST be rejected by the declared handler. The same handler MAY be declared on several entrypoints.
 - **FR-020**: Every node MUST offer the `admin` and `admin-http` handlers as part of the server itself, exposing the same administrative capabilities (status, effective configuration, thread usage, buffer usage, stop) over both.
@@ -167,7 +177,8 @@ A cluster administrator tunes memory use per node by setting the size of each na
 - **FR-024**: A disabled admin handler MUST NOT open a listener, and the node MUST log at startup that the handler is disabled by administrator choice.
 - **FR-025**: The admin handlers MUST report node name, node state, uptime, worker thread count, busy worker thread count, the list of active entrypoints with their handlers, and per-buffer configured size, current usage in bytes and percent, and limit-hit count.
 - **FR-026**: Access to the admin handlers MUST be subject to the cluster role system; unauthenticated callers MUST NOT be able to change node state or read effective configuration. Authentication mechanics are specified in the tenancy and security feature.
-- **FR-027**: An entrypoint MAY declare transport encryption (TLS). When declared, the certificate material MUST be referenced (for example by path or secret-store location) and MUST NOT be inlined in the configuration; the entrypoint MUST refuse plaintext connections. When not declared, the entrypoint accepts plaintext connections.
+- **FR-027**: Every enabled entrypoint MUST declare transport as either `tls { ... }` or `plaintext;`. Omitted transport MUST fail startup with an error naming the entrypoint. When `tls` is declared, the certificate material MUST be referenced (for example by path or secret-store location) and MUST NOT be inlined in the configuration; the entrypoint MUST refuse plaintext connections. When `plaintext;` is declared, the entrypoint accepts plaintext connections. TLS is not globally mandatory; plaintext is an explicit per-port choice.
+- **FR-027a**: Handlers `internode` and `replication` (registered by `12`) MUST always have listeners when those handlers exist in the inventory, including on a single node with no peers. Their documented default bind is loopback; joining remotes requires a cluster address (`11`/`12`). They MUST NOT share a port with a client protocol or with `admin` / `admin-http`.
 - **FR-028**: A TLS entrypoint whose referenced certificate material is missing, unreadable, or expired at startup MUST fail startup with an error naming the entrypoint and the reference; the node MUST NOT fall back to plaintext.
 - **FR-029**: The effective configuration MUST flag every entrypoint as `encrypted` or `plaintext`, and the admin handlers and CLI MUST show this flag alongside each active entrypoint.
 - **FR-030**: The CLI MUST support connecting to TLS admin entrypoints, MUST verify the server certificate against the operator's trust configuration, and MUST NOT downgrade to plaintext when verification fails.
@@ -196,8 +207,8 @@ A cluster administrator tunes memory use per node by setting the size of each na
 
 - **Node**: One SpaceStorage server process on one machine. Attributes: node name, lifecycle state, uptime, worker thread pool, set of entrypoints, handler inventory, buffer registry, effective configuration.
 - **Node Configuration**: The administrator's declared settings for one node: thread count (optional override), drain timeout, list of entrypoints, explicit enabled/disabled declaration for each admin handler, per-buffer capacities, launch-time overrides. Validated as a whole before the node opens any listener.
-- **Entrypoint**: One declared listening port of a node. Attributes: port, optional listen address (documented default when omitted), exactly one handler, optional TLS declaration (reference to certificate material, never inlined), resolved transport flag (`encrypted` or `plaintext`). Uniqueness: address plus port. Several entrypoints may share a handler.
-- **Handler**: A named behavior that an entrypoint speaks. This feature defines `admin` (TCP administrative API) and `admin-http` (HTTP administrative API); other features add protocol handlers (`postgresql`, `cassandra`, `clickhouse`, `elasticsearch`, `redis`, `s3`, `webdav`), `replication`, `syslog`, and more. Attributes: name, owning feature, whether it is administrative or client-facing. The inventory is expandable.
+- **Entrypoint**: One declared listening port of a node. Attributes: port, optional listen address (documented default when omitted), exactly one handler, mandatory transport declaration (`tls { ... }` or `plaintext;`), resolved transport flag (`encrypted` or `plaintext`). Uniqueness: address plus port. Several entrypoints may share a handler.
+- **Handler**: A named behavior that an entrypoint speaks. This feature defines `admin` (TCP administrative API) and `admin-http` (HTTP administrative API); other features add protocol handlers (`postgresql`, `cassandra`, `clickhouse`, `elasticsearch`, `redis`, `s3`, `webdav`), `internode`, `replication`, `syslog`, and more. Attributes: name, owning feature, whether it is administrative or client-facing. The inventory is expandable.
 - **Admin Handler Declaration**: The administrator's explicit statement for `admin` and for `admin-http`: an entrypoint (enabled) or disabled. Both declarations are mandatory.
 - **Worker Thread Pool**: The set of threads executing node work. Attributes: configured or derived size, count currently busy.
 - **Buffer**: A named, bounded memory region owned by the node. Attributes: name, default capacity, accepted range, configured capacity, current usage (bytes and percent), limit-hit count, overflow behavior (reject or wait).
@@ -214,7 +225,7 @@ A cluster administrator tunes memory use per node by setting the size of each na
 - **SC-003**: With one long-running request held open, at least 99% of concurrent short requests complete within twice their unloaded latency.
 - **SC-004**: 100% of invalid configurations in the acceptance test set (bad thread count, missing admin handler declaration, unknown handler, entrypoint without exactly one handler, unknown buffer, out-of-range size, port conflict, malformed file) are rejected before any listener opens, and every rejection message names the offending setting.
 - **SC-005**: Every declared entrypoint accepts a connection within 1 second of the node reporting `ready`; a declared-disabled admin handler never accepts a connection; no undeclared port is open on the node.
-- **SC-006**: 100% of plaintext connection attempts to a TLS-declared admin entrypoint are refused, and 100% of TLS-declared entrypoints with invalid certificate references are rejected at startup with no listener opened.
+- **SC-006**: 100% of plaintext connection attempts to a TLS-declared admin entrypoint are refused; 100% of TLS-declared entrypoints with invalid certificate references are rejected at startup with no listener opened; 100% of enabled entrypoints that omit both `tls { ... }` and `plaintext;` are rejected at startup.
 - **SC-007**: An operator can validate a configuration, start a node, read its status, and stop it gracefully using only the bundled CLI in under 5 minutes on first attempt, following the starter documentation.
 - **SC-008**: Buffer usage read through `admin`, `admin-http`, and CLI agrees to within one reporting interval, and a buffer driven to its limit shows a limit-hit count increase and holds its usage at or below 100% of configured capacity.
 - **SC-009**: A reload that changes only buffer capacities and drain timeout is applied on a loaded node with 0 dropped connections and 0 failed in-flight requests in 100% of test runs, and the new values are visible through `admin`, `admin-http`, and CLI within one reporting interval.
@@ -230,7 +241,9 @@ A cluster administrator tunes memory use per node by setting the size of each na
 - Buffer capacities and the drain timeout are live-reloadable; worker thread count and entrypoint declarations take effect on node restart (confirmed in Clarifications, Session 2026-09-13). Reload re-reads the same configuration source the node started from; editing individual settings through the admin API without touching the configuration source is not part of this feature.
 - The drain timeout has a documented default (on the order of tens of seconds) and is per node.
 - Authentication and authorization for the admin handlers come from the cluster role system specified in the tenancy and security feature; this feature only requires that the admin handlers are governed by it. Until that feature exists, restricting the admin entrypoint listen address to a management network or loopback, and declaring TLS on the entrypoint, are the administrator's mitigations.
-- Transport encryption is optional per entrypoint (confirmed in Clarifications, Session 2026-09-13). Certificate material is referenced from a path or secret store and never inlined in the configuration; which reference forms are supported is a planning decision. The TLS option applies to protocol entrypoints too, but each protocol feature decides whether its wire protocol can carry TLS.
+- Transport encryption is optional in the sense that plaintext is allowed, but every enabled entrypoint MUST declare `tls { ... }` or `plaintext;` (confirmed in Clarifications, Session 2026-09-15). Certificate material is referenced from a path or secret store and never inlined in the configuration; which reference forms are supported is a planning decision. The TLS option applies to protocol entrypoints too, but each protocol feature decides whether its wire protocol can carry TLS.
+- Handlers `internode` and `replication` always listen once registered (`12`); this feature owns the entrypoint model they plug into (confirmed in Clarifications, Session 2026-09-15). Default bind loopback; cluster address required to join remotes.
+- Drain excludes new tenant connections and new replica placements (confirmed in Clarifications, Session 2026-09-15). Membership procedures remain `11`.
 - The buffer registry in this feature covers node-level buffers (at minimum: inbound request queue and per-entrypoint network send/receive buffers). Buffers introduced by storage, cache, query, or replication features register into the same registry; the exact buffer inventory is expandable.
 - Metric series names, labels, and the scrape endpoint for buffer usage, worker thread usage, node state, and uptime are owned by the observability feature. This feature guarantees the underlying figures are tracked and exposed to it.
 - Node state restoration on boot, cluster membership, and controller elections belong to the control plane feature; `ready` in this feature means the local runtime and declared entrypoints are up, and later features may add preconditions to `ready`.
@@ -242,7 +255,10 @@ The intent file assigns the following to sibling features. This specification do
 
 - **Wire protocols and drivers** for PostgreSQL, Cassandra, Redis, Elasticsearch, ClickHouse, S3, and WebDAV (intent `02`). This feature reserves their handler names in the entrypoint inventory and requires that each protocol runs on its own declared entrypoint; the behavior behind each handler is specified there.
 - **Type inventories** and the L0–L4 type stack (intent `03`).
-- **Cluster topology, membership, controller elections, and state restore on boot** (intent `06`). This feature's `ready` state covers the local runtime and entrypoints only.
+- **Cluster topology, membership, controller elections, and state restore on boot** (intent `06`). This feature's `ready` state covers the local runtime and entrypoints only. Join/drain/decommission procedures are `11`; this feature only implements the local `draining` lifecycle and the "no new tenant connections / no new replica placements" effects.
+- **Internode framing, clocks, and always-on `internode`/`replication` semantics** (intent `12`) except the entrypoint model and the always-listen / default-loopback rules stated here.
+- **AuthN, permission vocabulary, master key, audit** (intent `14`) except that omitted transport is a startup error as specified here.
+- **First-binary vs complete-product sequencing** (intent `16`).
 - **Metric series catalog**: metric names, labels, and the scrape endpoint for node state, uptime, thread usage, and buffer usage (intent `08`). This feature tracks and exposes the underlying figures; the catalog names them.
 - **Graphical admin UIs and log ingest** (intent `09`). The `syslog` handler name is reserved only.
 - **Authentication and authorization mechanics** for the admin handlers (intent `07`). This feature requires that the admin handlers are governed by the cluster role system and nothing more.

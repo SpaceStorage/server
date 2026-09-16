@@ -1,11 +1,12 @@
 <!--
 Sync Impact Report
-- Version change: (unratified template placeholders) → 1.0.0
-- Modified principles: all five template slots replaced; eight additional
-  principles added from `.specify/intent/00-constitution.md`
-- Added sections: Architectural Contracts; Observability Contract
-- Removed sections: none (template example comments removed after fill-in)
-- Follow-up TODOs: none
+- Version change: 1.2.0 → 1.3.0
+- Modified principles: VII (cluster-declared topology ladder of reserved
+  farness keys; member nodes MUST fill that ladder; planet remains a
+  label, not a voting set)
+- Added sections: none
+- Removed sections: none
+- Follow-up TODOs: re-specify 004 against the ladder; specify 11–16
 -->
 
 # SpaceStorage Constitution
@@ -22,11 +23,20 @@ monolith auditable and avoids mixed runtimes.
 
 ### II. Fully Asynchronous Tokio Runtime
 
-All operations MUST run on the Tokio runtime with async/await. All
-operations MUST be asynchronous and non-blocking.
+All operations MUST run on the Tokio runtime with async/await.
+Database request work MUST be asynchronous and MUST NOT block
+worker threads.
 
-Rationale: every protocol, storage path, and control-plane action shares
-one async executor.
+Blocking durability operations (fsync and equivalent) MUST run off
+the async worker pool (a dedicated blocking pool). An acknowledgement
+that counts toward write quorum for persistent or hybrid data MUST
+wait for the durability contract in
+`.specify/intent/13-durability-and-recovery.md`, not for an in-memory
+write alone.
+
+Rationale: every protocol, storage path, and control-plane action
+shares one async executor; fsync is scheduled, not executed on a
+worker thread.
 
 ### III. Single-Process Multithreaded Monolith
 
@@ -52,16 +62,21 @@ second database product.
 
 ### V. Protocol Compatibility on Distinct Ports
 
-The server MUST implement PostgreSQL, Cassandra, Redis, Elasticsearch,
-ClickHouse, S3, and WebDAV protocols and APIs and work over them. It MAY
-later implement its own protocol or add extra protocols. Each protocol
-SHOULD listen on a different port. Drivers (for example PostgreSQL) MUST
-know about all datatypes and their features and MUST use all types via
-an abstract interface.
+The **complete product** MUST implement PostgreSQL, Cassandra, Redis,
+Elasticsearch, ClickHouse, S3, and WebDAV protocols and APIs and work
+over them (compatibility ceiling in
+`.specify/intent/15-compatibility-and-limits.md`; first binary in
+`.specify/intent/16-mvp-and-nongoals.md`). It MAY later implement its
+own protocol or add extra protocols. Each protocol SHOULD listen on a
+different port. Drivers (for example PostgreSQL) MUST know about all
+datatypes and their features and MUST use all types via an abstract
+interface. "Unmodified **client**" (psql, redis-cli, …) on the
+documented MUST verb list is the promise; unmodified **applications**
+that need MUST-NOT verbs are out of scope.
 
 Rationale: clients keep existing drivers; the type system is not hidden
-behind one protocol. Distinct ports keep protocol identity operationally
-obvious.
+behind one protocol; shipping all seven handlers is not the first
+binary.
 
 ### VI. Every Node Is a Request Coordinator
 
@@ -74,12 +89,18 @@ Rationale: no mandatory external proxy; any live node is a front door.
 
 All data options MUST be documented with examples to start, and MUST
 stay flexible enough to build clusters across many regions, continents,
-or planets, grouping datatypes with data near the user and replicating
-slowly to remote regions. Nodes MAY carry labels (rack, AZ, region, and
-further). Replica anti-affinity MUST be selectable by label. Disks
-(SSD, HDD, NVMe, and others) MUST enrich node labels so different data
-types can select different drives. In-memory storage MUST be explicit
-per node (size and labels) and MAY be absent on some nodes.
+or planets as **label keys**, grouping datatypes with data near the user
+and replicating slowly to remote regions. **`planet` is a label, never
+an HLC or write-quorum domain.** The voting / HLC set is an explicit
+**`quorum_domain`** (`.specify/intent/12-internode-and-time.md`). Each
+cluster MUST declare an ordered **topology ladder** of reserved farness
+keys (`rack`, `az`, `region`, `continent`, `planet` — a subsequence for
+this cluster, not a product-wide fill-in). Member nodes MUST supply every
+key on **that** ladder (`.specify/intent/04-distribution-placement.md`). Replica
+anti-affinity MUST be selectable by label. Disks (SSD, HDD, NVMe, and
+others) MUST enrich node labels so different data types can select
+different drives. In-memory storage MUST be explicit per node (size and
+labels) and MAY be absent on some nodes.
 
 Rationale: placement is a first-class product surface, not an
 afterthought of sharding.
@@ -89,11 +110,13 @@ afterthought of sharding.
 Storage and drivers MUST allow specifying quorum level for a query as in
 Cassandra. Protocols that do not support quorum MUST accept it via
 options or use global defaults: wait for write acknowledgement from two
-nodes (`ack == 2`) and read with `ack == 1`. Replication MAY be
-synchronous or asynchronous. Synchronous replication MUST implement
-quorum for writes. Asynchronous replication MUST implement quorum for
-reads. Replication logic MUST be based on datatypes and data
-composition.
+nodes (`ack == 2`) and read with `ack == 1`. **Write `TWO` / `QUORUM`
+count only durable replicas in the container's source `quorum_domain`
+(`.specify/intent/12-internode-and-time.md`).** Replication MAY be
+synchronous (inside that domain) or asynchronous (log-followers outside
+it). Synchronous replication MUST implement quorum for writes.
+Asynchronous replication MUST implement quorum for reads. Replication
+logic MUST be based on datatypes and data composition.
 
 Rationale: one quorum model across protocols, with safe defaults when a
 wire protocol has no quorum field.
@@ -136,11 +159,23 @@ laptop, with more labels.
 ### XII. Raft Controller Elections and Local Restore
 
 Different levels of controllers MUST implement elections using Raft.
-When a node comes up it MUST restore state of all local datatypes in
-drives or memory. All data and their state MUST be restored.
+Controllers own metadata (membership, namespaces, schemas,
+shared-datatype descriptors, role store) and leadership requests.
+The data path is leaderless: any replica may accept a write; the
+coordinator waits for quorum acknowledgements. A datatype that needs
+a single writer or a total order MUST request leadership from the
+control plane; it MUST NOT assume the datatype-level primary
+serializes every write.
 
-Rationale: control plane and data plane both recover without operator
-reconstruction.
+When a node comes up it MUST restore definitions and options of all
+local datatypes. It MUST restore content of persistent and hybrid
+datatypes from drives (including WAL replay). Memory-mode content is
+a volatile tier: it MUST NOT be promised across process restart on
+that node unless replication re-populates it.
+
+Rationale: control plane recovers without operator reconstruction;
+durable data returns from media; memory is a cache/volatile tier
+unless replicated.
 
 ### XIII. Security Defaults for Data and Roles
 
@@ -189,7 +224,7 @@ and PRs MUST verify compliance with these principles.
 
 Feature implementation MUST NOT be folded into this document. Feature
 work goes through `/speckit.specify` using `.specify/intent/01` through
-`10`. `server/start` is the original dump; numbered intent files win for
+`16`. `server/start` is the original dump; numbered intent files win for
 their domain after they exist.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-13 | **Last Amended**: 2026-09-13
+**Version**: 1.3.0 | **Ratified**: 2026-09-13 | **Last Amended**: 2026-09-15

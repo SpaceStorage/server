@@ -34,6 +34,10 @@ The server MUST be able to **receive logs and parse them into database data** vi
 
 (Outbound logging to Kafka/syslog for operators/tenants is specified in `08`. This feature is **ingest**: logs become stored data.)
 
+Ingest MUST declare the target namespace, container, and L3 type (default: Log Stream). Kafka: consumer group, at-least-once delivery, offset commit after durable ack (`13`). Syslog: RFC 5424 preferred, RFC 3164 accepted. Exactly-once is not v1.
+
+UIs MUST use the same authz vocabulary as `14`. They are served from the monolith (constitution) unless a later amendment splits them. MVP may defer UIs (`16`).
+
 ## Why
 
 Operators need a live map of nodes/shards/replication. Tenants need a familiar console to configure their namespace and browse types. Ingesting Kafka/syslog logs turns SpaceStorage into the store for operational and application logs without a separate pipeline database.

@@ -15,7 +15,7 @@ SpaceStorage MUST implement mechanics to **migrate data between nodes and namesp
 
 It MUST also implement **data transforms between datatypes and storage models** (for example L2/L3/L4 types in `03`).
 
-Background jobs for data transformation, data migration, data backup, and data restore are observable (series in `08`); this feature owns the **behavior**: strategies, policies, and transform rules.
+Background jobs for data transformation, data migration, data backup, and data restore are observable (series in `08`); this feature owns **migration and transform behavior**: strategies, policies, and transform rules. Backup/PITR snapshot mechanics are `13`; this feature MAY invoke them. Incompatible schema or type changes are directed here from `03`.
 
 Replication (sync/async, quorum) remains placement (`04`). Migration is an explicit, policy-driven move or copy, including cross-namespace, not only replica repair.
 

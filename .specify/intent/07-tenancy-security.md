@@ -19,7 +19,11 @@ Each tenant MAY have:
 - different **access policies** for different types of data
 - accumulated **metrics and logs** of its own
 
-Metrics are also used for **billing and quota management**.
+Quota **units** MUST include bytes stored, object/row counts, connections, and optionally operation counts, per namespace and per data type (`15`). At the limit the request is **rejected** with a named error. CPU hard isolation is a product non-goal (`15`, `16`); fairness is best-effort.
+
+Tenants are **hostile** to each other; the **operator runs all nodes**. The threat model is crash-stop, not Byzantine (`12`, `16`).
+
+Metrics are also used for **billing and quota management**. Authentication, permission vocabulary, master key / KEKs, TLS, and audit are specified in `14`; this feature owns namespaces, quotas, access-policy attachment, and the three role **names** (`admin`, `replication`, `custom`).
 
 Each namespace MAY configure an API to expose metrics relevant to that namespace only, to its own monitoring system, separately from the primary `/metrics` endpoint (personal API endpoint per namespace, or push to OpenTelemetry). Logging MAY be sent to the tenant’s own logging system separately from the primary logging system. Treat this as **per-namespace statistics and logging** plus **global** statistics and logging for the SpaceStorage administrator. (Exact series and log sinks are in `08`; this feature owns the tenancy boundary and the right to isolate them.)
 
@@ -61,3 +65,5 @@ Many customers share one cluster with isolated schema/data, quotas, keys, and op
 
 - Full metrics catalog (`08`)
 - Control-plane Raft layout (`06`) except that roles live in cluster-level controller storage
+- AuthN mechanisms, permission verbs, KMS, audit log (`14`)
+- Encryption algorithms and envelope keys (`14`); this feature still states that encryption is per container when specified

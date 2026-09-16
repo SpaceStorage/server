@@ -35,6 +35,14 @@ Operators need a single process they can size to the machine, turn on network ad
 - Per-node TCP interface that an administrator must explicitly enable.
 - Per-node HTTP interface that an administrator must explicitly enable.
 - Per-node configurable buffer sizes.
+- Every enabled entrypoint declares `tls { ... }` or `plaintext;`; omit is a startup error.
+- `internode` and `replication` always listen (registered by `12`).
+
+Drain: a stop signal MUST move the node to `draining` as specified in `01` runtime spec and `11` (no new tenant connections, no new replica placements). Blocking fsync MUST NOT run on worker threads (`00`, `13`).
+
+Handlers `internode` and `replication` are registered by `12`; this feature owns the entrypoint model they plug into. Those two handlers **always listen**, even with no peers (`12`).
+
+Every enabled entrypoint MUST declare **`tls { ... }`** or **`plaintext;`**. Omitted transport is a **startup error** (`14`). TLS is not globally mandatory.
 
 ## Out of scope for this feature
 

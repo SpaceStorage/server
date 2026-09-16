@@ -194,6 +194,10 @@ These metrics cover:
 - data backup
 - data restore
 
+**Behavior owners** (this file owns series names only): compaction/flush/checkpoint/vacuum/GC/TTL/snapshot/backup/restore → `13`; replication → `04`/`12`; index rebuild → `03`/`05`; data transformation/migration → `10`; cleanup → the feature that enqueued the job.
+
+OpenTelemetry **traces/spans** MAY be added as series-adjacent product surface; v1 MUST emit metrics and logs as specified. Alerting/SLO documents are operator-side; this feature does not define pages. Billing **money formula** is out of this repo; series used for billing MUST remain labelled with namespace and datatype.
+
 ## Datatype-specific metrics
 
 - `db_lsm_memtable_size_bytes`

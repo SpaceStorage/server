@@ -6,7 +6,7 @@ project: SpaceStorage
 
 # Constitution input for SpaceStorage
 
-Apply this file as the project constitution. It is **governance only**. Do not generate feature specs, code, or plans from this file. Deferred feature intents live in `01`–`10`.
+Apply this file as the project constitution. It is **governance only**. Do not generate feature specs, code, or plans from this file. Deferred feature intents live in `01`–`16`. The **complete product** is this constitution plus `01`–`15`. The **first shippable binary** is `16-mvp-and-nongoals.md`; constitution MUSTs that `16` defers are still owed, not cancelled.
 
 Project: **SpaceStorage** — a multiparadigm database. The paradigm is determined by the datatypes stored in the system. Storage has levels that start from simple types and end at high-level models.
 
@@ -20,9 +20,11 @@ Rationale: one language for server, CLI, and dependencies keeps the monolith aud
 
 ### Fully asynchronous Tokio runtime
 
-All operations MUST run on the Tokio runtime with async/await. All operations MUST be asynchronous and non-blocking.
+All operations MUST run on the Tokio runtime with async/await. Database request work MUST be asynchronous and MUST NOT block worker threads.
 
-Rationale: every protocol, storage path, and control-plane action shares one async executor.
+Blocking durability operations (fsync and equivalent) MUST run off the async worker pool (a dedicated blocking pool). An acknowledgement that counts toward write quorum for persistent or hybrid data MUST wait for the durability contract in `13-durability-and-recovery.md`, not for an in-memory write alone.
+
+Rationale: every protocol, storage path, and control-plane action shares one async executor; fsync is scheduled, not executed on a worker thread.
 
 ### Single-process multithreaded monolith
 
@@ -38,9 +40,9 @@ Rationale: new capabilities appear as types and compositions, not as a second da
 
 ### Protocol compatibility on distinct ports
 
-The server MUST implement PostgreSQL, Cassandra, Redis, Elasticsearch, ClickHouse, S3, and WebDAV protocols and APIs and work over them. It MAY later implement its own protocol or add extra protocols. Each protocol SHOULD be implemented on a different port (strongly recommended). Drivers (for example PostgreSQL) MUST know about all datatypes and their features and MUST use all types via an abstract interface.
+The **complete product** MUST implement PostgreSQL, Cassandra, Redis, Elasticsearch, ClickHouse, S3, and WebDAV protocols and APIs and work over them (compatibility **ceiling** in `15`; first binary in `16`). It MAY later implement its own protocol or add extra protocols. Each protocol SHOULD be implemented on a different port (strongly recommended). Drivers (for example PostgreSQL) MUST know about all datatypes and their features and MUST use all types via an abstract interface. "Unmodified **client**" (psql, redis-cli, …) on the documented MUST verb list is the promise; unmodified **applications** that need MUST-NOT verbs are out of scope.
 
-Rationale: clients keep existing drivers; the type system is not hidden behind one protocol.
+Rationale: clients keep existing drivers; the type system is not hidden behind one protocol; shipping all seven handlers is not the first binary.
 
 ### Every node is a request coordinator
 
@@ -50,13 +52,13 @@ Rationale: no mandatory external proxy; any live node is a front door.
 
 ### Label-based planetary placement
 
-All data options MUST be documented with examples to start, but MUST stay flexible enough to build clusters across many regions, continents, or planets, grouping datatypes with data near the user and replicating slowly to remote regions. Nodes MAY carry labels (rack, AZ, region, and further). Replica anti-affinity MUST be selectable by label. Disks (SSD, HDD, NVMe, and others) MUST enrich node labels so different data types can select different drives. In-memory storage MUST be explicit per node (size and labels) and MAY be absent on some nodes.
+All data options MUST be documented with examples to start, but MUST stay flexible enough to build clusters across many regions, continents, or planets as **label keys**, grouping datatypes with data near the user and replicating slowly to remote regions. **`planet` is a label, never an HLC or write-quorum domain.** The voting / HLC set is an explicit **`quorum_domain`** (`12`). Each cluster MUST declare an ordered **topology ladder** of reserved farness keys (`rack`, `az`, `region`, `continent`, `planet` — a subsequence for this cluster, not a product-wide fill-in). Member nodes MUST supply every key on **that** ladder (`04`). Replica anti-affinity MUST be selectable by label. Disks (SSD, HDD, NVMe, and others) MUST enrich node labels so different data types can select different drives. In-memory storage MUST be explicit per node (size and labels) and MAY be absent on some nodes.
 
 Rationale: placement is a first-class product surface, not an afterthought of sharding.
 
 ### Cassandra-style quorum with protocol defaults
 
-Storage and drivers MUST allow specifying quorum level for a query as in Cassandra. Protocols that do not support quorum MUST accept it via options or use global defaults: wait for write acknowledgement from two nodes (`ack == 2`) and read from every node with `ack == 1`. Replication MAY be synchronous or asynchronous. Synchronous replication MUST implement quorum for writes. Asynchronous replication MUST implement quorum for reads. Replication logic is based on datatypes and data composition.
+Storage and drivers MUST allow specifying quorum level for a query as in Cassandra. Protocols that do not support quorum MUST accept it via options or use global defaults: wait for write acknowledgement from two nodes (`ack == 2`) and read from every node with `ack == 1`. **Write `TWO` / `QUORUM` count only durable replicas in the container's source `quorum_domain` (`12`).** Replication MAY be synchronous (inside that domain) or asynchronous (log-followers outside it). Synchronous replication MUST implement quorum for writes. Asynchronous replication MUST implement quorum for reads. Replication logic is based on datatypes and data composition.
 
 Rationale: one quorum model across protocols, with safe defaults when a wire protocol has no quorum field.
 
@@ -80,9 +82,11 @@ Rationale: a planetary cluster is configured from the same knobs as a laptop, wi
 
 ### Raft controller elections and local restore
 
-Different levels of controllers MUST implement elections using RAFT. When a node comes up it MUST restore state of all local datatypes in drives or memory. All data and their state MUST be restored.
+Different levels of controllers MUST implement elections using RAFT. Controllers own **metadata** (membership, namespaces, schemas, shared-datatype descriptors, role store) and **leadership requests**. The **data path is leaderless**: any replica may accept a write; the coordinator waits for quorum acknowledgements (`04`, `12`). A datatype that needs a single writer or a total order MUST request leadership from the control plane; it MUST NOT assume the datatype-level primary serializes every write.
 
-Rationale: control plane and data plane both recover without operator reconstruction.
+When a node comes up it MUST restore **definitions and options** of all local datatypes. It MUST restore **content** of persistent and hybrid datatypes from drives (including WAL replay). Memory-mode content is a **volatile tier**: it MUST NOT be promised across process restart on that node unless replication re-populates it (`03`, `13`).
+
+Rationale: control plane recovers without operator reconstruction; durable data returns from media; memory is a cache/volatile tier unless replicated.
 
 ### Security defaults for data and roles
 
@@ -108,10 +112,10 @@ Metric labels and series named in `08-observability.md` are constitution-adjacen
 
 - **Amendments**: change this constitution via `/speckit.constitution` with an explicit rationale. Bump version: MAJOR for removed/redefined principles, MINOR for new principles, PATCH for wording.
 - **Compliance**: `/speckit.plan` MUST include a constitution check. Violations need Complexity Tracking justification.
-- **Intent split**: feature work goes through `/speckit.specify` using `01`–`10`. Do not fold those files into this constitution.
-- **Source**: `server/start` is the original dump. Numbered intent files win for their domain after they exist.
+- **Intent split**: feature work goes through `/speckit.specify` using `01`–`16`. Do not fold those files into this constitution.
+- **Source**: `server/start` is the original dump. Numbered intent files win for their domain after they exist. Gap-analysis files `11`–`16` win over `start` for identity, internode/clocks, durability, authz/keys, compatibility/limits, and MVP sequencing.
 
-**Version**: 1.0.0 (proposed) | **Ratified**: 2026-09-13 | **Last Amended**: 2026-09-13
+**Version**: 1.3.0 (proposed) | **Ratified**: 2026-09-13 | **Last Amended**: 2026-09-15
 
 ## Deferred non-governance intents (do not implement here)
 
@@ -127,3 +131,9 @@ Feed these to `/speckit.specify` using the sibling files, in order:
 8. Metrics, logs, billing export — `08-observability.md`
 9. Admin UIs and log ingest — `09-admin-ui-ingest.md`
 10. Migration and transforms — `10-migration-transforms.md`
+11. Cluster identity, discovery, join/leave/replace — `11-identity-membership.md`
+12. Internode fabric, clocks, conflict resolution — `12-internode-and-time.md`
+13. Durability, WAL, restore, deletes/TTL, backup — `13-durability-and-recovery.md`
+14. AuthN, authZ vocabulary, master key / KEKs, audit — `14-authz-keys.md`
+15. Protocol compatibility subsets, limits, rolling upgrade — `15-compatibility-and-limits.md`
+16. MVP cut, sequencing, product non-goals — `16-mvp-and-nongoals.md`

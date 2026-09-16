@@ -31,7 +31,7 @@ Storage and drivers MUST allow specifying **quorum level** for a query as in Cas
 
 Every node can receive user requests and operate with data (no protocol-only gateway node).
 
-Query execution MUST work **natively for all protocols** (Elasticsearch, PostgreSQL, and so on) — parser/planner/executor are specified in `05`; this feature requires that each protocol can invoke that stack rather than a protocol-private engine.
+Query execution MUST work **natively for all protocols** (Elasticsearch, PostgreSQL, and so on) — parser/planner/executor are specified in `05`; this feature requires that each protocol can invoke that stack rather than a protocol-private engine. The **MUST / MUST NOT verb matrix and wire versions** are `15`; a verb outside the MUST set MUST return that protocol's not-supported error, never a silent empty success.
 
 ## Why
 
