@@ -55,7 +55,7 @@ Many customers share one cluster with isolated schema/data, quotas, keys, and op
 
 ## Requirements
 
-- Namespace = tenant; contains schemas and data.
+- Namespace = tenant; contains schemas and data. Stable identity is an **id**; the **name** is unique and **renameable** (`CLUSTER_ADMIN`). Rename does not move data.
 - Quotas and access policies per tenant and per data type.
 - Optional per-container encryption at rest (disk or memory).
 - Cluster-level role store: admin, replication, custom-with-permissions.
