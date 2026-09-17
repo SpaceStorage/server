@@ -1,0 +1,7 @@
+{
+  "kind": "data_migration",
+  "strategy": "live",
+  "source": { "namespace": "acme", "container": "kv" },
+  "dest_nodes": ["node-b"],
+  "policy": "copy"
+}

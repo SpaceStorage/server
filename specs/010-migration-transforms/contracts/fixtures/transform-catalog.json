@@ -1,0 +1,9 @@
+{
+  "kind": "data_transformation",
+  "strategy": "live",
+  "source": { "namespace": "acme", "container": "profiles" },
+  "rewrite": "type_model",
+  "target_type": "relational_table",
+  "swap": true,
+  "retain_source": false
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "data_migration",
+  "strategy": "live",
+  "source": { "namespace": "acme", "container": "t" },
+  "dest_namespace": "beta",
+  "dest_name": "t",
+  "policy": "copy"
+}

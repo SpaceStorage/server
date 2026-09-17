@@ -1,0 +1,7 @@
+{
+  "kind": "data_transformation",
+  "source": { "namespace": "acme", "container": "blob" },
+  "rewrite": "type_model",
+  "target_type": "relational_table",
+  "_expect": "MappingQueryRequired for schema-free source without catalog mapping"
+}

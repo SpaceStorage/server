@@ -1,0 +1,17 @@
+{
+  "kind": "data_transformation",
+  "strategy": "live",
+  "source": { "namespace": "acme", "container": "events" },
+  "rewrite": "type_model",
+  "target_type": "relational_table",
+  "mapping": {
+    "sources": [
+      { "namespace": "acme", "container": "events", "columns": ["id", "payload.ts"] }
+    ],
+    "destinations": [
+      { "namespace": "acme", "container": "events_sql", "columns": ["id", "ts"] }
+    ]
+  },
+  "new_name": "events_sql",
+  "swap": false
+}

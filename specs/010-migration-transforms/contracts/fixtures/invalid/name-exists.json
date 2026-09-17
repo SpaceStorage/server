@@ -1,0 +1,8 @@
+{
+  "kind": "data_migration",
+  "source": { "namespace": "acme", "container": "t" },
+  "dest_namespace": "beta",
+  "dest_name": "t",
+  "policy": "copy",
+  "_expect": "NameExists when beta.t already exists"
+}

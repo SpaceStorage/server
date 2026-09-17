@@ -1,0 +1,7 @@
+{
+  "kind": "data_migration",
+  "source": { "namespace": "acme", "container": "t" },
+  "dest_namespace": "tiny",
+  "policy": "copy",
+  "_expect": "QuotaExceeded at start when tiny cannot hold a second copy of t"
+}
