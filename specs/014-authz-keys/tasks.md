@@ -105,7 +105,7 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 - [ ] T037 [US2] Implement `Authorizer::authorize(principal_id, verb, resource{namespace_id?, container_id?}) -> Allow | Deny` in `crates/authz/src/permission.rs` (or `lib.rs`); Deny maps to protocol authorization error (`002`)
 - [ ] T038 [US2] Encode builtins in `crates/authz` + call sites in `crates/tenancy`: `admin` exactly `{CLUSTER_ADMIN}` cluster scope; `replication` exactly `{REPLICATE}` node identity; `RolePut`/`RoleDelete`/rename of builtins → `BuiltinRoleImmutable`; custom name `admin`/`replication` → `RoleNameReserved`
-- [ ] T039 [US2] Implement first-binary implicit tenant grant in `crates/authz/src/permission.rs`: namespace-bound principal that is not `admin` or `replication` gets `{READ, WRITE, CREATE, DROP, CONFIGURE}` **on that namespace only** (not a stored custom role); slice 7 replaces with explicit sets
+- [ ] T039 [US2] Implement first-binary implicit tenant grant (**FR-017**) in `crates/authz/src/permission.rs`: namespace-bound principal that is not `admin` or `replication` gets `{READ, WRITE, CREATE, DROP, CONFIGURE}` **on that namespace only** (not a stored custom role); slice 7 replaces with explicit sets
 - [ ] T040 [US2] Refuse custom RolePut / remaining-verb grants / tenant `AUDIT_READ` attach on first-binary profile with `Slice7Required` in `crates/tenancy` + `crates/authz` when feature `authz-custom` is off
 - [ ] T041 [US2] Wire `REPLICATE` peer auth on `internode`/`replication` in `crates/internodes` / `crates/membership`: join secret + builtin `replication`; presenting replication identity on tenant handler → `ReplicationNotTenant`; MUST NOT be a tenant login
 - [ ] T042 [US2] Ensure `CLUSTER_ADMIN` admits join, changes global config, and creates/writes containers in any namespace without separate READ/WRITE grants (integration with `011`/`007` call sites) via `authorize` implication
@@ -155,7 +155,7 @@ description: "Task list for authentication, authorization, envelope keys, and au
 ### Tests for User Story 4 ⚠️
 
 - [ ] T059 [P] [US4] Add unit tests in `crates/authz/src/audit.rs` that required first-binary actions serialize with principal id (or nil), action, target, Hlc and never include key bytes
-- [ ] T060 [P] [US4] Add conformance tests in `crates/conformance` for SC-006: failed Redis AUTH, membership join, key rotate appear in `spacestorage audit` readable by `CLUSTER_ADMIN`
+- [ ] T060 [P] [US4] Add conformance tests in `crates/conformance` for SC-006: failed Redis AUTH, membership join, key rotate, **login rename**, and **namespace rename** appear in `spacestorage audit` readable by `CLUSTER_ADMIN` (rename audit events MUST be asserted)
 
 ### Implementation for User Story 4
 

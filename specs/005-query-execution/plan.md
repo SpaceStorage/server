@@ -145,7 +145,7 @@ docs/
 | Slice 8 engines deferred in the first binary | `016` slice order: CRUD through this stack now; joins/MapReduce/subscribe/2PC/BEGIN after three-node quorum and remaining handlers | Blocking first-binary PG on full MapReduce inverts slices and delays the shippable binary. Complete-product MUSTs remain in this spec. |
 | `LocalEngine` retained alongside `PlannerEngine` | RF=1 unit tests and `002` local conformance must keep a zero-internode path | Deleting `LocalEngine` would force internodes even for parser tests. Default production path is `PlannerEngine`. |
 | Spill on `spawn_blocking` to local disk | FR-022 memory cap | Unbounded memory (rejected by `15`); a second process for spill (rejected by Principle III). |
-| SQL parsers remain in handler crates | `002` already lowers to IR; one IR owner is this crate | Moving `sqlparser` into `exec` would pull protocol dialects into the engine and invite a second AST. |
+| SQL parsers remain in handler crates | `002` already lowers to IR; one IR owner is this crate. **Parser-stage ownership (FR-005)**: handler parse → IR is stage `Received`/`Bound` ownership in the handler crate; `ExecutionRecord` always names shared planner stages thereafter (`Planned`|`Scheduled`|`Running`|…) — never a private engine. T019/T032 assert those shared stage names on the record. | Moving `sqlparser` into `exec` would pull protocol dialects into the engine and invite a second AST. |
 
 ## Phase 0 — Research
 

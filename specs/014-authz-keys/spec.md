@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-15
 
-**Updated**: 2026-09-18
+**Updated**: 2026-09-19
 
 **Status**: Draft
 
@@ -29,6 +29,11 @@
 - Q: Which parts of logins, permissions, keys, and audit must already work in the first shippable binary, and which wait for later slices? → A: First binary: local principal store, bootstrap `CLUSTER_ADMIN`, SCRAM and Redis AUTH, one-namespace binding, built-in `admin` and `replication` only, `tls`/`plaintext;`, master-key file wrapping namespace KEKs, audit of join / key bind-rotate / failed auth. Custom roles and the rest of the permission list wait for slice 7 (`16`). Rewriting data under a new data key waits for transforms (`10`).
 - Q: What permissions do the built-in `admin` and `replication` roles carry, and does `CLUSTER_ADMIN` already include the other verbs (read, write, audit, and the rest)? → A: Built-in `admin` is `{CLUSTER_ADMIN}`, and that verb includes every other verb in the list. Built-in `replication` is `{REPLICATE}` only and is not a tenant login. Neither built-in role can be edited.
 - Q: After a login's password is changed, the principal is disabled, or its permissions are reduced, what happens to connections that are already open? → A: Later requests re-check enablement, password (credential generation), and current grants. In-flight work MAY finish. No forced disconnect. New authentications use the new password and grants.
+
+### Session 2026-09-19
+
+- Q: What is the normative SCRAM-SHA-256 PBKDF2 iteration count? → A: Default **16384** (`auth.scram_iterations`). Tests MAY override to **4096**. Production MAY raise above 16384 (documented range up to 65536); 16384 is the shipped default, not 4096.
+- Q: Until custom roles (slice 7), what may a namespace-bound tenant principal do on its namespace in the first binary? → A: A principal bound to exactly one namespace that is not `admin` or `replication` receives an **implicit** grant `{READ, WRITE, CREATE, DROP, CONFIGURE}` on that namespace only. This is not a stored custom role; slice 7 replaces it with explicit custom roles. Needed so Redis/PG smoke can use a bound login while unbound `admin` is refused on Redis.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -58,7 +63,7 @@ The **first shippable binary** (`16` slices 1–5) MUST implement this story for
 
 Roles `admin`, `replication`, and `custom` (`07`) are composed from a closed vocabulary: `CLUSTER_ADMIN`, `NAMESPACE_ADMIN`, `READ`, `WRITE`, `CREATE`, `DROP`, `CONFIGURE`, `REPLICATE`, `MIGRATE`, `AUDIT_READ`, `METRICS_READ`. Built-in `admin` is the set `{CLUSTER_ADMIN}`; **`CLUSTER_ADMIN` implies every other verb** (all namespaces, data plane, keys, audit, metrics, migrate, membership). Built-in `replication` is `{REPLICATE}` only and MUST NOT be a tenant login. Neither built-in role is editable. A custom role that includes `CLUSTER_ADMIN` (slice 7) has the same implication. UIs (`09`) MUST use the same vocabulary. Replication authenticates nodes on `internode`/`replication`, not tenants.
 
-The **first binary** MUST persist and honor built-in `admin` (`CLUSTER_ADMIN`) and `replication` (`REPLICATE`) only. **Custom** roles and attaching remaining verbs as grants (without `CLUSTER_ADMIN`) wait for **slice 7** (with `07`). UIs wait for `09`.
+The **first binary** MUST persist and honor built-in `admin` (`CLUSTER_ADMIN`) and `replication` (`REPLICATE`) only. Until slice 7, a namespace-bound non-admin principal receives an **implicit** `{READ, WRITE, CREATE, DROP, CONFIGURE}` on that namespace (FR-017). **Custom** roles and attaching remaining verbs as grants (without `CLUSTER_ADMIN`) wait for **slice 7** (with `07`). UIs wait for `09`.
 
 **Why this priority**: Three role names were unimplementable without verbs.
 
@@ -70,8 +75,9 @@ The **first binary** MUST persist and honor built-in `admin` (`CLUSTER_ADMIN`) a
 2. **Given** `CLUSTER_ADMIN` (first binary) with no separate `READ`/`WRITE`/`CREATE` grants, **When** it admits a join (`11`), changes global config, or creates and writes a container in any namespace, **Then** those actions succeed and are audit-logged.
 3. **Given** `REPLICATE` (first binary), **When** used on tenant protocols, **Then** it does not grant tenant data; **When** used on `internode`/`replication`, **Then** peers authenticate.
 4. **Given** first binary, **When** a caller creates a custom role, grants `READ`/`NAMESPACE_ADMIN`/`AUDIT_READ` as a custom set, or edits built-in `admin` or `replication` (strip or add verbs), **Then** the attempt is refused or documented as not in this binary.
-5. **Given** a custom role that includes `CLUSTER_ADMIN` (slice 7), **When** the principal writes or reads audit without those verbs listed separately, **Then** those actions succeed.
-6. **Given** a UI (`09`), **When** it attempts an action, **Then** the same vocabulary is enforced; no private privilege model.
+5. **Given** a principal bound to exactly one namespace (first binary, not `admin`/`replication`), **When** it authenticates on Redis/PostgreSQL and issues data-plane ops needing `READ`/`WRITE`/`CREATE`/`DROP`/`CONFIGURE` on that namespace, **Then** those succeed via the implicit grant (FR-017) without a stored custom role.
+6. **Given** a custom role that includes `CLUSTER_ADMIN` (slice 7), **When** the principal writes or reads audit without those verbs listed separately, **Then** those actions succeed.
+7. **Given** a UI (`09`), **When** it attempts an action, **Then** the same vocabulary is enforced; no private privilege model.
 
 ---
 
@@ -134,17 +140,18 @@ The **first binary** MUST append join, key bind/rotate, failed authentication, l
 - **FR-003**: Custom roles MUST be composed from the closed vocabulary: `CLUSTER_ADMIN`, `NAMESPACE_ADMIN`, `READ`, `WRITE`, `CREATE`, `DROP`, `CONFIGURE`, `REPLICATE`, `MIGRATE`, `AUDIT_READ`, `METRICS_READ`. Built-in `admin` MUST be exactly `{CLUSTER_ADMIN}`. Built-in `replication` MUST be exactly `{REPLICATE}` and MUST NOT authenticate as a tenant. **`CLUSTER_ADMIN` implies every other verb** in that list (any principal that has it, including a slice-7 custom role that includes it). Built-in `admin` and `replication` MUST NOT be edited, renamed, or deleted. Custom roles and attaching those verbs except via the two built-ins are **slice 7**.
 - **FR-004**: UIs MUST enforce the same vocabulary (`09`). This MUST NOT be required before `09`.
 - **FR-005**: Every entrypoint MUST declare `tls { ... }` or `plaintext;`. Omitted transport is a startup error. TLS is not globally mandatory. Certificate material referenced, never inlined. No silent plaintext fallback when TLS is declared.
-- **FR-006**: Encryption at rest is opt-in per container (`03`). Encrypted: stolen disk/snapshot/backup is ciphertext. Running node that unwrapped keys can read hosted data. `CLUSTER_ADMIN` can unwrap. Unencrypted persistent data is an operator-chosen leak.
+- **FR-006**: Encryption at rest is opt-in per container (`03`). Encrypted: stolen disk/snapshot/backup is ciphertext. Running node that unwrapped keys can read hosted data. Nodes **cache** unwrapped data keys only for containers they **host**; `CLUSTER_ADMIN` MAY unwrap for restore/admin outside that hosted-only cache. Unencrypted persistent data is an operator-chosen leak.
 - **FR-007**: Algorithms MUST include AES-256-GCM (default) and ChaCha20-Poly1305.
 - **FR-008**: Envelope: cluster master key (file in first binary; later KMS as another provider, same references) wraps per-namespace KEKs in cluster-level controller storage. Nodes unwrap data keys only for containers they host and cache them in memory. Data keys encrypt payloads and WAL/snapshots (`13`).
 - **FR-009**: Rotate master key = rewrap KEKs; data keys unchanged. Master key MUST be backupable. Restore with a specified key MUST be documented. Lost master without backup ⇒ encrypted containers unrestorable, explicit.
 - **FR-010**: Data-key rotate MAY issue a new key; old keys retained until transform (`10`). Lost data key → container unreadable, error names the reference. Rewriting existing payloads under the new key MUST NOT be required before `10`.
 - **FR-011**: Bind key reference: `CLUSTER_ADMIN` for any namespace (first binary). `NAMESPACE_ADMIN` MAY bind a key reference for their namespace from **slice 7**.
-- **FR-012**: Audit log for privileged actions as listed, with principal id, action, target, time. Login rename and namespace rename MUST appear. First binary MUST append join, key bind/rotate, and failed authentication, readable by `CLUSTER_ADMIN`. Tenants need `AUDIT_READ` to see cluster audit; that grant is **slice 7**.
-- **FR-013**: The first shippable binary (`16` slices 1–5) MUST include: local principal store in cluster-level controller storage; bootstrap `CLUSTER_ADMIN` (FR-015); SCRAM-SHA-256 and Redis AUTH mapped to that store; one-namespace binding for non-admin principals; built-in `admin` and `replication` only; every entrypoint `tls` or `plaintext;`; cluster master-key file wrapping namespace KEKs; audit of join, key bind/rotate, and failed auth. It MUST NOT require custom roles, tenant `AUDIT_READ`, remaining protocol handlers, UIs, external KMS, or data-key rewrite via transform. LDAP/SSO later.
+- **FR-012**: Audit log for privileged actions as listed, with principal id, action, target, time. Login rename and namespace rename MUST appear. First binary MUST append join, key bind/rotate, failed authentication, **login rename**, and **namespace rename**, readable by `CLUSTER_ADMIN`. Tenants need `AUDIT_READ` to see cluster audit; that grant is **slice 7**.
+- **FR-013**: The first shippable binary (`16` slices 1–5) MUST include: local principal store in cluster-level controller storage; bootstrap `CLUSTER_ADMIN` (FR-015); SCRAM-SHA-256 and Redis AUTH mapped to that store; one-namespace binding for non-admin principals; built-in `admin` and `replication` only; implicit bound-tenant grant (FR-017); every entrypoint `tls` or `plaintext;`; cluster master-key file wrapping namespace KEKs; audit of join, key bind/rotate, failed auth, login rename, and namespace rename. It MUST NOT require custom roles, tenant `AUDIT_READ`, remaining protocol handlers, UIs, external KMS, or data-key rewrite via transform. LDAP/SSO later.
 - **FR-014**: A principal MUST have an immutable id and a unique, **renameable** login name (same charset class as namespace names in `07`: 1–63, `^[A-Za-z][A-Za-z0-9_]*$`). Rename MUST NOT change id, password verifier, or namespace binding. After rename, the old login MUST NOT authenticate that principal. Who MAY rename: the principal themselves; `CLUSTER_ADMIN` for any principal (first binary); `NAMESPACE_ADMIN` for principals bound to their namespace (**slice 7**). Taken name → refused. Role bindings in `07` MUST use principal id.
 - **FR-015**: Cluster bootstrap (`11`) MUST create the first `CLUSTER_ADMIN` principal from an initial admin login and password (or verifier) in the bootstrap declaration. Bootstrap without that credential MUST fail startup. An empty principal store MUST NOT leave admin CLI/HTTP unauthenticated (including loopback). The join secret MUST NOT authenticate as `CLUSTER_ADMIN` or any tenant principal. Restart of a node that already has a cluster identity MUST keep the existing principal store and MUST NOT mint a second bootstrap admin.
 - **FR-016**: After a session is authenticated, each later request MUST re-check principal enablement, credential generation (password/verifier change invalidates the session's right to continue), and current grants. A request already in flight MAY finish. The server MUST NOT be required to drop the connection. Login rename MUST NOT by itself fail later requests (session remains bound by principal id). New authentications MUST use the current login, password, and grants. Password change (self or `CLUSTER_ADMIN`) is first binary; disable follows the same re-check; grant reduction applies from slice 7.
+- **FR-017**: Until custom roles (slice 7), a principal bound to exactly one namespace that is not `admin` or `replication` MUST receive an **implicit** grant `{READ, WRITE, CREATE, DROP, CONFIGURE}` on that namespace only. The grant is not a stored custom role and MUST NOT invent custom RolePut in the first binary. Slice 7 replaces it with explicit custom roles (empty custom set = authenticate only).
 
 ### Key Entities
 
@@ -164,7 +171,7 @@ The **first binary** MUST append join, key bind/rotate, failed authentication, l
 - **SC-003**: 100% of entrypoints that omit transport fail startup; 100% of TLS entrypoints refuse plaintext.
 - **SC-004**: 100% of encrypted-container disk images in the suite are unreadable without the master key; 100% of unencrypted containers remain readable (chosen leak).
 - **SC-005**: Master-key rotate rewraps KEKs with 0 table rewrites in 100% of tests.
-- **SC-006**: First binary: 100% of join, key-rotate, and failed-auth events in the suite appear in audit with principal, action, target, time, readable by `CLUSTER_ADMIN`. Slice 7: 100% of tenant requests without `AUDIT_READ` are refused.
+- **SC-006**: First binary: 100% of join, key-rotate, failed-auth, login-rename, and namespace-rename events in the suite appear in audit with principal, action, target, time, readable by `CLUSTER_ADMIN`. Slice 7: 100% of tenant requests without `AUDIT_READ` are refused.
 - **SC-007**: 100% of login renames in the suite keep principal id and namespace binding; 100% of new auths with the old login fail for that principal; 100% of duplicate target logins are refused.
 - **SC-008**: 100% of first-node bootstraps in the suite with an initial admin credential yield a working `CLUSTER_ADMIN`; 100% of bootstraps without that credential fail startup; 100% of join-secret-as-admin attempts are refused; 100% of restarts keep the existing bootstrap admin (no duplicate).
 - **SC-009**: 100% of later requests in the suite after password change or disable are refused; 100% of login-rename-only later requests still run as that principal id; 0 forced disconnects required. Slice 7: 100% of later requests that need a stripped verb are refused.
@@ -173,7 +180,8 @@ The **first binary** MUST append join, key bind/rotate, failed authentication, l
 
 - Role **names** and quota units are `07`. Encryption **scope** field is `03`. Internode framing is `12`. WAL encryption uses this feature's data keys (`13`).
 - Hostile tenants; operator runs nodes; crash-stop (`16`).
-- First binary has no external KMS. Slice numbering follows `16`; first binary is slices 1–5. Custom roles wait for slice 7 (`07`/`14`). Data-key rewrite waits for `10`.
+- First binary has no external KMS. Slice numbering follows `16`; first binary is slices 1–5. Custom roles wait for slice 7 (`07`/`14`); until then FR-017 implicit tenant grant applies. Data-key rewrite waits for `10`.
+- Default SCRAM-SHA-256 PBKDF2 iterations = **16384** (`auth.scram_iterations`); tests MAY use **4096**.
 - Join secret (`11`) is necessary to speak `internode`/`replication` and is never an admin or tenant credential.
 
 ## Out of Scope

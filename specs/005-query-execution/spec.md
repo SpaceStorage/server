@@ -6,7 +6,7 @@
 
 **Updated**: 2026-09-16
 
-**Status**: Draft
+**Status**: Ready for implement
 
 **Input**: User description: "005-query-execution" — re-specify the shared execution layer from `.specify/intent/05-query-execution.md` after constitution 1.3.0 and features `011`–`016`: parser, planner, task scheduler, task executor, MapReduce, shuffle, aggregation, join, data exchange, and execution state, working natively for all complete-product protocols through one canonical intermediate representation; planner-owned concurrency and a closed isolation set (`READ COMMITTED`, `SNAPSHOT` where the type supports it; **`SERIALIZABLE` is a product non-goal**); timeout and quorum on every query; subscribe-on-results; cancel on disconnect; explicit unavailability when a data part has zero live replicas; shuffle over the `internode` fabric; replica/shuffle locality by topology ladder then measured RTT and HLC-skew health (`04`/`12`); first-binary PostgreSQL/Redis CRUD through this stack without `COPY`/`BEGIN` (`16` slices 1–5); joins/aggregation/MapReduce/subscribe/distributed transactions as slice 8.
 

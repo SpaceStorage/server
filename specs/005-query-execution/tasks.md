@@ -10,7 +10,7 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 
 **Tests**: Requested. Plan Testing section + SC-001–SC-012 + Independent Tests in [spec.md](spec.md). Unit tests in `crates/exec`; conformance in `crates/conformance/tests/` (`planner_smoke`, `equivalence`, `timeout_cancel`, `unavailability`, `isolation`, `admission`, `explain`, `forward_local`, and `query-distributed`: `join_aggregate`, `subscribe`). Write failing tests first where listed.
 
-**Organization**: Tasks grouped by user story so each story is independently implementable and testable. First-binary MVP = User Story 1 (+ shared foundation). Slice 8 / `query-distributed` = User Stories 3 (BEGIN/2PC), 4 (COPY), and 5.
+**Organization**: Tasks grouped by user story so each story is independently implementable and testable. First-binary MVP = User Story 1 + User Story 2 + User Story 4 **admission/spill** (not COPY) (+ shared foundation), matching Session 2026-09-16 / [plan.md](plan.md) Summary (timeout, quorum, cancel, unavailability, admission through this stack). US4 is split: admission/spill/concurrency limits = first-binary; COPY in/out = complete-product. Slice 8 / `query-distributed` / complete-product = User Stories 3 (BEGIN/2PC), US4 COPY, and 5 (join/agg/MapReduce/subscribe).
 
 **Scope**: Grow `crates/exec` from the `002` seam into `PlannerEngine`. No new binary, no second IR, no DataFusion/Arrow. Fan-out/2PC/quorum math stay in `004`/`placement`; shuffle framing in `012`/`internode`. First-binary dialect continues to refuse `COPY`/`BEGIN` in the handler before IR.
 
@@ -53,7 +53,7 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - [ ] T010 [P] Define `LogicalPlan`, `PhysicalPlan`, `Task`, `EngineKind`, `PlanId`, `TaskId` in `crates/exec/src/planner.rs` (or `plan.rs`) per [data-model.md](data-model.md) §3
 - [ ] T011 [P] Define `RankKey { ladder_distance, rtt, skew_unhealthy }` compare order and `PartUnavailable` in `crates/exec/src/rank.rs` / `error.rs` per [data-model.md](data-model.md) §8–§9
 - [ ] T012 [P] Define `AdmissionLimits` defaults (`max_concurrent_per_node` **512**, `max_concurrent_per_namespace` **128**, `max_memory` **256MiB**, `spill` **false**) and `AdmissionToken` / `SpillDir` types in `crates/exec/src/admission.rs` and `crates/exec/src/spill.rs` per [data-model.md](data-model.md) §7 and [admission.md](contracts/admission.md)
-- [ ] T013 [P] Define `Transaction` / `TxnState` and `Subscription` / `JobState` structs in `crates/exec/src/txn.rs` and `crates/exec/src/engines/subscribe.rs` (or `crates/exec/src/subscribe.rs` re-exported) per [data-model.md](data-model.md) §5–§6
+- [ ] T013 [P] Define `Transaction` / `TxnState` and `Subscription` / `JobState` structs in `crates/exec/src/txn.rs` and always-compiled `crates/exec/src/subscribe.rs` (re-export / thin wrap from `engines/subscribe.rs` when `query-distributed` is on) per [data-model.md](data-model.md) §5–§6 — core subscription types are **not** gated behind the feature
 - [ ] T014 Parse `query { max_concurrent_per_node; max_concurrent_per_namespace; max_memory; spill on|off; default_concurrency; }` with validation codes `query_max_concurrent_zero`, `query_max_memory_zero`, `query_concurrency_zero`, `query_spill_unknown` in `crates/config` per [config-directives.md](contracts/config-directives.md); live-reload applies to **new** queries only
 - [ ] T015 Implement session cancel token plumbing in `crates/exec/src/cancel.rs` (disconnect + explicit cancel share one token) and timeout `tokio::select!` wrapper skeleton used by all execute paths (SLA: deadline + 1 s) per [research.md](research.md) R8
 - [ ] T016 Implement `PlannerEngine` stub in `crates/exec/src/engine.rs` implementing `QueryEngine` (additive `explain` / `cancel` / `subscribe` methods may have default bodies); retain `LocalEngine` under `crates/exec/src/local/` for RF=1 / `002` unit tests only
@@ -64,9 +64,9 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 
 ---
 
-## Phase 3: User Story 1 - Shared planner for native protocol queries (Priority: P1) 🎯 MVP
+## Phase 3: User Story 1 - Shared planner for native protocol queries (Priority: P1) 🎯 MVP (part 1 of 3)
 
-**Goal**: First-binary PostgreSQL (simple + extended/prepared, auto-commit DML/DDL; no COPY/BEGIN) and Redis MUST-list on `K/V Store` execute through one `PlannerEngine` and `LogicalRequest`. Type-unsupported ops refused before data. Semantically equivalent cross-protocol reads agree. EXPLAIN MAY return a logical plan without executing.
+**Goal**: First-binary PostgreSQL (simple + extended/prepared, auto-commit DML/DDL; no COPY/BEGIN) and Redis MUST-list on `K/V Store` execute through one `PlannerEngine` and `LogicalRequest`. Type-unsupported ops refused before data. Semantically equivalent cross-protocol reads agree. EXPLAIN MAY return a logical plan without executing. (First-binary MVP also requires Phase 4 US2 + Phase 6 US4 admission/spill — see Organization.)
 
 **Independent Test**: One node — Relational Table + K/V Store; PG smoke + Redis MUST list; write via one protocol and read via the other; `spacestorage executions` shows `engine=planner`. No MapReduce/BEGIN/distributed txn required.
 
@@ -74,7 +74,7 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T019 [P] [US1] Add `crates/conformance/tests/planner_smoke.rs` covering SC-001/SC-012: PG INSERT/SELECT/UPDATE/DELETE, CREATE/DROP, prepared round-trip through `PlannerEngine`; `BEGIN`/`COPY` → not-supported and store nothing; Redis MUST-list on KV; execution record `engine == "planner"`
+- [ ] T019 [P] [US1] Add `crates/conformance/tests/planner_smoke.rs` covering SC-001/SC-012: PG INSERT/SELECT/UPDATE/DELETE, CREATE/DROP, prepared round-trip through `PlannerEngine`; `BEGIN`/`COPY` → not-supported and store nothing; Redis MUST-list on KV; execution record `engine == "planner"` and shared stage names (`Received`/`Bound`/… — never a private engine; handler parse→IR is Received/Bound ownership per [planner-executor.md](contracts/planner-executor.md))
 - [ ] T020 [P] [US1] Add `crates/conformance/tests/equivalence.rs` covering SC-002: value written via PostgreSQL readable via Redis mapping (and reverse) with identical logical content
 - [ ] T021 [P] [US1] Add unit tests in `crates/exec/src/planner.rs` for type-catalog refuse (`unsupported_by_type{container, type, op}`) before any mutate and for MUST NOT / first-binary COPY/BEGIN never becoming `LogicalRequest`
 - [ ] T022 [P] [US1] Add `crates/conformance/tests/explain.rs` covering SC-008 (MAY on first binary): `EXPLAIN SELECT` returns logical plan naming container + Scan, stage stops at `Planned`, no data touch
@@ -85,20 +85,20 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - [ ] T024 [US1] Match each operation to `Datatype::operations()` (`003`) and refuse unsupported ops before touching data in `crates/exec/src/planner.rs` (FR-006); walk L4 composition per `003` rules; stale cycle → `Failed{cyclic_composition}` without execution
 - [ ] T025 [US1] Attach timeout and quorum to every query using `002`/`004` precedence in `crates/exec/src/planner.rs` / `options.rs` (full clamp/reject behaviour completed in US2; stubs must still record applied options on the execution record)
 - [ ] T026 [US1] Execute planned CRUD tasks via `placement::Coordinator` (or local path when RF=1) inside `crates/exec/src/engine.rs` without handlers calling type mutators except through `QueryEngine` ([ir.md](contracts/ir.md))
-- [ ] T027 [P] [US1] Implement Bound stage for prepared/extended parameter fill in `crates/exec/src/planner.rs` so EXECUTE matches equivalent ad-hoc (FR-023); handlers keep storing slotted `LogicalRequest` in `crates/handler-postgresql` (and CQL later)
+- [ ] T027 [P] [US1] Implement Bound stage for prepared/extended parameter fill in `crates/exec/src/planner.rs` so EXECUTE matches equivalent ad-hoc (FR-023); handlers keep storing slotted `LogicalRequest` in `crates/handler-postgresql` (complete-product CQL/ClickHouse/ES/S3/WebDAV IR lowering deferred — see T084–T086 / `016` slice 6)
 - [ ] T028 [P] [US1] Implement `LogicalRequest::Explain` completing at Planned (no Running) with containers, ops, engines, attached options in `crates/exec/src/planner.rs`; SQL text via `crates/handler-postgresql`; JSON via admin `POST /v1/explain` in `crates/node`
 - [ ] T029 [US1] Keep first-binary PostgreSQL dialect refusing `COPY`/`BEGIN` **before** IR in `crates/handler-postgresql` (SC-012) even though this crate owns those variants for complete-product
 - [ ] T030 [US1] Ensure Redis MUST-list commands lower to the same IR and execute through `PlannerEngine` in `crates/handler-redis` with no protocol-private engine
 - [ ] T031 [US1] Publish inspectable execution records (identity, stage, applied timeout/quorum, coordinator) on existing admin/CLI `executions` in `crates/node` + `crates/spacestorage` (FR-009 subset for US1)
-- [ ] T032 [US1] Unit-test stage transitions and `engine=planner` labelling inside `crates/exec` (debug invalid transitions panic; release → `Failed`)
+- [ ] T032 [US1] Unit-test stage transitions and `engine=planner` labelling inside `crates/exec` (debug invalid transitions panic; release → `Failed`); assert `ExecutionRecord` uses shared stage names only (`Received`|`Bound`|`Planned`|…) after handler parse→IR (FR-005 ownership: handler owns Received/Bound parse; shared planner stages thereafter — see [planner-executor.md](contracts/planner-executor.md))
 
-**Checkpoint**: `cargo test -p spacestorage-conformance --features first-binary planner_` and equivalence pass. Quickstart §1 works. MVP demoable without US2–US5.
+**Checkpoint**: `cargo test -p spacestorage-conformance --features first-binary planner_` and equivalence pass. Quickstart §1 works. US1 path green — continue to US2 and US4 admission/spill before declaring first-binary MVP (do **not** stop after US1 alone).
 
 ---
 
-## Phase 4: User Story 2 - Timeout, quorum, cancel, unavailability, domain-aware coordination (Priority: P1)
+## Phase 4: User Story 2 - Timeout, quorum, cancel, unavailability, domain-aware coordination (Priority: P1) 🎯 MVP (part 2 of 3)
 
-**Goal**: Every query carries timeout + quorum (clamp defaults, reject explicit unsatisfiable). Cancel/disconnect and timeout stop work within deadline+1s. Zero live replicas → named unavailability (fail whole unless `partial_ok`). Multi-shard fan-out with per-shard quorum. Follower writes forward to source. `EACH_QUORUM` refused unless opted in. Replica ranking: topology ladder then RTT / in-domain HLC skew.
+**Goal**: Every query carries timeout + quorum (clamp defaults, reject explicit unsatisfiable). Cancel/disconnect and timeout stop work within deadline+1s. Zero live replicas → named unavailability (fail whole unless `partial_ok`). Multi-shard fan-out with per-shard quorum. Follower writes forward to source. `EACH_QUORUM` refused unless opted in. Replica ranking: topology ladder then RTT / in-domain HLC skew. Required for first-binary MVP (Session 2026-09-16).
 
 **Independent Test**: Three-node replicated container: ONE/TWO queries; stop all replicas of one shard; cancel and timeout a long query; optional follower-domain write forward. No MapReduce required.
 
@@ -122,7 +122,7 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - [ ] T045 [US2] Implement replica (and later shuffle) ranking in `crates/exec/src/rank.rs` using placement topology + internode RTT/skew gauges (FR-017); call from schedule when placing tasks
 - [ ] T046 [US2] Ensure write that cannot meet quorum never reports success; empty successful shard remains zero rows, not unavailability ([coordination.md](contracts/coordination.md))
 
-**Checkpoint**: timeout/cancel/unavailability/forward conformance green. Quickstart §§2 and 5 pass.
+**Checkpoint**: timeout/cancel/unavailability/forward conformance green. Quickstart §§2 and 5 pass. US2 complete — still need US4 admission/spill before first-binary MVP STOP.
 
 ---
 
@@ -151,9 +151,9 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 
 ---
 
-## Phase 6: User Story 4 - Admission, concurrency, prepared statements, and COPY (Priority: P2)
+## Phase 6: User Story 4 - Admission, concurrency, prepared statements, and COPY (Priority: P2) 🎯 MVP admission (part 3 of 3) + complete-product COPY
 
-**Goal**: Enforce max concurrent queries per node/namespace and max query memory (spill or reject). Honour planner concurrency when the plan has independent tasks. Prepared already required in US1; this story completes admission/spill and complete-product COPY in/out.
+**Goal**: Enforce max concurrent queries per node/namespace and max query memory (spill or reject). Honour planner concurrency when the plan has independent tasks. Prepared already required in US1. **Split**: admission/spill/concurrency limits = first-binary MVP (Session 2026-09-16); COPY in/out = complete-product only.
 
 **Independent Test**: Drive past max concurrent (expect named reject); prepared SELECT (already US1); complete-product COPY in and out a small table; first-binary COPY still not-supported.
 
@@ -162,17 +162,22 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - [ ] T056 [P] [US4] Add `crates/conformance/tests/admission.rs` covering SC-007: `max_concurrent_per_node 1` → second in-flight query gets `admission_rejected{limit:node,…}` with 0 hang; memory cap reject when `spill off`
 - [ ] T057 [P] [US4] Add unit tests in `crates/exec/src/spill.rs` for spill dir `{data_dir}/spill/{exec_id}/` create/cleanup on Done/Error/cancel and `admission_rejected{limit:"spill_disk"}` when disk full
 
-### Implementation for User Story 4
+### Implementation for User Story 4 — first-binary (admission/spill)
 
 - [ ] T058 [US4] Implement admission acquire (node slot → namespace slot → memory reservation) before Scheduled in `crates/exec/src/admission.rs` / `schedule.rs`; overflow → `admission_rejected{limit, current, max}`; buffer-full (`001`) → `limit:"buffer"` ([admission.md](contracts/admission.md))
 - [ ] T059 [US4] Implement spill-to-disk for spillable blocking operators when `spill on` in `crates/exec/src/spill.rs`; when `spill off`, exceeding `max_memory` rejects immediately (FR-022); spill not restored across restart
 - [ ] T060 [US4] Honour `Concurrency::Parallel { degree }` only for independent tasks; cap degree by remaining admission slots; default sequential in `crates/exec/src/schedule.rs` (FR-008)
 - [ ] T061 [US4] Reject oversize query text/results with `limit_exceeded{what}` at Received or while producing rows in `crates/exec/src/engine.rs` / handlers (`015` limits)
-- [ ] T062 [US4] Implement `CopyIn`/`CopyOut` for complete-product PostgreSQL in `crates/exec/src/engine.rs` + `crates/handler-postgresql` (`CopyIn` → `Mutate::Insert` batches; `CopyOut` → encoded `Scan`; formats Text/Csv/Binary) per [copy-prepared.md](contracts/copy-prepared.md); types without tabular data → `unsupported_by_type`
-- [ ] T063 [US4] Confirm first-binary COPY remains handler not-supported before IR (SC-012) in `crates/handler-postgresql`; gate COPY execution behind complete-product / `query-distributed` as appropriate
 - [ ] T064 [P] [US4] Ensure config validation fixtures under `specs/005-query-execution/contracts/fixtures/invalid/` fail `spacestorage validate` with the documented codes (quickstart §0)
 
-**Checkpoint**: admission conformance green; COPY works on complete-product; first-binary COPY still refused.
+**Checkpoint (first-binary MVP STOP)**: admission conformance green; US1 + US2 + US4 admission/spill validated. Quickstart admission path works. **STOP and VALIDATE** first-binary MVP here — COPY/BEGIN/US3/US5 remain complete-product / slice 8.
+
+### Implementation for User Story 4 — complete-product (COPY)
+
+- [ ] T062 [US4] Implement `CopyIn`/`CopyOut` for complete-product PostgreSQL in `crates/exec/src/engine.rs` + `crates/handler-postgresql` (`CopyIn` → `Mutate::Insert` batches; `CopyOut` → encoded `Scan`; formats Text/Csv/Binary) per [copy-prepared.md](contracts/copy-prepared.md); types without tabular data → `unsupported_by_type`
+- [ ] T063 [US4] Confirm first-binary COPY remains handler not-supported before IR (SC-012) in `crates/handler-postgresql`; gate COPY execution behind complete-product / `query-distributed` as appropriate
+
+**Checkpoint (complete-product COPY)**: COPY works on complete-product; first-binary COPY still refused.
 
 ---
 
@@ -198,7 +203,7 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - [ ] T073 [P] [US5] Wire SQL wait surfaces in `crates/handler-postgresql`: `SET spacestorage.async`, `spacestorage.job_submit` / `job_wait` / `job_cancel`, `spacestorage.jobs`; refuse `LISTEN`/`NOTIFY` as wait path (`015`)
 - [ ] T074 [P] [US5] Wire Redis `SS.JOB SUBMIT|GET|WAIT|CANCEL` in `crates/handler-redis` and HTTP `/_spacestorage/jobs/{id}` (+ wait/cancel) on applicable HTTP handlers per [subscribe.md](contracts/subscribe.md)
 - [ ] T075 [P] [US5] Complete admin/CLI jobs in `crates/node`, `crates/admin-proto`, `crates/spacestorage`: `GET /v1/jobs`, `{id}`, `{id}/watch`, `POST …/cancel`, `spacestorage jobs wait|cancel` — same `ExecId` as SQL/Redis/HTTP
-- [ ] T076 [US5] Refuse Elasticsearch aggregations beyond `terms` + metric min/max/sum/avg/value_count as not-supported with no silent approximation in planner/handler path (FR-035)
+- [ ] T076 [US5] Refuse Elasticsearch aggregations beyond `terms` + metric min/max/sum/avg/value_count as not-supported with no silent approximation in planner/handler path (FR-035); ES search MUST verbs still lower to shared `LogicalRequest` with `engine=planner` when the handler exists (see T084–T086 / `016` slice 6 — no second engine)
 - [ ] T077 [US5] Increment `008` FR-006 query-processing figures from `crates/exec` via `node` stats hooks (totals, errors, in-flight, rows, histograms, retries, scan kind) with required labels when known; **do not** invent parallel `exec_*` public names ([metrics.md](contracts/metrics.md), FR-030)
 
 **Checkpoint**: `cargo test -p spacestorage-conformance --features query-distributed` join/subscribe pass. Quickstart §§6–7 pass.
@@ -216,6 +221,14 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - [ ] T082 Confirm `002` tests that assumed `LocalEngine` nested-loop join either keep `LocalEngine` or run under `query-distributed` without forcing internodes on parser-only tests
 - [ ] T083 Sweep metrics after a smoke query: assert `008` series exist on `/metrics` for implemented paths (first-binary labels only where applicable)
 
+### Deferred complete-product IR routing (FR-002 / US1 A6 — `016` slice 6)
+
+> **Not first-binary.** When slice-6 handlers land, each MUST lower wire requests to shared `LogicalRequest` and execute with `engine=planner` (extend T027/T076 — do **not** invent a second engine). First-binary MVP is not blocked on these.
+
+- [ ] T084 [P] [US1] When `crates/handler-cassandra` exists (`016` slice 6), lower CQL MUST-subset verbs to `LogicalRequest` and execute through `PlannerEngine` (`engine=planner`) — same IR ownership as PG/Redis (FR-002 / US1 A6)
+- [ ] T085 [P] [US1] When `crates/handler-clickhouse` and `crates/handler-elasticsearch` exist (`016` slice 6), lower ClickHouse SQL and Elasticsearch MUST-subset search/ops to `LogicalRequest` through `PlannerEngine` (FR-002 / US1 A6; ES agg ceiling remains T076)
+- [ ] T086 [P] [US1] When `crates/handler-s3` and `crates/handler-webdav` exist (`016` slice 6), lower S3/WebDAV MUST-subset GET/PUT (and documented verbs) to `LogicalRequest` through `PlannerEngine` (FR-002 / US1 A6)
+
 ---
 
 ## Dependencies & Execution Order
@@ -225,19 +238,19 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 - **Setup (Phase 1)**: No dependencies — start immediately
 - **Foundational (Phase 2)**: Depends on Setup — **BLOCKS** all user stories
 - **User Stories (Phase 3–7)**: All depend on Foundational
-  - US1 (P1) 🎯 MVP — shared planner CRUD; can proceed without US2–US5
-  - US2 (P1) — coordination; builds on US1 execute path
-  - US3 (P2) — txns; needs US1 (+ US2 durability/forward for distributed commit scenarios)
-  - US4 (P2) — admission/COPY; admission can start after Foundational in parallel with US2 staff capacity; COPY needs complete-product dialect
+  - US1 (P1) 🎯 MVP part 1 — shared planner CRUD; then US2 + US4 admission before first-binary STOP
+  - US2 (P1) 🎯 MVP part 2 — coordination; builds on US1 execute path; first-binary owed
+  - US3 (P2) — txns; needs US1 (+ US2 durability/forward for distributed commit scenarios); complete-product / slice 8
+  - US4 (P2) — **split**: admission/spill 🎯 MVP part 3 (after Foundational; can parallel US2); COPY = complete-product dialect only
   - US5 (P3) — engines/subscribe; needs US2 ranking + timeout and US4 spill/admission for heavy plans
-- **Polish (Phase 8)**: Depends on stories intended for the release slice
+- **Polish (Phase 8)**: Depends on stories intended for the release slice; T084–T086 wait on `016` slice 6 handlers
 
 ### User Story Dependencies
 
-- **User Story 1 (P1) 🎯 MVP**: After Foundational only. Independently testable via planner smoke + equivalence.
-- **User Story 2 (P1)**: After Foundational; practically after US1 execute path exists. Independently testable via timeout/unavailability/forward suites.
+- **User Story 1 (P1) 🎯 MVP part 1**: After Foundational only. Independently testable via planner smoke + equivalence. Not sufficient alone for first-binary MVP.
+- **User Story 2 (P1) 🎯 MVP part 2**: After Foundational; practically after US1 execute path exists. Independently testable via timeout/unavailability/forward suites. First-binary owed (Session 2026-09-16).
 - **User Story 3 (P2)**: After Foundational; distributed-commit scenarios need US2 forward/durability + `004` 2PC. Independently testable on complete-product profile.
-- **User Story 4 (P2)**: After Foundational; COPY after complete-product handler dialect; prepared Bound already in US1. Independently testable via admission suite + COPY round-trip.
+- **User Story 4 (P2)**: After Foundational; **admission/spill** = first-binary MVP part 3 (can overlap US2); **COPY** after complete-product handler dialect; prepared Bound already in US1. Independently testable via admission suite + COPY round-trip.
 - **User Story 5 (P3)**: After Foundational; needs US2 ranking/timeout and preferably US4 admission/spill. Independently testable with `--features query-distributed`.
 
 ### Within Each User Story
@@ -303,43 +316,47 @@ Task: "T076 ES ceiling | T077 metrics increments"
 
 ## Implementation Strategy
 
-### MVP First (User Story 1 Only)
+### MVP First (User Story 1 + US2 + US4 admission/spill)
 
 1. Complete Phase 1: Setup
 2. Complete Phase 2: Foundational (**CRITICAL** — blocks all stories)
 3. Complete Phase 3: User Story 1 (shared planner CRUD + prepared + optional EXPLAIN)
-4. **STOP and VALIDATE**: `planner_smoke` + equivalence + quickstart §1; `engine=planner`
-5. Demo/ship first-binary path without MapReduce/BEGIN/COPY/subscribe
+4. Complete Phase 4: User Story 2 (timeout/quorum/cancel/unavailability/forward/ranking)
+5. Complete Phase 6 admission/spill (T056–T061, T064) — US4 first-binary half
+6. **STOP and VALIDATE** first-binary MVP: `planner_smoke` + equivalence + timeout/cancel/unavailability + admission + quickstart first-binary paths; `engine=planner`
+7. Demo/ship first-binary path **with** timeout, quorum, cancel, unavailability, and admission — without MapReduce/BEGIN/COPY/subscribe (US3, US4 COPY, US5 remain complete-product / slice 8)
 
 ### Incremental Delivery
 
 1. Setup + Foundational → types and `PlannerEngine` seam ready
-2. US1 → shared planner MVP
-3. US2 → fault-tolerant coordination (timeout/cancel/unavailability/forward/ranking)
-4. US4 admission/spill (can overlap late US2) → hard limits live
+2. US1 → shared planner CRUD (MVP part 1)
+3. US2 → fault-tolerant coordination (timeout/cancel/unavailability/forward/ranking) (MVP part 2)
+4. US4 admission/spill (can overlap late US2) → hard limits live (MVP part 3) — **first-binary STOP**
 5. US3 txns + US4 COPY on complete-product
 6. US5 join/agg/MapReduce/subscribe + metrics → slice 8 / complete acceptance
-7. Each story adds value without requiring a second protocol engine
+7. T084–T086 when `016` slice 6 handlers exist → complete-product IR routing (FR-002 / US1 A6)
+8. Each story adds value without requiring a second protocol engine
 
 ### Parallel Team Strategy
 
 1. Team completes Setup + Foundational together
 2. After Foundational:
    - Developer A: US1 then US2
-   - Developer B: US4 admission/spill (then COPY)
+   - Developer B: US4 admission/spill (then COPY on complete-product)
    - Developer C: US3 txn types/tests (integrate after US2 durability)
-3. After US2: staff US5 engines vs subscribe surfaces in parallel
+3. After US2 + US4 admission: staff US5 engines vs subscribe surfaces in parallel; T084–T086 when handlers exist
 
 ### Suggested wave order (from plan.md)
 
 1. IR + `PlannerEngine` CRUD + stages (US1 / Foundation)
-2. Admission, cancel, timeout, size limits, partial option (US2 + US4)
+2. Admission, cancel, timeout, size limits, partial option (US2 + US4 admission) — first-binary MVP wave
 3. Live `PlacementInfo` + fan-out + unavailability + clamp/reject + forward + ranking (US2)
 4. EXPLAIN + prepared bind (US1)
 5. Isolation + BEGIN/ROLLBACK + 2PC consume (US3)
-6. COPY (US4)
+6. COPY (US4 complete-product)
 7. Join/aggregate (US5)
 8. MapReduce/shuffle/subscribe + metrics sweep (US5 + Polish)
+9. Complete-product handler IR routing (T084–T086 / `016` slice 6)
 
 ---
 
@@ -348,8 +365,9 @@ Task: "T076 ES ceiling | T077 metrics increments"
 - [P] = different files, no dependencies on incomplete tasks
 - [USn] maps to spec user stories for traceability
 - Handlers MUST NOT depend on `exec` internals — only `QueryEngine` + `LogicalRequest`
-- First-binary dialect short-circuits COPY/BEGIN in the handler before `exec`
+- First-binary MVP = US1 + US2 + US4 admission/spill; first-binary dialect short-circuits COPY/BEGIN in the handler before `exec`
 - `LocalEngine` remains for RF=1 / `002` tests; default production path is `PlannerEngine`
 - Spill dirs are ephemeral under `{data_dir}/spill/<exec-id>/`; not restored across restart
 - Commit after each task or logical group; stop at any checkpoint to validate independently
 - Avoid: second IR, protocol-private engines, shuffle on client ports, `LISTEN`/`NOTIFY` as job wait, treating quorum as SQL isolation
+- Complete-product IR routing for CQL/ClickHouse/ES/S3/WebDAV is T084–T086 (`016` slice 6); not a first-binary gate

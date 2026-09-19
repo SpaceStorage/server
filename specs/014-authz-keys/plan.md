@@ -1,8 +1,8 @@
 # Implementation Plan: Authentication, Authorization, Encryption in Transit, Keys, and Audit
 
-**Branch**: `014-authz-keys` | **Date**: 2026-09-18 | **Spec**: [spec.md](spec.md)
+**Branch**: `014-authz-keys` | **Date**: 2026-09-19 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/014-authz-keys/spec.md` (Clarifications, Sessions 2026-09-15, 2026-09-16, 2026-09-18 — TLS not globally mandatory; master-key file wraps namespace KEKs; encryption opt-in; renameable logins; unbound `CLUSTER_ADMIN` refused on Redis/S3/WebDAV/ES; bootstrap creates first admin; first-binary cut; `CLUSTER_ADMIN` implies all verbs; live sessions re-check on later requests)
+**Input**: Feature specification from `specs/014-authz-keys/spec.md` (Clarifications, Sessions 2026-09-15, 2026-09-16, 2026-09-18, 2026-09-19 — TLS not globally mandatory; master-key file wraps namespace KEKs; encryption opt-in; renameable logins; unbound `CLUSTER_ADMIN` refused on Redis/S3/WebDAV/ES; bootstrap creates first admin; first-binary cut; `CLUSTER_ADMIN` implies all verbs; live sessions re-check on later requests; SCRAM default 16384; FR-017 implicit tenant grant)
 
 ## Summary
 
@@ -16,7 +16,7 @@ Own the **security mechanisms** that `007` left as names and opaque blobs: a clu
 
 **Primary Dependencies**: existing workspace (`tokio`, `async-trait`, `serde`/`serde_json`, `bytes`, `tracing`, `uuid`, `parking_lot`, `subtle`, `zeroize`, `rustls`/`tokio-rustls`). SCRAM: `pgwire` `server-api-scram` already in `002` plus `hmac`/`sha2`/`pbkdf2` (pure Rust) for Redis AUTH mapping to the same verifier. Envelope: existing `aes-gcm`, `chacha20poly1305`, `hkdf` in `003` `crypto`. No OpenSSL, no KMS SDK, no LDAP.
 
-**Storage**: Principal, KEK (wrapped), audit, and session-token hash rows are **cluster-log** bodies via `controlplane` (`{data_dir}/raft/cluster/`), same store as `007` roles/bindings. Master key is a **0600 file** referenced by path (`keys { master_key_file P; }`), never inlined, backupable by copying the file. Data-key wrapped blobs live with the container definition (namespace Raft, `003`) plus a `KeyRef` id. Unwrapped data keys are **process memory only** (`Zeroizing`), cached for hosted containers. Not tenant WAL.
+**Storage**: Principal, KEK (wrapped), audit, and session-token hash rows are **cluster-log** bodies via `controlplane` (`{data_dir}/raft/cluster/`), same store as `007` roles/bindings. Master key is a **0600 file** referenced by path (`keys { master_key_file P; }`), never inlined, backupable by copying the file. Data-key wrapped blobs live with the container definition (namespace Raft, `003`) plus a `KeyRef` id. Unwrapped data keys are **process memory only** (`Zeroizing`), cached for hosted containers; `CLUSTER_ADMIN` MAY unwrap for restore/admin outside that hosted-only cache. Not tenant WAL.
 
 **Testing**: `cargo test`. Unit: SCRAM verify, implication, generation bump, unbound Redis refuse, rewrap, audit fields. `crates/conformance`: bootstrap admin (SC-008); PG+Redis bind (SC-001); password change later-request refuse (SC-009); login rename (SC-007); join/key-rotate/failed-auth audit (SC-006); omit transport / TLS refuse plaintext (SC-003, already `001`); encrypted snapshot unreadable without master (SC-004); master rotate 0 rewrites (SC-005); custom-role create refused on first-binary profile (SC-002). Slice 7 feature `authz-custom`. Contract tests on `contracts/fixtures/`.
 
@@ -24,7 +24,7 @@ Own the **security mechanisms** that `007` left as names and opaque blobs: a clu
 
 **Project Type**: Cargo workspace extension — **one new library crate** `crates/authz` (`spacestorage-authz`). Envelope `KeyAuthority` implementation lands in existing `crates/crypto` (no new crypto crate). No new binary. Replaces `002` users-file authenticator and `003` interim `keyring_file`. Additive admin/CLI/config. `release-profile`: first binary compiles principal store + envelope + audit append; `authz-custom` is slice 7.
 
-**Performance Goals**: SCRAM verify < 5 ms p95 (PBKDF2 iterations documented, default 4096 for tests / 4096–65536 production). Permission check after session bind < 5 µs p99 (bitmask). Later-request re-check is a generation compare + verb bit, not a new SCRAM. Master rewrap of tens of namespace KEKs < 1 s. Leaderless KV p95 unchanged vs `004` when the principal is already authenticated.
+**Performance Goals**: SCRAM verify < 5 ms p95 (PBKDF2 iterations documented; normative default **16384**, tests MAY use **4096**, production MAY raise up to 65536). Permission check after session bind < 5 µs p99 (bitmask). Later-request re-check is a generation compare + verb bit, not a new SCRAM. Master rewrap of tens of namespace KEKs < 1 s. Leaderless KV p95 unchanged vs `004` when the principal is already authenticated.
 
 **Constraints**: Hostile tenants; operator runs all nodes (crash-stop). Unbound `CLUSTER_ADMIN` refused on Redis/S3/WebDAV/ES. Join secret MUST NOT authenticate as admin. Empty principal store MUST NOT leave admin open. Built-in roles immutable. `CLUSTER_ADMIN` implies all verbs. Later requests re-check; no forced disconnect. Key material never in logs/describe. First binary MUST NOT require custom roles, tenant `AUDIT_READ`, KMS, or data-key rewrite. UIs (`09`) get no extra verbs.
 
@@ -126,7 +126,7 @@ crates/
 | Replace `002` `auth.users_file` and `003` `keyring_file` | Spec requires cluster principal store and envelope KEKs | Leaving interim files would ship two credential/key systems in the first binary |
 | Audit source of truth in cluster log, not `08` | Clarify deferred; join/key-rotate must survive node death in the first binary before slice 9 sinks | `08`-only audit is off by default and not in the first binary |
 | Every node with the master file can unwrap any KEK (policy limits to hosted containers) | Operator runs all nodes; first binary has no per-node wrapping keys | Per-node wrapping would need a KMS or threshold keys (explicitly later) |
-| Implicit first-binary `{READ,WRITE,CREATE,DROP,CONFIGURE}` for bound tenants | Redis AUTH smoke cannot use unbound `admin` (clarify Q1); custom roles wait for slice 7 | Shipping custom RolePut in slices 1–5 would pull `007` quotas/custom into the first binary |
+| Implicit first-binary `{READ,WRITE,CREATE,DROP,CONFIGURE}` for bound tenants (**FR-017**) | Redis AUTH smoke cannot use unbound `admin` (clarify 2026-09-18 Q1 / 2026-09-19); custom roles wait for slice 7 | Shipping custom RolePut in slices 1–5 would pull `007` quotas/custom into the first binary |
 | Data-key rewrite via `010` | Spec FR-010 | Re-encrypting tables in slice 2 would pull the transform engine into the first binary |
 
 ## Constitution Check (post-design)

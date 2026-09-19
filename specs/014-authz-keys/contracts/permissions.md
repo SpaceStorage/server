@@ -1,6 +1,6 @@
 # Contract: Permission vocabulary
 
-**Feature**: `014-authz-keys` | Crate: `authz` | Spec: FR-003, FR-004 | Research R9, R13, R16 | Roles stored in `007`
+**Feature**: `014-authz-keys` | Crate: `authz` | Spec: FR-003, FR-004, FR-017 | Research R9, R13, R16 | Roles stored in `007`
 
 ## Closed verbs
 
@@ -23,7 +23,7 @@ A principal that has `CLUSTER_ADMIN` (builtin `admin`, or a slice-7 custom role 
 
 ## First-binary tenant default
 
-Until slice 7 custom roles exist, a namespace-bound principal that is **not** `admin` or `replication` receives an implicit grant `{READ, WRITE, CREATE, DROP, CONFIGURE}` **on that namespace only**. This is not a stored custom role. It exists so PG/Redis smoke can use a bound login (unbound `admin` is refused on Redis). Slice 7 **replaces** the implicit grant with explicit custom roles (empty custom set = authenticate only).
+(**FR-017**) Until slice 7 custom roles exist, a namespace-bound principal that is **not** `admin` or `replication` receives an implicit grant `{READ, WRITE, CREATE, DROP, CONFIGURE}` **on that namespace only**. This is not a stored custom role. It exists so PG/Redis smoke can use a bound login (unbound `admin` is refused on Redis). Slice 7 **replaces** the implicit grant with explicit custom roles (empty custom set = authenticate only).
 
 ## Slice 7 custom roles
 
