@@ -8,9 +8,11 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/)
 
-**Tests**: Requested. Spec Independent Tests + SC-001–SC-005 + [conformance-profile.md](contracts/conformance-profile.md) (`cargo test -p spacestorage-conformance --features first-binary`, `cargo test -p spacestorage-release-profile --test ledger`, `cargo test -p spacestorage-release-profile --test nongoals`). Write failing tests first.
+**Tests**: Requested. Spec Independent Tests + SC-001–SC-006 + [conformance-profile.md](contracts/conformance-profile.md) (`cargo test -p spacestorage-conformance --features first-binary`, `cargo test -p spacestorage-release-profile --test ledger`, `cargo test -p spacestorage-release-profile --test nongoals`). Write failing tests first.
 
 **Scope of this feature**: `016` ships a **release profile**, **slice ledger**, **starter configs**, and **conformance suite**. Protocol, type, WAL, membership, and quorum **behavior** stay in `001`–`015`. This feature **selects and proves** the slices 1–5 subset. Do not reimplement handlers or invent a second query engine.
+
+**Clarifications baked in (Session 2026-09-18)**: one-node starter `write_quorum ONE` (product/three-node stay TWO); `Document Store` admin-create + canonical-blob CRUD via PostgreSQL and/or Redis; PostgreSQL `BEGIN`/`COMMIT`/`ROLLBACK` all `0A000`; Redis type-specific verbs off the K/V MUST list MUST error (never silent success).
 
 **Sibling crates** (from `001`–`015` plans; create the seam, do not duplicate internals): `crates/config`, `crates/node`, `crates/spacestoraged`, `crates/spacestorage`, `crates/handler-postgresql`, `crates/handler-redis`, `crates/conformance`.
 
@@ -20,6 +22,13 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 - **[Story]**: [US1], [US2], [US3] on user-story phase tasks only
 - Every task includes an exact file path
 
+## Path Conventions
+
+- Workspace root: `Cargo.toml`, `crates/`, `docs/`, `scripts/`
+- Feature artifacts: `specs/016-mvp-and-nongoals/`
+
+---
+
 ## Phase 1: Setup (Shared Infrastructure)
 
 **Purpose**: Workspace member, crate skeleton, docs trees, Cargo feature inventory from [release-profile.md](contracts/release-profile.md)
@@ -27,7 +36,7 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 - [ ] T001 Create `crates/release-profile/Cargo.toml` (package `spacestorage-release-profile`, edition 2024) and `crates/release-profile/src/lib.rs` that `mod`s `slice`, `profile`, `handlers`, `types`, `nongoals`, `ledger`
 - [ ] T002 Add `crates/release-profile` to workspace `[workspace.members]` in `Cargo.toml` and encode `[features] default = ["first-binary"]` with `first-binary = ["handler-postgresql", "handler-redis"]` and `complete-product` pulling `handler-cassandra`, `handler-elasticsearch`, `handler-clickhouse`, `handler-s3`, `handler-webdav` exactly as [release-profile.md](contracts/release-profile.md)
 - [ ] T003 [P] Create `docs/milestones/README.md` (how to record a slice milestone; tags MAY be `slices-1-5` not `v1.0.0`) and `docs/milestones/000-template.md` requiring a `## Deferred` heading per [milestone-record.md](contracts/milestone-record.md)
-- [ ] T004 [P] Copy [contracts/fixtures/first-binary-one-node.conf](contracts/fixtures/first-binary-one-node.conf) to `docs/examples/first-binary-one-node.conf` and the three-node set to `docs/examples/first-binary-three-node/{a,b,c}.conf`
+- [ ] T004 [P] Copy [contracts/fixtures/first-binary-one-node.conf](contracts/fixtures/first-binary-one-node.conf) (must retain `query_defaults { write_quorum ONE; }`) to `docs/examples/first-binary-one-node.conf` and the three-node set (`write_quorum TWO`) to `docs/examples/first-binary-three-node/{a,b,c}.conf`
 
 ---
 
@@ -51,39 +60,43 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 ## Phase 3: User Story 1 - First shippable binary (Priority: P1) 🎯 MVP
 
-**Goal**: Encode and prove slices 1–5 DoD: 1-node and 3-node starters with ladder `[az]`; types KV / Relational Table / Document Store; PostgreSQL smoke without COPY/BEGIN; Redis MUST list on `K/V Store` only; write TWO / read ONE durable WAL acks; UUID + join secret; always-on `internode`/`replication`; explicit `tls` or `plaintext;`; admin CLI/HTTP + drain; `/metrics`; master-key file; `multi_active=on` create refused; Cassandra/ES/CH/S3/WebDAV absent (`entrypoint_unknown_handler`). Not a “v1” of the seven-protocol matrix.
+**Goal**: Encode and prove slices 1–5 DoD: 1-node (starter `write_quorum ONE`) and 3-node (product `write_quorum TWO`) with ladder `[az]`; types KV / Relational Table / Document Store (admin-create + canonical-blob CRUD via PG and/or Redis); PostgreSQL smoke without COPY; `BEGIN`/`COMMIT`/`ROLLBACK` all `0A000`; Redis MUST list on `K/V Store` only — off-list verbs (`HGET`, `JSON.GET`, …) error never silent success; product write TWO / read ONE durable WAL acks (TWO ≠ `min(2, live replicas)`); UUID + join secret; always-on `internode`/`replication`; explicit `tls` or `plaintext;`; admin CLI/HTTP + drain; `/metrics`; master-key file; `multi_active=on` create refused; Cassandra/ES/CH/S3/WebDAV absent (`entrypoint_unknown_handler`). Not a “v1” of the seven-protocol matrix.
 
-**Independent Test**: Bring up 1-node then 3-node from starter examples; PG and Redis smokes; kill one node; write at TWO; restart; confirm restore. `cargo test -p spacestorage-conformance --features first-binary`.
+**Independent Test**: Bring up 1-node (write ONE) then 3-node (write TWO) from starter examples; PG and Redis smokes; admin-create a `Document Store` and CRUD as canonical blob via PG and/or Redis; kill one node; write at TWO; restart; confirm restore. `cargo test -p spacestorage-conformance --features first-binary`.
 
 ### Tests for User Story 1 ⚠️
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T012 [P] [US1] Add G1/G2 tests in `crates/conformance/tests/first_binary.rs`: validate+start [first-binary-one-node.conf](contracts/fixtures/first-binary-one-node.conf) → `ready`, `internode`+`replication` bound on loopback, `/metrics` scrapeable; omitted-transport fixture fails; bootstrap A and join B/C from three-node fixtures → membership identical, ladder `[az]` with three values
-- [ ] T013 [P] [US1] Add G3/G4 tests in `crates/conformance/tests/dialect_pg.rs`: `tokio-postgres` CREATE/INSERT/SELECT/UPDATE/DELETE/DROP simple+extended auto-commit succeed; `COPY` and `BEGIN` return PostgreSQL `ERRCODE_FEATURE_NOT_SUPPORTED` (`0A000`) with no data change
+- [ ] T012 [P] [US1] Add G1/G2 tests in `crates/conformance/tests/first_binary.rs`: validate+start [first-binary-one-node.conf](contracts/fixtures/first-binary-one-node.conf) → `ready`, `internode`+`replication` bound on loopback, `/metrics` scrapeable, effective `write_quorum ONE`; omitted-transport fixture fails; bootstrap A and join B/C from three-node fixtures → membership identical, ladder `[az]` with three values, effective `write_quorum TWO`
+- [ ] T013 [P] [US1] Add G3/G4 tests in `crates/conformance/tests/dialect_pg.rs`: `tokio-postgres` CREATE/INSERT/SELECT/UPDATE/DELETE/DROP simple+extended auto-commit succeed; `COPY`, `BEGIN`, `COMMIT`, and `ROLLBACK` each return PostgreSQL `ERRCODE_FEATURE_NOT_SUPPORTED` (`0A000`) with no data change and no empty-transaction notices
 - [ ] T014 [P] [US1] Add G5 tests in `crates/conformance/tests/dialect_redis.rs`: AUTH, PING, GET, SET, DEL, EXISTS, SCAN, SELECT as no-op, TTL/EXPIRE/PTTL mapped to container TTL on a `K/V Store` only
-- [ ] T015 [P] [US1] Add G8 tests in `crates/conformance/tests/handlers_absent.rs`: [unknown-handler-cassandra.conf](contracts/fixtures/invalid/unknown-handler-cassandra.conf) → `entrypoint_unknown_handler{handler=cassandra, known=[admin, admin-http, internode, postgresql, redis, replication]}`; elasticsearch/clickhouse/s3/webdav named in config fail the same way
-- [ ] T016 [P] [US1] Add G9 tests in `crates/conformance/tests/multi_active.rs`: catalog create with `multi_active=on` → `multi_active_unsupported`; flag default off
-- [ ] T017 [P] [US1] Add G6/G7 tests in `crates/conformance/tests/first_binary.rs` (or `quorum_restore.rs`): default write TWO with one node killed succeeds (two durable WAL acks in source `quorum_domain`); kill a second node → TWO fails; restart killed node → previous TWO write readable
-- [ ] T018 [P] [US1] Add G10 drain test in `crates/conformance/tests/first_binary.rs`: drain one member → no new tenant connections; in-flight bound by drain timeout
-- [ ] T019 [P] [US1] Add config unit tests in `crates/config/src/validate.rs` (or `crates/config/tests/first_binary.rs`) that [omitted-transport.conf](contracts/fixtures/invalid/omitted-transport.conf) yields `transport_undeclared` and a missing `internode`/`replication` entrypoint yields `internode_required` / `replication_required`
+- [ ] T015 [P] [US1] Add G5b tests in `crates/conformance/tests/dialect_redis.rs`: `HGET` and `JSON.GET` (and similar off-list type-specific verbs) return a Redis error (unknown command or not-supported); never success or no-op (SC-006)
+- [ ] T016 [P] [US1] Add G11 tests in `crates/conformance/tests/document_store.rs`: admin-create persistent `Document Store`; read/write as canonical blob via PostgreSQL and/or Redis; assert `JSON.GET` still errors on that container
+- [ ] T017 [P] [US1] Add G8 tests in `crates/conformance/tests/handlers_absent.rs`: [unknown-handler-cassandra.conf](contracts/fixtures/invalid/unknown-handler-cassandra.conf) → `entrypoint_unknown_handler{handler=cassandra, known=[admin, admin-http, internode, postgresql, redis, replication]}`; elasticsearch/clickhouse/s3/webdav named in config fail the same way
+- [ ] T018 [P] [US1] Add G9 tests in `crates/conformance/tests/multi_active.rs`: catalog create with `multi_active=on` → `multi_active_unsupported`; flag default off
+- [ ] T019 [P] [US1] Add G6/G7 tests in `crates/conformance/tests/first_binary.rs` (or `quorum_restore.rs`): product default write TWO with one node killed succeeds (two durable WAL acks in source `quorum_domain`); kill a second node → TWO fails (TWO is not `min(2, live replicas)`); restart killed node → previous TWO write readable
+- [ ] T020 [P] [US1] Add G10 drain test in `crates/conformance/tests/first_binary.rs`: drain one member → no new tenant connections; in-flight bound by drain timeout
+- [ ] T021 [P] [US1] Add config unit tests in `crates/config/src/validate.rs` (or `crates/config/tests/first_binary.rs`) that [omitted-transport.conf](contracts/fixtures/invalid/omitted-transport.conf) yields `transport_undeclared` and a missing `internode`/`replication` entrypoint yields `internode_required` / `replication_required`; assert one-node fixture resolves `write_quorum ONE` and three-node fixtures resolve `TWO`
 
 ### Implementation for User Story 1
 
-- [ ] T020 [US1] Register only `ReleaseProfile::FirstBinary` handlers in `crates/node/src/handler/mod.rs` via Cargo features; default `cargo build -p spacestoraged` MUST NOT link cassandra/elasticsearch/clickhouse/s3/webdav
-- [ ] T021 [US1] In `crates/config/src/validate.rs` and `crates/node` startup, a config naming a handler not in `HandlerRegistry` fails collect-all `entrypoint_unknown_handler{handler, known}` (`001` reuse)
-- [ ] T022 [US1] Reject every entrypoint missing `tls {…}` and `plaintext;` with `transport_undeclared` in `crates/config/src/validate.rs` (`014` reuse)
-- [ ] T023 [US1] Require `internode` and `replication` always listening for this profile (default bind `127.0.0.1`) via `internode_required` / `replication_required` in `crates/config/src/validate.rs`; join of remotes still requires a cluster address (`012`)
-- [ ] T024 [US1] Require `cluster { master_key_file <path>; }` with mode ≤ 0600 (`master_key_required` / `master_key_unreadable`) in `crates/config/src/validate.rs` and `crates/node` startup; no required external KMS
-- [ ] T025 [US1] Default missing `topology_ladder` to `[az]` at resolve time (`topology_ladder_required` if still missing after resolve) in `crates/config/src/resolve.rs`; starter fixtures already declare `topology_ladder az` and `quorum_domain lab`
-- [ ] T026 [US1] Refuse container create with `multi_active=on` as `multi_active_unsupported` in the catalog create path (`crates/node` / types crate from `003`/`012`); catalog flag remains, default off; create never leaves `creating`
-- [ ] T027 [US1] Select `DialectProfile::FirstBinary` for PostgreSQL in `crates/handler-postgresql` from `spacestorage-release-profile`: wire 3.0, SCRAM, simple+extended, INSERT/SELECT/UPDATE/DELETE, CREATE/DROP table, auto-commit; `BEGIN`/`COMMIT`/`ROLLBACK`/`COPY` → `feature_not_supported` `0A000` (recommended: not-supported for all three txn verbs so the dialect is one rule)
-- [ ] T028 [US1] Select first-binary Redis dialect in `crates/handler-redis`: AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT-noop/TTL on `K/V Store`; other types canonical blob only; type-specific verbs off KV not required
-- [ ] T029 [US1] Include compile-time `"release_profile": "first-binary"` and registered `handlers` in `spacestorage status --output json` and admin `GET /v1/status` (`crates/admin-proto` + `crates/node/src/admin`); there is no config knob that enables Cassandra without rebuilding with `complete-product`
-- [ ] T030 [US1] Expose global `/metrics` for implemented paths only (runtime/buffer/`node_state`, postgresql/redis traffic, WAL and replication ack counters used by TWO) via the `008` exposition seam; do not emit placeholder series for unimplemented families
-- [ ] T031 [US1] Ensure node `ready` for this profile additionally requires: both cluster handlers bound, master-key readable, every entrypoint has transport, membership path bootstrap or joined (`crates/node/src/lifecycle.rs`)
+- [ ] T022 [US1] Register only `ReleaseProfile::FirstBinary` handlers in `crates/node/src/handler/mod.rs` via Cargo features; default `cargo build -p spacestoraged` MUST NOT link cassandra/elasticsearch/clickhouse/s3/webdav
+- [ ] T023 [US1] In `crates/config/src/validate.rs` and `crates/node` startup, a config naming a handler not in `HandlerRegistry` fails collect-all `entrypoint_unknown_handler{handler, known}` (`001` reuse)
+- [ ] T024 [US1] Reject every entrypoint missing `tls {…}` and `plaintext;` with `transport_undeclared` in `crates/config/src/validate.rs` (`014` reuse)
+- [ ] T025 [US1] Require `internode` and `replication` always listening for this profile (default bind `127.0.0.1`) via `internode_required` / `replication_required` in `crates/config/src/validate.rs`; join of remotes still requires a cluster address (`012`)
+- [ ] T026 [US1] Require `cluster { master_key_file <path>; }` with mode ≤ 0600 (`master_key_required` / `master_key_unreadable`) in `crates/config/src/validate.rs` and `crates/node` startup; no required external KMS
+- [ ] T027 [US1] Default missing `topology_ladder` to `[az]` at resolve time (`topology_ladder_required` if still missing after resolve) in `crates/config/src/resolve.rs`; starter fixtures already declare `topology_ladder az` and `quorum_domain lab`
+- [ ] T028 [US1] Refuse container create with `multi_active=on` as `multi_active_unsupported` in the catalog create path (`crates/node` / types crate from `003`/`012`); catalog flag remains, default off; create never leaves `creating`
+- [ ] T029 [US1] Wire product default write quorum TWO / read ONE in `crates/config` query defaults; honor one-node starter `query_defaults.write_quorum ONE` without reinterpreting TWO as `min(2, live replicas)` (FR-009) in `crates/node` / placement quorum path from `004`/`012`
+- [ ] T030 [US1] Select `DialectProfile::FirstBinary` for PostgreSQL in `crates/handler-postgresql` from `spacestorage-release-profile`: wire 3.0, SCRAM, simple+extended, INSERT/SELECT/UPDATE/DELETE, CREATE/DROP table, auto-commit; `BEGIN`, `COMMIT`, `ROLLBACK`, and `COPY` each → `feature_not_supported` `0A000` (no empty-transaction notices)
+- [ ] T031 [US1] Select first-binary Redis dialect in `crates/handler-redis`: AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT-noop/TTL on `K/V Store`; other types (incl. Document Store) canonical blob only; type-specific verbs off the MUST list (`HGET`, `JSON.GET`, …) MUST return Redis error (unknown command or not-supported), never success or no-op
+- [ ] T032 [US1] Enable admin-create of `Document Store` and canonical-blob read/write via PostgreSQL and/or Redis for that type in the admin/catalog + protocol mapping path (`crates/node` admin create + `002` blob mapping); native document verbs MUST NOT be required
+- [ ] T033 [US1] Include compile-time `"release_profile": "first-binary"` and registered `handlers` in `spacestorage status --output json` and admin `GET /v1/status` (`crates/admin-proto` + `crates/node/src/admin`); there is no config knob that enables Cassandra without rebuilding with `complete-product`
+- [ ] T034 [US1] Expose global `/metrics` for implemented paths only (runtime/buffer/`node_state`, postgresql/redis traffic, WAL and replication ack counters used by TWO) via the `008` exposition seam; do not emit placeholder series for unimplemented families
+- [ ] T035 [US1] Ensure node `ready` for this profile additionally requires: both cluster handlers bound, master-key readable, every entrypoint has transport, membership path bootstrap or joined (`crates/node/src/lifecycle.rs`)
 
-**Checkpoint**: `cargo test -p spacestorage-conformance --features first-binary` passes G1–G10 against in-process nodes. `spacestorage status --output json` reports `"first-binary"`. Unknown-handler and omitted-transport fixtures fail as specified. Do not brand this artifact as seven-protocol “v1”.
+**Checkpoint**: `cargo test -p spacestorage-conformance --features first-binary` passes G1–G11 against in-process nodes. `spacestorage status --output json` reports `"first-binary"`. Unknown-handler and omitted-transport fixtures fail as specified. Do not brand this artifact as seven-protocol “v1”.
 
 ---
 
@@ -95,16 +108,16 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T032 [P] [US2] Add `crates/release-profile/tests/ledger.rs` that reads `docs/milestones/*.yaml`: any record with `implemented: [1,2,3,4,5]` MUST have deferred ids `6,7,8,9,10,11` and `still_owed: true` on each; `still_owed: false` → `deferred_marked_cancelled`; holes → `slice_gap`; `profile: complete-product` with missing slices → `profile_incomplete`
-- [ ] T033 [P] [US2] Add a fixture `docs/milestones/fixtures/missing-deferred.yaml` that omits slice 8 and assert the ledger test fails with `deferred_missing`
-- [ ] T034 [P] [US2] Add `scripts/check-milestone.sh` wrapping `cargo test -p spacestorage-release-profile --test ledger` so a 1–5 changelog without deferred 6–11 fails CI (SC-004)
+- [ ] T036 [P] [US2] Add `crates/release-profile/tests/ledger.rs` that reads `docs/milestones/*.yaml`: any record with `implemented: [1,2,3,4,5]` MUST have deferred ids `6,7,8,9,10,11` and `still_owed: true` on each; `still_owed: false` → `deferred_marked_cancelled`; holes → `slice_gap`; `profile: complete-product` with missing slices → `profile_incomplete`
+- [ ] T037 [P] [US2] Add a fixture `docs/milestones/fixtures/missing-deferred.yaml` that omits slice 8 and assert the ledger test fails with `deferred_missing`
+- [ ] T038 [P] [US2] Add `scripts/check-milestone.sh` wrapping `cargo test -p spacestorage-release-profile --test ledger` so a 1–5 changelog without deferred 6–11 fails CI (SC-004)
 
 ### Implementation for User Story 2
 
-- [ ] T035 [P] [US2] Encode slice→intent map from [slices.md](contracts/slices.md) as `SliceId::intent_files()` in `crates/release-profile/src/slice.rs` (1→`001`; 2→`003`,`013`,`014` master-key subset; 3→`002` postgresql; 4→`002` redis + `015` KV MUST; 5→`011`,`012`,`004` quorum; 6→ remaining handlers at `015` MUST; 7→`006`,`007`,`014`; 8→`005`; 9→`008`; 10→`010`,`013`; 11→`009`)
-- [ ] T036 [US2] Parse `docs/milestones/<nnn>-<slug>.yaml` in `crates/release-profile/src/ledger.rs` to the schema in [milestone-record.md](contracts/milestone-record.md) (`slug`, `profile: first-binary|complete-product`, `implemented`, `deferred: [{id, still_owed, reason}]`, `changelog_ref`); markdown sibling MUST contain `## Deferred` listing the same ids
-- [ ] T037 [US2] Add `docs/milestones/001-first-binary.yaml` and `docs/milestones/001-first-binary.md` for the slices 1–5 ship: `profile: first-binary`, `implemented: [1,2,3,4,5]`, deferred 6–11 each `still_owed: true` with reasons from the contract example; `changelog_ref: docs/milestones/001-first-binary.md`
-- [ ] T038 [US2] Document in `docs/milestones/README.md` that skipping a later slice in an implementation milestone is `DeferredSlice`, not deletion of `.specify/intent/01`–`15`; slice 6 gate is the **`015` complete-product MUST column**, not [dialect-first-binary.md](contracts/dialect-first-binary.md)
+- [ ] T039 [P] [US2] Encode slice→intent map from [slices.md](contracts/slices.md) as `SliceId::intent_files()` in `crates/release-profile/src/slice.rs` (1→`001`; 2→`003`,`013`,`014` master-key subset; 3→`002` postgresql; 4→`002` redis + `015` KV MUST; 5→`011`,`012`,`004` quorum; 6→ remaining handlers at `015` MUST; 7→`006`,`007`,`014`; 8→`005`; 9→`008`; 10→`010`,`013`; 11→`009`)
+- [ ] T040 [US2] Parse `docs/milestones/<nnn>-<slug>.yaml` in `crates/release-profile/src/ledger.rs` to the schema in [milestone-record.md](contracts/milestone-record.md) (`slug`, `profile: first-binary|complete-product`, `implemented`, `deferred: [{id, still_owed, reason}]`, `changelog_ref`); markdown sibling MUST contain `## Deferred` listing the same ids
+- [ ] T041 [US2] Add `docs/milestones/001-first-binary.yaml` and `docs/milestones/001-first-binary.md` for the slices 1–5 ship: `profile: first-binary`, `implemented: [1,2,3,4,5]`, deferred 6–11 each `still_owed: true` with reasons from the contract example; `changelog_ref: docs/milestones/001-first-binary.md`
+- [ ] T042 [US2] Document in `docs/milestones/README.md` that skipping a later slice in an implementation milestone is `DeferredSlice`, not deletion of `.specify/intent/01`–`15`; slice 6 gate is the **`015` complete-product MUST column**, not [dialect-first-binary.md](contracts/dialect-first-binary.md)
 
 **Checkpoint**: `cargo test -p spacestorage-release-profile --test ledger` passes on `001-first-binary.yaml` and fails on the missing-deferred fixture. Intent files `01`–`15` are untouched.
 
@@ -118,14 +131,14 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T039 [P] [US3] Add `crates/release-profile/tests/nongoals.rs` that greps owning spec paths from [non-goals.md](contracts/non-goals.md) for each `ProductNonGoal` id (or its statement); missing mention → `nongoal_unspecified{id, spec}`
-- [ ] T040 [P] [US3] Add a negative fixture (test-only string or temp file) proving the audit fails when `SqlSerializable` is absent from a cited spec path
+- [ ] T043 [P] [US3] Add `crates/release-profile/tests/nongoals.rs` that greps owning spec paths from [non-goals.md](contracts/non-goals.md) for each `ProductNonGoal` id (or its statement); missing mention → `nongoal_unspecified{id, spec}`
+- [ ] T044 [P] [US3] Add a negative fixture in `crates/release-profile/tests/fixtures/nongoal-missing-serializable.md` (or inline temp file in `crates/release-profile/tests/nongoals.rs`) proving the audit fails when `SqlSerializable` is absent from a cited spec path
 
 ### Implementation for User Story 3
 
-- [ ] T041 [P] [US3] Complete `crates/release-profile/src/nongoals.rs` `REQUIRED_MENTIONS: &[(ProductNonGoal, &[&str])]` with paths: second query engine → `specs/002-protocol-drivers/spec.md`, `specs/005-query-execution/spec.md`; drop-in replacement → `specs/015-compatibility-and-limits/spec.md`; Kafka as stored log → `specs/003-type-system/spec.md`, `specs/008-observability/spec.md`, `specs/009-admin-ui-ingest/spec.md`; human conflict / Byzantine → `specs/012-internode-and-time/spec.md`; CPU hard isolation → `specs/015-compatibility-and-limits/spec.md`, `specs/007-tenancy-security/spec.md`; native client protocol → `.specify/memory/constitution.md`, `specs/002-protocol-drivers/spec.md`; SERIALIZABLE → `specs/015-compatibility-and-limits/spec.md`, `specs/005-query-execution/spec.md`; `multi_active=on` → `specs/012-internode-and-time/spec.md`, `specs/016-mvp-and-nongoals/spec.md`
-- [ ] T042 [US3] Confirm (and if a cited spec is silent, add an Out of Scope bullet **only** in that spec’s Out of Scope section — do not rewrite `01`–`15` interiors) that Kafka is ingest (`009`) + outbound logging (`008`) with Log Stream as the type; `SERIALIZABLE` and a second query engine are refused; no `handler spacestorage` in inventories
-- [ ] T043 [US3] Keep later-not-first items (UIs/ingest, full L0 creatable-as-workflow, planetary production examples, external KMS, mixed-version upgrade, federated/union at planetary scale, billing formula, GDPR workflows, CDC beyond Log Stream + WAL) **out** of `ProductNonGoal` and **in** deferred slices / `01`–`15` as [non-goals.md](contracts/non-goals.md) “Later, not first binary”
+- [ ] T045 [P] [US3] Complete `crates/release-profile/src/nongoals.rs` `REQUIRED_MENTIONS: &[(ProductNonGoal, &[&str])]` with paths: second query engine → `specs/002-protocol-drivers/spec.md`, `specs/005-query-execution/spec.md`; drop-in replacement → `specs/015-compatibility-and-limits/spec.md`; Kafka as stored log → `specs/003-type-system/spec.md`, `specs/008-observability/spec.md`, `specs/009-admin-ui-ingest/spec.md`; human conflict / Byzantine → `specs/012-internode-and-time/spec.md`; CPU hard isolation → `specs/015-compatibility-and-limits/spec.md`, `specs/007-tenancy-security/spec.md`; native client protocol → `.specify/memory/constitution.md`, `specs/002-protocol-drivers/spec.md`; SERIALIZABLE → `specs/015-compatibility-and-limits/spec.md`, `specs/005-query-execution/spec.md`; `multi_active=on` → `specs/012-internode-and-time/spec.md`, `specs/016-mvp-and-nongoals/spec.md`
+- [ ] T046 [US3] Confirm (and if a cited spec is silent, add an Out of Scope bullet **only** in that spec’s Out of Scope section — do not rewrite interiors) across `specs/002-protocol-drivers/spec.md`, `specs/003-type-system/spec.md`, `specs/005-query-execution/spec.md`, `specs/008-observability/spec.md`, `specs/009-admin-ui-ingest/spec.md`, `specs/012-internode-and-time/spec.md`, `specs/015-compatibility-and-limits/spec.md` that Kafka is ingest (`009`) + outbound logging (`008`) with Log Stream as the type; `SERIALIZABLE` and a second query engine are refused; no `handler spacestorage` in inventories
+- [ ] T047 [US3] Keep later-not-first items (UIs/ingest, full L0 creatable-as-workflow, planetary production examples, external KMS, mixed-version upgrade, federated/union at planetary scale, billing formula, GDPR workflows, CDC beyond Log Stream + WAL) **out** of `ProductNonGoal` and **in** deferred slices / `01`–`15` as [non-goals.md](contracts/non-goals.md) “Later, not first binary”
 
 **Checkpoint**: `cargo test -p spacestorage-release-profile --test nongoals` passes. Non-goals are not silent backlog; later-not-first is not classified as non-goals.
 
@@ -135,11 +148,11 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 **Purpose**: Operator path, CI isolation, naming discipline
 
-- [ ] T044 [P] Align `docs/examples/` and [quickstart.md](quickstart.md) ports/paths (`5432`–`5434`, `6379`–`6381`, `7700`–`7703`, `7800`–`7803`, `7900`–`7903`) so an operator can finish 1-node then 3-node + PG/Redis smokes in under 60 minutes (SC-001)
-- [ ] T045 [P] Document in `docs/milestones/README.md` that default CI is `--features first-binary` (or default features) and a `complete-product` job MUST NOT be a merge gate for slices 1–5
-- [ ] T046 Ensure no published artifact, changelog title, or crate description calls the first binary a “v1” of the seven-protocol matrix (FR-002) — prefer `slices-1-5` / `first-binary`
-- [ ] T047 Run [quickstart.md](quickstart.md) steps 2, 3, 4 (`BEGIN`/`COPY`), 5, 8 against the in-process or loopback binary and record the command set in `crates/conformance` so SC-001–SC-003 stay executable
-- [ ] T048 [P] Add `rustfmt`/`clippy` clean pass on `crates/release-profile` and new conformance tests
+- [ ] T048 [P] Align `docs/examples/` and [quickstart.md](quickstart.md) ports/paths (`5432`–`5434`, `6379`–`6381`, `7700`–`7703`, `7800`–`7803`, `7900`–`7903`) so an operator can finish 1-node (write ONE) then 3-node (write TWO) + PG/Redis smokes + Document Store blob CRUD in under 60 minutes (SC-001)
+- [ ] T049 [P] Document in `docs/milestones/README.md` that default CI is `--features first-binary` (or default features) and a `complete-product` job MUST NOT be a merge gate for slices 1–5
+- [ ] T050 Ensure no published artifact, changelog title, or crate description calls the first binary a “v1” of the seven-protocol matrix (FR-002) — prefer `slices-1-5` / `first-binary`
+- [ ] T051 Run [quickstart.md](quickstart.md) steps covering validate rejects, 1-node start, PG smoke (`BEGIN`/`COMMIT`/`ROLLBACK`/`COPY` → `0A000`), Redis MUST + `HGET` error, Document Store blob (step 5b), and 3-node kill-one against the in-process or loopback binary; record the command set in `crates/conformance` so SC-001–SC-003 and SC-006 stay executable
+- [ ] T052 [P] Add `rustfmt`/`clippy` clean pass on `crates/release-profile` and new conformance tests
 
 ---
 
@@ -150,14 +163,14 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 - **Setup (Phase 1)**: No dependencies — start immediately (workspace member + docs trees)
 - **Foundational (Phase 2)**: Depends on Setup — **BLOCKS** all user stories
 - **User Stories (Phase 3–5)**: All depend on Foundational
-  - US1 (first binary wiring + conformance) needs sibling crates from `001`–`005`/`011`–`014` for G1–G10 to go green; profile types do not
+  - US1 (first binary wiring + conformance) needs sibling crates from `001`–`005`/`011`–`014` for G1–G11 to go green; profile types do not
   - US2 (ledger) is independent of a running node once T009 exists
   - US3 (nongoal audit) is independent of a running node once T008 exists
-- **Polish (Phase 6)**: Depends on US1–US3 as needed for quickstart; T045/T046 can start after US2 docs exist
+- **Polish (Phase 6)**: Depends on US1–US3 as needed for quickstart; T049/T050 can start after US2 docs exist
 
 ### User Story Dependencies
 
-- **User Story 1 (P1) 🎯 MVP**: After Foundational. Uses `HandlerBuildSet` / `TypeRequirement` / dialect selection. Independent Test = first-binary conformance.
+- **User Story 1 (P1) 🎯 MVP**: After Foundational. Uses `HandlerBuildSet` / `TypeRequirement` / dialect selection. Independent Test = first-binary conformance (incl. write-ONE starter, Document Store blob, PG txn trio, Redis off-list errors).
 - **User Story 2 (P1)**: After Foundational. Uses `SliceId` / `MilestoneRecord`. Independently testable via `--test ledger` even if US1 node tests are red.
 - **User Story 3 (P1)**: After Foundational. Uses `ProductNonGoal`. Independently testable via `--test nongoals`.
 
@@ -172,9 +185,9 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 - T003, T004 after T001
 - T006, T007, T008 after T005 starts (different files)
-- T012–T019 all `[P]` once Foundational is done
-- T032–T034 and T039–T040 in parallel with US1 tests
-- T035 and T041 in parallel (different files)
+- T012–T021 all `[P]` once Foundational is done
+- T036–T038 and T043–T044 in parallel with US1 tests
+- T039 and T045 in parallel (different files)
 - US2 and US3 can be fully implemented while US1 waits on sibling `001`–`015` crates
 
 ---
@@ -183,29 +196,32 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 ```bash
 # Launch all US1 tests together (must fail until wiring exists):
-Task: "G1/G2 first_binary.rs"
-Task: "G3/G4 dialect_pg.rs"
-Task: "G5 dialect_redis.rs"
+Task: "G1/G2 first_binary.rs (write ONE / write TWO)"
+Task: "G3/G4 dialect_pg.rs (COPY/BEGIN/COMMIT/ROLLBACK → 0A000)"
+Task: "G5 dialect_redis.rs MUST list"
+Task: "G5b dialect_redis.rs HGET/JSON.GET error"
+Task: "G11 document_store.rs admin-create + blob CRUD"
 Task: "G8 handlers_absent.rs"
 Task: "G9 multi_active.rs"
-Task: "G6/G7 quorum restore"
+Task: "G6/G7 quorum restore (TWO ≠ min live)"
 Task: "G10 drain"
-Task: "config omitted-transport / cluster-ports"
+Task: "config omitted-transport / cluster-ports / quorum resolve"
 
-# Then wiring (order: registry → validate → dialects → status/metrics):
-Task: "T020 handler feature registration"
-Task: "T021–T025 config/node profile checks"
-Task: "T026–T028 multi_active + PG/Redis dialects"
-Task: "T029–T031 status, metrics, ready"
+# Then wiring (order: registry → validate → quorum → dialects → Document Store → status/metrics):
+Task: "T022 handler feature registration"
+Task: "T023–T028 config/node profile checks"
+Task: "T029 write ONE starter / product TWO"
+Task: "T030–T032 PG/Redis dialects + Document Store blob"
+Task: "T033–T035 status, metrics, ready"
 ```
 
 ## Parallel Example: User Stories 2 and 3 (no running node)
 
 ```bash
-Task: "T032–T034 ledger tests + check-milestone.sh"
-Task: "T039–T040 nongoals tests"
-Task: "T035 slice intent map"
-Task: "T041 REQUIRED_MENTIONS"
+Task: "T036–T038 ledger tests + check-milestone.sh"
+Task: "T043–T044 nongoals tests"
+Task: "T039 slice intent map"
+Task: "T045 REQUIRED_MENTIONS"
 ```
 
 ---
@@ -216,9 +232,9 @@ Task: "T041 REQUIRED_MENTIONS"
 
 1. Complete Phase 1: Setup
 2. Complete Phase 2: Foundational (CRITICAL)
-3. Complete Phase 3: User Story 1 (conformance G1–G10 + profile wiring)
+3. Complete Phase 3: User Story 1 (conformance G1–G11 + profile wiring)
 4. **STOP and VALIDATE**: `cargo test -p spacestorage-conformance --features first-binary`
-5. Demo the [quickstart.md](quickstart.md) 1-node path
+5. Demo the [quickstart.md](quickstart.md) 1-node path (write ONE + Document Store blob)
 
 ### Incremental Delivery
 
@@ -243,5 +259,6 @@ Task: "T041 REQUIRED_MENTIONS"
 - [US1]/[US2]/[US3] map to spec stories (all P1; US1 is the first-binary MVP)
 - Do not implement Cassandra/ES/CH/S3/WebDAV, Raft, MapReduce, UIs, or Kafka ingest in this feature — those are deferred slices 6–11
 - Do not treat product non-goals as deferred slices
+- Product write quorum stays TWO; one-node starter override is ONE; never reinterpret TWO as `min(2, live replicas)`
 - Verify tests fail before implementing
 - Stop at any checkpoint to validate a story independently
