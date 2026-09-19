@@ -72,7 +72,9 @@ different port. Drivers (for example PostgreSQL) MUST know about all
 datatypes and their features and MUST use all types via an abstract
 interface. "Unmodified **client**" (psql, redis-cli, …) on the
 documented MUST verb list is the promise; unmodified **applications**
-that need MUST-NOT verbs are out of scope.
+that need MUST-NOT verbs are out of scope. A SpaceStorage-native
+client protocol is not a required slice of the product; constitution
+MAY add one later.
 
 Rationale: clients keep existing drivers; the type system is not hidden
 behind one protocol; shipping all seven handlers is not the first

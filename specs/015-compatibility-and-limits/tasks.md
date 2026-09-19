@@ -24,7 +24,7 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 
 **Purpose**: Workspace member and crate skeleton for `spacestorage-compat` per [plan.md](plan.md) Project Structure
 
-- [ ] T001 Create `crates/compat/Cargo.toml` (package `spacestorage-compat`, edition 2024, deps `serde`, `serde_json`, `bytes`, `tracing`, `thiserror` as needed; no `*-sys`, no DataFusion, no protocol crates) and `crates/compat/src/lib.rs` that `mod`s `matrix`, `wire`, `isolation`, `limits`, `version`, `profile`
+- [X] T001 Create `crates/compat/Cargo.toml` (package `spacestorage-compat`, edition 2024, deps `serde`, `serde_json`, `bytes`, `tracing`, `thiserror` as needed; no `*-sys`, no DataFusion, no protocol crates) and `crates/compat/src/lib.rs` that `mod`s `matrix`, `wire`, `isolation`, `limits`, `version`, `profile`
 - [ ] T002 Add `crates/compat` to workspace `[workspace.members]` in `Cargo.toml` and ensure `handler-*`, `exec`, `types`, `internode`, `storage`, `config`, `node`, `release-profile`, and `conformance` can depend on `spacestorage-compat` without cyclic deps (handlers/exec → compat; compat MUST NOT depend on handlers or exec)
 - [ ] T003 [P] Copy [contracts/fixtures/first-binary.conf](contracts/fixtures/first-binary.conf) and [contracts/fixtures/limits-raised.conf](contracts/fixtures/limits-raised.conf) into `docs/examples/compat/` (or keep referenced from specs) and document the invalid fixtures path in `crates/compat/README.md`
 

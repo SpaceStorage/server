@@ -1,0 +1,13 @@
+[package]
+name = "spacestorage-handler-postgresql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "PostgreSQL protocol handler (002 first-binary)"
+publish = false
+
+[dependencies]
+spacestorage-query = { path = "../query" }
+tokio = { workspace = true }
+tracing = { workspace = true }

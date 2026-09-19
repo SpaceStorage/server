@@ -1,0 +1,11 @@
+slug: first-binary
+profile: first-binary
+implemented: [1, 2, 3, 4, 5]
+deferred:
+  - { id: 6, still_owed: true, reason: "remaining 015 handlers" }
+  - { id: 7, still_owed: true, reason: "Raft, quotas, full authz" }
+  - { id: 8, still_owed: true, reason: "query beyond CRUD" }
+  - { id: 9, still_owed: true, reason: "full 08 catalog" }
+  - { id: 10, still_owed: true, reason: "migration and PITR" }
+  - { id: 11, still_owed: true, reason: "UIs and ingest" }
+changelog_ref: docs/milestones/001-first-binary.md

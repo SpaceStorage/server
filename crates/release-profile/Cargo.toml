@@ -1,0 +1,16 @@
+[package]
+name = "spacestorage-release-profile"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SpaceStorage release profile, slice ledger, and product non-goal audit (slices-1-5 / first-binary)"
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

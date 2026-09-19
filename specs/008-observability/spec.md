@@ -164,3 +164,4 @@ Operators diagnose replication lag, API traffic, WAL/fsync health, LSM/HNSW inte
 - Log ingest into tables (`09`).
 - Defining the audit event vocabulary (`14`).
 - Outbound sinks other than Kafka and syslog.
+- **Kafka as a stored log product** — product non-goal (`16`); this feature may emit to Kafka as an outbound log sink; Log Stream is the type for stored logs.

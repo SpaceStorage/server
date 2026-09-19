@@ -1,0 +1,12 @@
+[package]
+name = "spacestorage-handler-redis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Redis protocol handler (002 first-binary)"
+publish = false
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }

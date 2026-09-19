@@ -139,3 +139,4 @@ Producers send logs to Kafka or syslog. SpaceStorage parses them into database d
 - Role vocabulary (`14`) except enforcing it.
 - Replication streaming (`04`).
 - Backup/PITR (`13`).
+- **Kafka as a stored log product** — product non-goal (`16`); Kafka here is ingest into containers; Log Stream is the L3 type, not a Kafka log store.

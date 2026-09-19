@@ -306,3 +306,5 @@ The intent file assigns the following to sibling features. This specification do
 - **Complete-product verb matrix, wire versions, isolation, limits, N/N+1** (intent `15`) except enforcing not-supported on the wire.
 - **First-binary handler cut** (intent `16`) except that a build may omit handlers not yet implemented and MUST fail startup if an entrypoint names a handler this build does not have (`001`).
 - **Internode and replication ports** (intent `12`); they are not client protocols.
+- **A second query engine per protocol** — product non-goal (`16`); every handler lowers into one shared query stack (`05`).
+- **A SpaceStorage-native client protocol as a required slice** — product non-goal for slices 1–11 (`16`); constitution V MAY add a native protocol later, but there is no `handler spacestorage` in this inventory.

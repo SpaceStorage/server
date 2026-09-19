@@ -24,7 +24,7 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 **Purpose**: Workspace member, crate skeleton, feature flags, fixture docs tree
 
-- [ ] T001 Create `crates/authz/Cargo.toml` (package `spacestorage-authz`, edition 2024) with workspace deps `tokio`, `async-trait`, `serde`, `serde_json`, `bytes`, `tracing`, `uuid`, `parking_lot`, `subtle`, `zeroize`, `hmac`, `sha2`, `pbkdf2` and `crates/authz/src/lib.rs` that `mod`s `principal`, `scram`, `permission`, `session`, `bootstrap`, `audit`
+- [X] T001 Create `crates/authz/Cargo.toml` (package `spacestorage-authz`, edition 2024) with workspace deps `tokio`, `async-trait`, `serde`, `serde_json`, `bytes`, `tracing`, `uuid`, `parking_lot`, `subtle`, `zeroize`, `hmac`, `sha2`, `pbkdf2` and `crates/authz/src/lib.rs` that `mod`s `principal`, `scram`, `permission`, `session`, `bootstrap`, `audit`
 - [ ] T002 Add `crates/authz` to workspace `[workspace.members]` in `Cargo.toml` and declare Cargo feature `authz-custom` (slice 7; off by default) in `crates/authz/Cargo.toml` and wire `first-binary` compile of `authz` (without custom RolePut) in `crates/release-profile`
 - [ ] T003 [P] Ensure `docs/examples/` (or feature docs tree) references [contracts/fixtures/bootstrap-admin.conf](contracts/fixtures/bootstrap-admin.conf) and [contracts/fixtures/master-key.conf](contracts/fixtures/master-key.conf); keep invalid fixtures under `specs/014-authz-keys/contracts/fixtures/invalid/`
 

@@ -1,0 +1,94 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/release-profile",
+    "crates/conformance",
+    "crates/config",
+    "crates/admin-proto",
+    "crates/node",
+    "crates/spacestoraged",
+    "crates/spacestorage",
+    "crates/identity",
+    "crates/internode",
+    "crates/wal",
+    "crates/types",
+    "crates/placement",
+    "crates/query",
+    "crates/handler-postgresql",
+    "crates/handler-redis",
+    "crates/authz",
+    "crates/compat",
+    "crates/observability",
+]
+default-members = [
+    "crates/release-profile",
+    "crates/config",
+    "crates/node",
+    "crates/spacestoraged",
+    "crates/spacestorage",
+]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.85"
+version = "0.1.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+hyper = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+bytes = "1"
+arc-swap = "1"
+tokio-util = { version = "0.7", features = ["rt"] }
+thiserror = "2"
+anyhow = "1"
+futures = "0.3"
+http-body-util = "0.1"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["limit"] }
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+subtle = "2"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[package]
+name = "spacestorage-workspace"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[features]
+default = ["first-binary"]
+first-binary = ["handler-postgresql", "handler-redis"]
+complete-product = [
+    "first-binary",
+    "handler-cassandra",
+    "handler-elasticsearch",
+    "handler-clickhouse",
+    "handler-s3",
+    "handler-webdav",
+]
+handler-postgresql = ["dep:spacestorage-handler-postgresql"]
+handler-redis = ["dep:spacestorage-handler-redis"]
+handler-cassandra = []
+handler-elasticsearch = []
+handler-clickhouse = []
+handler-s3 = []
+handler-webdav = []
+
+[dependencies]
+spacestorage-handler-postgresql = { path = "crates/handler-postgresql", optional = true }
+spacestorage-handler-redis = { path = "crates/handler-redis", optional = true }

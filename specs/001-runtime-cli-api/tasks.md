@@ -32,14 +32,14 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 **Purpose**: Cargo workspace, toolchain pin, and empty crate layout matching plan.md
 
-- [ ] T001 Create workspace root `Cargo.toml` with members `crates/config`, `crates/admin-proto`, `crates/node`, `crates/spacestoraged`, `crates/spacestorage` and shared `[workspace.dependencies]`
-- [ ] T002 [P] Add toolchain pin file `./rust-toolchain.toml` (Rust 1.87, edition 2024, MSRV 1.85)
-- [ ] T003 [P] Scaffold `crates/config/Cargo.toml` + `crates/config/src/lib.rs` (no Tokio dependency)
-- [ ] T004 [P] Scaffold `crates/admin-proto/Cargo.toml` + `crates/admin-proto/src/lib.rs` (serde/bytes only)
-- [ ] T005 [P] Scaffold `crates/node/Cargo.toml` + `crates/node/src/lib.rs` module tree placeholders (`runtime`, `lifecycle`, `entrypoint`, `handler`, `admin`, `buffer`, `reload`, `stats`, `effective`)
-- [ ] T006 [P] Scaffold `crates/spacestoraged/Cargo.toml` + `crates/spacestoraged/src/main.rs` stub
-- [ ] T007 [P] Scaffold `crates/spacestorage/Cargo.toml` + `crates/spacestorage/src/{main,args,output,exit}.rs` and `crates/spacestorage/src/client/` stubs
-- [ ] T008 Wire workspace dependency versions for `tokio`, `axum`, `hyper`, `rustls`, `tokio-rustls`, `rustls-pemfile`, `webpki-roots`, `serde`, `serde_json`, `clap`, `tracing`, `tracing-subscriber`, `bytes`, `arc-swap`, `tokio-util`, `assert_cmd`, `predicates` per plan.md / research.md
+- [X] T001 Create workspace root `Cargo.toml` with members `crates/config`, `crates/admin-proto`, `crates/node`, `crates/spacestoraged`, `crates/spacestorage` and shared `[workspace.dependencies]`
+- [X] T002 [P] Add toolchain pin file `./rust-toolchain.toml` (Rust 1.87, edition 2024, MSRV 1.85)
+- [X] T003 [P] Scaffold `crates/config/Cargo.toml` + `crates/config/src/lib.rs` (no Tokio dependency)
+- [X] T004 [P] Scaffold `crates/admin-proto/Cargo.toml` + `crates/admin-proto/src/lib.rs` (serde/bytes only)
+- [X] T005 [P] Scaffold `crates/node/Cargo.toml` + `crates/node/src/lib.rs` module tree placeholders (`runtime`, `lifecycle`, `entrypoint`, `handler`, `admin`, `buffer`, `reload`, `stats`, `effective`)
+- [X] T006 [P] Scaffold `crates/spacestoraged/Cargo.toml` + `crates/spacestoraged/src/main.rs` stub
+- [X] T007 [P] Scaffold `crates/spacestorage/Cargo.toml` + `crates/spacestorage/src/{main,args,output,exit}.rs` and `crates/spacestorage/src/client/` stubs
+- [X] T008 Wire workspace dependency versions for `tokio`, `axum`, `hyper`, `rustls`, `tokio-rustls`, `rustls-pemfile`, `webpki-roots`, `serde`, `serde_json`, `clap`, `tracing`, `tracing-subscriber`, `bytes`, `arc-swap`, `tokio-util`, `assert_cmd`, `predicates` per plan.md / research.md
 
 **Checkpoint**: `cargo check --workspace` succeeds with empty stubs
 
@@ -53,28 +53,28 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 ### Config crate (offline + online shared validation)
 
-- [ ] T009 Implement `ConfigError { file, line, col, setting, code, message }` and error codes in `crates/config/src/error.rs`
-- [ ] T010 [P] Implement nginx-style lexer (IDENT, NUMBER, SIZE, DURATION, STRING, PATH, `{` `}` `;`, `#` comments) in `crates/config/src/lexer.rs`
-- [ ] T011 [P] Implement AST (`Directive` | `Block`) in `crates/config/src/ast.rs`
-- [ ] T012 Implement recursive-descent parser collecting all syntax errors in `crates/config/src/parser.rs` per `contracts/config-grammar.md`
-- [ ] T013 Implement typed model `NodeConfig`, `EntrypointDecl`, `TlsDecl`, `AdminHandlerDecl`, `CertRef` in `crates/config/src/model.rs` with constraints: `node.name` non-empty ≤ 253 chars; `runtime.threads` if set ≥ 1; `runtime.drain_timeout` 1 s–24 h (default 30 s); `log.level` one of `error|warn|info|debug|trace` (default `info`); `log.format` `text|json` (default `text`); entrypoint `port` 1–65535 mandatory; default `address` `127.0.0.1`
-- [ ] T014 Implement `resolve()` AST → `NodeConfig` applying defaults, `threads auto`, launch `--set` overrides, and accumulating ALL resolve errors in `crates/config/src/resolve.rs`
-- [ ] T015 Implement `validate()` cross-field rules in `crates/config/src/validate.rs`: `admin_handler_undeclared` / `admin_handler_conflict`; `admin_token_required` / `admin_token_unreadable` (token file readable, non-empty after trim when any admin handler enabled); entrypoint missing/multiple/unknown handler; duplicate `(address,port)` / name; `threads_out_of_range`; `drain_timeout_out_of_range`; `buffer_unknown` / `buffer_out_of_range`; `cert_inline_forbidden` / `cert_ref_scheme_unsupported` / cert unreadable/invalid/expired; every enabled entrypoint MUST declare `tls { ... }` or `plaintext;` (omitted transport → startup error); reserved foreign blocks (`labels`, `storage`, …) → `unknown_directive`
-- [ ] T016 [P] Implement `ReloadClass { Live, RestartRequired }` and `diff(running, incoming) -> ConfigDiff` in `crates/config/src/reload_class.rs` (buffers, drain_timeout, log.level, token_file = Live; threads, entrypoints, log.format = RestartRequired)
-- [ ] T017 Export public `parse_validate(path, overrides, handler_names, buffer_specs) -> Result<(NodeConfig, Vec<warning>), Vec<ConfigError>>` from `crates/config/src/lib.rs`
+- [X] T009 Implement `ConfigError { file, line, col, setting, code, message }` and error codes in `crates/config/src/error.rs`
+- [X] T010 [P] Implement nginx-style lexer (IDENT, NUMBER, SIZE, DURATION, STRING, PATH, `{` `}` `;`, `#` comments) in `crates/config/src/lexer.rs`
+- [X] T011 [P] Implement AST (`Directive` | `Block`) in `crates/config/src/ast.rs`
+- [X] T012 Implement recursive-descent parser collecting all syntax errors in `crates/config/src/parser.rs` per `contracts/config-grammar.md`
+- [X] T013 Implement typed model `NodeConfig`, `EntrypointDecl`, `TlsDecl`, `AdminHandlerDecl`, `CertRef` in `crates/config/src/model.rs` with constraints: `node.name` non-empty ≤ 253 chars; `runtime.threads` if set ≥ 1; `runtime.drain_timeout` 1 s–24 h (default 30 s); `log.level` one of `error|warn|info|debug|trace` (default `info`); `log.format` `text|json` (default `text`); entrypoint `port` 1–65535 mandatory; default `address` `127.0.0.1`
+- [X] T014 Implement `resolve()` AST → `NodeConfig` applying defaults, `threads auto`, launch `--set` overrides, and accumulating ALL resolve errors in `crates/config/src/resolve.rs`
+- [X] T015 Implement `validate()` cross-field rules in `crates/config/src/validate.rs`: `admin_handler_undeclared` / `admin_handler_conflict`; `admin_token_required` / `admin_token_unreadable` (token file readable, non-empty after trim when any admin handler enabled); entrypoint missing/multiple/unknown handler; duplicate `(address,port)` / name; `threads_out_of_range`; `drain_timeout_out_of_range`; `buffer_unknown` / `buffer_out_of_range`; `cert_inline_forbidden` / `cert_ref_scheme_unsupported` / cert unreadable/invalid/expired; every enabled entrypoint MUST declare `tls { ... }` or `plaintext;` (omitted transport → startup error); reserved foreign blocks (`labels`, `storage`, …) → `unknown_directive`
+- [X] T016 [P] Implement `ReloadClass { Live, RestartRequired }` and `diff(running, incoming) -> ConfigDiff` in `crates/config/src/reload_class.rs` (buffers, drain_timeout, log.level, token_file = Live; threads, entrypoints, log.format = RestartRequired)
+- [X] T017 Export public `parse_validate(path, overrides, handler_names, buffer_specs) -> Result<(NodeConfig, Vec<warning>), Vec<ConfigError>>` from `crates/config/src/lib.rs`
 
 ### Admin-proto + node skeletons
 
-- [ ] T018 [P] Implement shared JSON types `Status`, `EffectiveConfig`, `BufferReport`, `ReloadReport`, `ErrorBody`, `ThreadsReport` in `crates/admin-proto/src/types.rs` per `contracts/admin-api.md` and data-model.md
-- [ ] T019 [P] Implement `AdminOp { Status, Config, Threads, Buffers, Reload, Stop { wait } }` in `crates/admin-proto/src/ops.rs`
-- [ ] T020 [P] Implement length-prefixed JSON frame codec (`u32` BE len, payload 1..=4 MiB) plus Hello/Request/Response shapes in `crates/admin-proto/src/frame.rs` per `contracts/admin-tcp-protocol.md`
-- [ ] T021 Implement `Handler` trait (`name`, `kind`, `owner`, `serve`) and `HandlerRegistry` with duplicate-name rejection in `crates/node/src/handler/mod.rs`
-- [ ] T022 [P] Implement `Buffer` / `BufferRegistry` / `OverflowPolicy { Reject, Wait }` / `Permit` and register builtins in `crates/node/src/buffer/{mod,builtin}.rs`: `net.recv` default 64 MiB range 1 MiB–64 GiB Wait; `net.send` default 64 MiB range 1 MiB–64 GiB Wait; `request.queue` default 16 MiB range 1 MiB–16 GiB Reject — including `try_reserve`/`set_capacity` (allow capacity &lt; used; ratio may exceed 1.0) per FR-038–FR-042
-- [ ] T023 [P] Implement in-memory `Stats` atomics (`worker_threads`, `worker_threads_busy`, `drain_timed_out`, uptime derivation) with Prometheus-conformant reserved names in `crates/node/src/stats.rs`
-- [ ] T024 Implement `EffectiveConfig` snapshot via `ArcSwap` and pending-restart markers in `crates/node/src/effective.rs`
-- [ ] T025 Implement interim bearer `token_file` constant-time check in `crates/node/src/admin/auth.rs` (health probes exempt)
-- [ ] T026 Assemble `Node` shell fields (`state`, `effective`, `handlers`, `buffers`, `stats`, `tasks`, `cancel`, `reload_lock`) in `crates/node/src/lib.rs`
-- [ ] T027 [P] Add contract tests that parse every fixture under `specs/001-runtime-cli-api/contracts/fixtures/` (including `invalid/*.conf`) and assert expected validation codes in `crates/config/tests/fixtures.rs` (use test-only stub `cassandra` handler inventory so `fixtures/node.conf` passes SC-011)
+- [X] T018 [P] Implement shared JSON types `Status`, `EffectiveConfig`, `BufferReport`, `ReloadReport`, `ErrorBody`, `ThreadsReport` in `crates/admin-proto/src/types.rs` per `contracts/admin-api.md` and data-model.md
+- [X] T019 [P] Implement `AdminOp { Status, Config, Threads, Buffers, Reload, Stop { wait } }` in `crates/admin-proto/src/ops.rs`
+- [X] T020 [P] Implement length-prefixed JSON frame codec (`u32` BE len, payload 1..=4 MiB) plus Hello/Request/Response shapes in `crates/admin-proto/src/frame.rs` per `contracts/admin-tcp-protocol.md`
+- [X] T021 Implement `Handler` trait (`name`, `kind`, `owner`, `serve`) and `HandlerRegistry` with duplicate-name rejection in `crates/node/src/handler/mod.rs`
+- [X] T022 [P] Implement `Buffer` / `BufferRegistry` / `OverflowPolicy { Reject, Wait }` / `Permit` and register builtins in `crates/node/src/buffer/{mod,builtin}.rs`: `net.recv` default 64 MiB range 1 MiB–64 GiB Wait; `net.send` default 64 MiB range 1 MiB–64 GiB Wait; `request.queue` default 16 MiB range 1 MiB–16 GiB Reject — including `try_reserve`/`set_capacity` (allow capacity &lt; used; ratio may exceed 1.0) per FR-038–FR-042
+- [X] T023 [P] Implement in-memory `Stats` atomics (`worker_threads`, `worker_threads_busy`, `drain_timed_out`, uptime derivation) with Prometheus-conformant reserved names in `crates/node/src/stats.rs`
+- [X] T024 Implement `EffectiveConfig` snapshot via `ArcSwap` and pending-restart markers in `crates/node/src/effective.rs`
+- [X] T025 Implement interim bearer `token_file` constant-time check in `crates/node/src/admin/auth.rs` (health probes exempt)
+- [X] T026 Assemble `Node` shell fields (`state`, `effective`, `handlers`, `buffers`, `stats`, `tasks`, `cancel`, `reload_lock`) in `crates/node/src/lib.rs`
+- [X] T027 [P] Add contract tests that parse every fixture under `specs/001-runtime-cli-api/contracts/fixtures/` (including `invalid/*.conf`) and assert expected validation codes in `crates/config/tests/fixtures.rs` (use test-only stub `cassandra` handler inventory so `fixtures/node.conf` passes SC-011)
 
 **Checkpoint**: Foundation ready — config validates fixtures offline; registries and types compile; user story implementation can begin
 
@@ -88,18 +88,18 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 ### Tests for User Story 1
 
-- [ ] T028 [P] [US1] Write integration tests for startup thread derivation, invalid threads rejection before bind, and ready timing in `crates/node/tests/startup.rs` (SC-001, SC-002, SC-004 threads case)
-- [ ] T029 [P] [US1] Write drain/stop integration tests (in-flight complete within timeout; timeout records `drain_timed_out`; second signal immediate exit; stop before ready aborts) in `crates/node/tests/drain.rs` (SC-010, FR-006/007)
+- [X] T028 [P] [US1] Write integration tests for startup thread derivation, invalid threads rejection before bind, and ready timing in `crates/node/tests/startup.rs` (SC-001, SC-002, SC-004 threads case)
+- [X] T029 [P] [US1] Write drain/stop integration tests (in-flight complete within timeout; timeout records `drain_timed_out`; second signal immediate exit; stop before ready aborts) in `crates/node/tests/drain.rs` (SC-010, FR-006/007)
 
 ### Implementation for User Story 1
 
-- [ ] T030 [US1] Implement Tokio multi-thread runtime builder (`worker_threads` = configured or `available_parallelism()` min 1; fallback to 1 + log when undetermined) in `crates/node/src/runtime.rs`
-- [ ] T031 [US1] Implement `NodeState` machine `Starting|Ready|Draining|Failed`, SIGTERM/SIGINT handling, and drain orchestration with `TaskTracker` + `CancellationToken` in `crates/node/src/lifecycle.rs` (`drain_timeout` default 30 s, range 1 s–24 h)
-- [ ] T032 [US1] Implement listener bind-all-before-ready, accept loop → `handler.serve`, and unbind-on-abort in `crates/node/src/entrypoint/{mod,listener}.rs` (default address `127.0.0.1` when omitted)
-- [ ] T033 [US1] Add a test-only / stub client-facing handler usable for concurrency and drain tests in `crates/node/src/handler/` (or test helper) so US1 can exercise FR-004 without admin handlers
-- [ ] T034 [US1] Implement `spacestoraged` binary: parse `--config` and `--set key=value`, build runtime, load config, run node in `crates/spacestoraged/src/main.rs`
-- [ ] T035 [US1] Sample busy worker count into `Stats` (RuntimeMetrics or in-flight task fallback per research R3) from `crates/node/src/stats.rs` / lifecycle hooks
-- [ ] T036 [US1] Ensure stop-before-ready closes any opened listeners and exits without entering `ready` in `crates/node/src/lifecycle.rs` + `crates/node/src/entrypoint/mod.rs`
+- [X] T030 [US1] Implement Tokio multi-thread runtime builder (`worker_threads` = configured or `available_parallelism()` min 1; fallback to 1 + log when undetermined) in `crates/node/src/runtime.rs`
+- [X] T031 [US1] Implement `NodeState` machine `Starting|Ready|Draining|Failed`, SIGTERM/SIGINT handling, and drain orchestration with `TaskTracker` + `CancellationToken` in `crates/node/src/lifecycle.rs` (`drain_timeout` default 30 s, range 1 s–24 h)
+- [X] T032 [US1] Implement listener bind-all-before-ready, accept loop → `handler.serve`, and unbind-on-abort in `crates/node/src/entrypoint/{mod,listener}.rs` (default address `127.0.0.1` when omitted)
+- [X] T033 [US1] Add a test-only / stub client-facing handler usable for concurrency and drain tests in `crates/node/src/handler/` (or test helper) so US1 can exercise FR-004 without admin handlers
+- [X] T034 [US1] Implement `spacestoraged` binary: parse `--config` and `--set key=value`, build runtime, load config, run node in `crates/spacestoraged/src/main.rs`
+- [X] T035 [US1] Sample busy worker count into `Stats` (RuntimeMetrics or in-flight task fallback per research R3) from `crates/node/src/stats.rs` / lifecycle hooks
+- [X] T036 [US1] Ensure stop-before-ready closes any opened listeners and exits without entering `ready` in `crates/node/src/lifecycle.rs` + `crates/node/src/entrypoint/mod.rs`
 
 **Checkpoint**: Node starts, sizes threads, reaches `ready`, drains/stops cleanly — MVP runtime without requiring admin CLI
 
@@ -113,20 +113,20 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 ### Tests for User Story 2
 
-- [ ] T037 [P] [US2] Write admin parity tests (same JSON results over `admin` and `admin-http`, ignoring `uptime_seconds` / `connections_active` / `threads.busy`) in `crates/node/tests/admin_parity.rs`
-- [ ] T038 [P] [US2] Write TLS/plaintext entrypoint tests (refuse plaintext on TLS port; invalid cert refs fail startup; omitted transport fails; `plaintext;` accepted) in `crates/node/tests/tls.rs` (SC-006)
+- [X] T037 [P] [US2] Write admin parity tests (same JSON results over `admin` and `admin-http`, ignoring `uptime_seconds` / `connections_active` / `threads.busy`) in `crates/node/tests/admin_parity.rs`
+- [X] T038 [P] [US2] Write TLS/plaintext entrypoint tests (refuse plaintext on TLS port; invalid cert refs fail startup; omitted transport fails; `plaintext;` accepted) in `crates/node/tests/tls.rs` (SC-006)
 
 ### Implementation for User Story 2
 
-- [ ] T039 [P] [US2] Implement rustls acceptor from file-referenced PEM cert/key with leaf validity check at startup in `crates/node/src/entrypoint/tls.rs` (no plaintext fallback; hourly expiry marker on running entrypoints)
-- [ ] T040 [US2] Register built-in `admin` and `admin-http` handlers in `HandlerRegistry` from `crates/node/src/handler/mod.rs` (inventory reported in effective config)
-- [ ] T041 [US2] Implement `AdminService` executing `Status`, `Config`, `Threads`, `Buffers`, `Stop` against `Node` in `crates/node/src/admin/mod.rs` per `contracts/admin-api.md`
-- [ ] T042 [US2] Implement `admin` TCP handler (5 s hello timeout, bearer in hello, framed ops, idle 10 m, reserve `net.recv`/`net.send`) in `crates/node/src/handler/admin_tcp.rs` per `contracts/admin-tcp-protocol.md`
-- [ ] T043 [US2] Implement `admin-http` axum router (`GET /v1/status|config|threads|buffers`, `POST /v1/reload|stop`, `GET /v1/health/live|ready`, `/metrics` → 404, headers `X-SpaceStorage-Node` / `X-SpaceStorage-State`, body limit 1 MiB) in `crates/node/src/handler/admin_http.rs` per `contracts/admin-http.md`
-- [ ] T044 [US2] Enforce admin handler declarations at startup: missing → fail; `disable admin;` / `disable admin-http;` logs notice and opens no listener; duplicate address:port / port-in-use → fail naming entrypoints; bind failure rolls back all listeners in `crates/node/src/entrypoint/mod.rs` + `crates/config/src/validate.rs`
-- [ ] T045 [US2] Flag each entrypoint `transport: encrypted|plaintext` and `cert_expired` in effective config / status in `crates/node/src/effective.rs`
-- [ ] T046 [US2] Reject non-handler traffic on admin ports (FR-019) inside `crates/node/src/handler/admin_tcp.rs` and `crates/node/src/handler/admin_http.rs` (404/`unknown_op` for foreign paths; TCP non-ops rejected)
-- [ ] T047 [US2] Implement reload orchestration parse→validate→diff→apply live (buffer capacities, drain_timeout, log.level, re-read token) + pending-restart markers; reject when state ≠ `ready`; serialize with `reload_lock` in `crates/node/src/reload.rs` and wire `AdminOp::Reload` in `crates/node/src/admin/mod.rs` (SC-009 live path; restart-required reporting for threads/entrypoints)
+- [X] T039 [P] [US2] Implement rustls acceptor from file-referenced PEM cert/key with leaf validity check at startup in `crates/node/src/entrypoint/tls.rs` (no plaintext fallback; hourly expiry marker on running entrypoints)
+- [X] T040 [US2] Register built-in `admin` and `admin-http` handlers in `HandlerRegistry` from `crates/node/src/handler/mod.rs` (inventory reported in effective config)
+- [X] T041 [US2] Implement `AdminService` executing `Status`, `Config`, `Threads`, `Buffers`, `Stop` against `Node` in `crates/node/src/admin/mod.rs` per `contracts/admin-api.md`
+- [X] T042 [US2] Implement `admin` TCP handler (5 s hello timeout, bearer in hello, framed ops, idle 10 m, reserve `net.recv`/`net.send`) in `crates/node/src/handler/admin_tcp.rs` per `contracts/admin-tcp-protocol.md`
+- [X] T043 [US2] Implement `admin-http` axum router (`GET /v1/status|config|threads|buffers`, `POST /v1/reload|stop`, `GET /v1/health/live|ready`, `/metrics` → 404, headers `X-SpaceStorage-Node` / `X-SpaceStorage-State`, body limit 1 MiB) in `crates/node/src/handler/admin_http.rs` per `contracts/admin-http.md`
+- [X] T044 [US2] Enforce admin handler declarations at startup: missing → fail; `disable admin;` / `disable admin-http;` logs notice and opens no listener; duplicate address:port / port-in-use → fail naming entrypoints; bind failure rolls back all listeners in `crates/node/src/entrypoint/mod.rs` + `crates/config/src/validate.rs`
+- [X] T045 [US2] Flag each entrypoint `transport: encrypted|plaintext` and `cert_expired` in effective config / status in `crates/node/src/effective.rs`
+- [X] T046 [US2] Reject non-handler traffic on admin ports (FR-019) inside `crates/node/src/handler/admin_tcp.rs` and `crates/node/src/handler/admin_http.rs` (404/`unknown_op` for foreign paths; TCP non-ops rejected)
+- [X] T047 [US2] Implement reload orchestration parse→validate→diff→apply live (buffer capacities, drain_timeout, log.level, re-read token) + pending-restart markers; reject when state ≠ `ready`; serialize with `reload_lock` in `crates/node/src/reload.rs` and wire `AdminOp::Reload` in `crates/node/src/admin/mod.rs` (SC-009 live path; restart-required reporting for threads/entrypoints)
 
 **Checkpoint**: Remotely administrable node over TCP and/or HTTP with TLS optional-but-explicit
 
@@ -186,12 +186,12 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 **Purpose**: Documentation, packaging sanity, quickstart proof, leftover edge cases
 
-- [ ] T066 [P] Copy starter example to `docs/examples/node.conf` from `specs/001-runtime-cli-api/contracts/fixtures/node.conf` and draft `docs/configuration.md` from `contracts/config-grammar.md`
+- [X] T066 [P] Copy starter example to `docs/examples/node.conf` from `specs/001-runtime-cli-api/contracts/fixtures/node.conf` and draft `docs/configuration.md` from `contracts/config-grammar.md`
 - [ ] T067 [P] Add unit tests for lexer/parser/resolve edge cases (SIZE/DURATION literals, wrong arity, bad literal) in `crates/config/src/` modules
 - [ ] T068 Harden edge cases: oversubscription threads accepted; address not owned by host → bind error; cert expiry while running logs + flags entrypoint; concurrent reloads ordered; reload while draining → `invalid_state` in `crates/node/src/`
 - [ ] T069 Ensure both binaries build from one workspace (`cargo build --release` produces `target/release/spacestoraged` and `target/release/spacestorage`) documenting FR-031 in `README.md` or `docs/`
 - [ ] T070 Run end-to-end validation of `specs/001-runtime-cli-api/quickstart.md` (validate → start → inspect → reload → stop) and fix gaps discovered
-- [ ] T071 [P] Reserve `/metrics` 404 and confirm stats names remain stable for feature `08` without exposition in this feature (`crates/node/src/handler/admin_http.rs`, `crates/node/src/stats.rs`)
+- [X] T071 [P] Reserve `/metrics` 404 and confirm stats names remain stable for feature `08` without exposition in this feature (`crates/node/src/handler/admin_http.rs`, `crates/node/src/stats.rs`)
 
 ---
 

@@ -183,3 +183,7 @@ Peers are marked unavailable by a **fixed cluster-wide** heartbeat timeout on `i
 - What an acknowledgement means on disk (`13`).
 - Client protocols (`02`).
 - Key material (`14`).
+
+- **Human-picked multi-master conflict** — product non-goal (`16`); concurrent writes MUST NOT wait for a human (LWW by HLC or type merge only).
+- **Byzantine / adversarial nodes** — product non-goal (`16`); failure detection is crash-stop.
+- **`multi_active=on` create in the first binary** — refused (`16`); catalog default off.

@@ -1,3 +1,15 @@
 .cursor
 .specify/feature.json
 .specify/extensions
+/target/
+**/*.rs.bk
+*.rlib
+*.prof*
+.idea/
+*.log
+.env*
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/

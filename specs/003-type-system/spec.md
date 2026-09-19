@@ -365,3 +365,4 @@ The intent file assigns the following to sibling features. This specification do
 - **Data browsing UI across levels** (intent `09`). This feature guarantees the catalog and descriptions it would display.
 - **Protocol-specific type mappings, carriers, and name escaping** (feature `002`). This feature provides the canonical representation and catalog those mappings are built on.
 - **Cross-namespace compositions** and **user-defined types outside the registration path**; both are possible future additions through the expandable inventory.
+- **Kafka as a stored log product** — product non-goal (`16`); Kafka is ingest (`09`) and outbound logging (`08`); Log Stream is the L3 type.

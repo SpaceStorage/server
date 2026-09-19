@@ -24,7 +24,7 @@ description: "Task list for distribution, placement, media, and replication (L1)
 
 **Purpose**: Workspace member, placement module skeleton, docs/examples trees, starter fixture copies
 
-- [ ] T001 Create `crates/internode/Cargo.toml` (package `spacestorage-internode`, edition 2024) and `crates/internode/src/lib.rs` that `mod`s `frame`, `rpc`, `heartbeat`, `auth`
+- [X] T001 Create `crates/internode/Cargo.toml` (package `spacestorage-internode`, edition 2024) and `crates/internode/src/lib.rs` that `mod`s `frame`, `rpc`, `heartbeat`, `auth`
 - [ ] T002 Add `crates/internode` to workspace `[workspace.members]` in `Cargo.toml` and depend from `crates/node` / `crates/spacestoraged` without pulling TCP into `crates/placement`
 - [ ] T003 Extend `crates/placement/src/lib.rs` to declare modules `topology`, `selector`, `planner`, `replica`, `quorum`, `stamp`, `group`, `shard`, `repair`, `rebalance`, `txn`, `error`, `director` while keeping `matrix.rs` and `local.rs` compiling for `003`
 - [ ] T004 [P] Create `docs/placement.md` and `docs/replication.md` stubs that link to [contracts/topology.md](contracts/topology.md) and [contracts/quorum.md](contracts/quorum.md)

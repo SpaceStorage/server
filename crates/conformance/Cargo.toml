@@ -1,0 +1,20 @@
+[package]
+name = "spacestorage-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "First-binary conformance suite (slices-1-5); not a seven-protocol v1 gate"
+publish = false
+
+[features]
+default = ["first-binary"]
+first-binary = []
+complete-product = ["first-binary"]
+
+[dependencies]
+spacestorage-release-profile = { path = "../release-profile" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+spacestorage-release-profile = { path = "../release-profile" }

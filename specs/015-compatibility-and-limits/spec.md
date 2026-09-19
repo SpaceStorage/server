@@ -148,3 +148,6 @@ Documented maxima: key, value/document/object, query text, result size, connecti
 - Full execution engine inventory (`05`) except dialect/isolation/admission contracts.
 - Auth mechanisms (`14`).
 - MVP sequencing (`16`) — this file is the ceiling; `16` is what ships first.
+- **Drop-in replacement of every feature of the emulated systems** — product non-goal (`16`); stock **clients** on MUST verbs are the promise; unmodified **applications** that need MUST-NOT verbs are out of scope.
+- **SQL `SERIALIZABLE`** — product non-goal (`16`); isolation is `READ COMMITTED` / `SNAPSHOT` only.
+- **Per-tenant CPU hard isolation** — product non-goal (`16`); fairness is best-effort.
