@@ -1,9 +1,9 @@
 //! Product non-goal audit (SC-005).
 
+use spacestorage_release_profile::ValidationCode;
 use spacestorage_release_profile::nongoals::{
     audit_nongoals, audit_text_mentions_serializable, default_repo_root,
 };
-use spacestorage_release_profile::ValidationCode;
 
 #[test]
 fn owning_specs_mention_all_product_nongoals() {

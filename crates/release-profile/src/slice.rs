@@ -80,7 +80,7 @@ impl SliceId {
             ],
             Self::PostgreSqlSubset => &["specs/002-protocol-drivers"], // postgresql
             Self::RedisSubset => &[
-                "specs/002-protocol-drivers", // redis
+                "specs/002-protocol-drivers",         // redis
                 "specs/015-compatibility-and-limits", // KV MUST
             ],
             Self::MembershipInternodeQuorum => &[
@@ -177,9 +177,6 @@ mod tests {
 
     #[test]
     fn unknown_slice() {
-        assert_eq!(
-            SliceId::from_u8(0).unwrap_err().code(),
-            "slice_unknown"
-        );
+        assert_eq!(SliceId::from_u8(0).unwrap_err().code(), "slice_unknown");
     }
 }

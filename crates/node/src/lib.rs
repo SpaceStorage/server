@@ -176,6 +176,37 @@ impl Node {
                 &node.catalog,
             ))))
             .unwrap();
+            #[cfg(feature = "handlers-complete")]
+            {
+                reg.register(Arc::new(crate::handler::cassandra::CassandraPortHandler::new(
+                    Arc::clone(&node.catalog),
+                )))
+                .unwrap();
+                reg.register(Arc::new(
+                    crate::handler::elasticsearch::ElasticsearchPortHandler::new(Arc::clone(
+                        &node.catalog,
+                    )),
+                ))
+                .unwrap();
+                reg.register(Arc::new(crate::handler::clickhouse::ClickHousePortHandler::new(
+                    Arc::clone(&node.catalog),
+                )))
+                .unwrap();
+                reg.register(Arc::new(
+                    crate::handler::clickhouse::ClickHouseHttpPortHandler::new(Arc::clone(
+                        &node.catalog,
+                    )),
+                ))
+                .unwrap();
+                reg.register(Arc::new(crate::handler::s3::S3PortHandler::new(Arc::clone(
+                    &node.catalog,
+                ))))
+                .unwrap();
+                reg.register(Arc::new(crate::handler::webdav::WebDavPortHandler::new(
+                    Arc::clone(&node.catalog),
+                )))
+                .unwrap();
+            }
         }
         node
     }
@@ -328,7 +359,8 @@ pub fn first_binary_handler_names() -> Vec<&'static str> {
     ]
 }
 
-pub fn complete_product_handler_names() -> Vec<&'static str> {
+/// Known handlers when built with `--features handlers-complete` (slice 6).
+pub fn handlers_complete_handler_names() -> Vec<&'static str> {
     let mut v = first_binary_handler_names();
     v.extend([
         "cassandra",
@@ -339,4 +371,20 @@ pub fn complete_product_handler_names() -> Vec<&'static str> {
         "webdav",
     ]);
     v
+}
+
+pub fn complete_product_handler_names() -> Vec<&'static str> {
+    handlers_complete_handler_names()
+}
+
+/// Active build's known-handler list (FB by default; expands with `handlers-complete`).
+pub fn built_handler_names() -> Vec<&'static str> {
+    #[cfg(feature = "handlers-complete")]
+    {
+        handlers_complete_handler_names()
+    }
+    #[cfg(not(feature = "handlers-complete"))]
+    {
+        first_binary_handler_names()
+    }
 }

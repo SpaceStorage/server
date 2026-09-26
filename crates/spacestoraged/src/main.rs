@@ -1,13 +1,13 @@
 use clap::Parser;
 use spacestorage_config::{load_file, ValidateOptions};
-use spacestorage_node::{first_binary_handler_names, logging, runtime, Node};
+use spacestorage_node::{built_handler_names, logging, runtime, Node};
 use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, reload, EnvFilter};
 
 #[derive(Parser, Debug)]
-#[command(name = "spacestoraged", about = "SpaceStorage node daemon (slices-1-5 / first-binary)")]
+#[command(name = "spacestoraged", about = "SpaceStorage node daemon")]
 struct Args {
     #[arg(long)]
     config: PathBuf,
@@ -17,7 +17,7 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let handlers = first_binary_handler_names();
+    let handlers = built_handler_names();
     let (cfg, _) = load_file(
         &args.config,
         &args.set,

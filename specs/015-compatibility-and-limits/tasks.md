@@ -63,7 +63,8 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 
 - [X] T014 [P] [US1] Add unit tests in `crates/compat/src/matrix.rs` (or `crates/compat/tests/matrix.rs`) that `classify` for FirstBinary returns `MustNot` for PG `BEGIN`/`COPY`/`DECLARE` and Redis `CLUSTER`/`EVAL`, and `Must` for PG simple DML and Redis `GET`/`SET` per [matrix.md](contracts/matrix.md)
 - [ ] T015 [P] [US1] Add conformance MUST/MUST NOT smokes in `crates/conformance/tests/compat_first_binary.rs` (SC-001/SC-002): stock PG INSERT/SELECT/UPDATE/DELETE + prepared succeed; `COPY`/`BEGIN`/`DECLARE CURSOR` → not-supported (`0A000` / `copy_not_in_profile` / `begin_not_in_profile` / `cursor_not_in_profile`); Redis AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT/TTL succeed; `CLUSTER SLOTS`/`EVAL` → not-supported; 0 silent empty successes
-- [ ] T016 [P] [US1] Add `crates/conformance/tests/compat_handlers_complete.rs` behind feature `handlers-complete`: Cassandra/ES/CH/S3/WebDAV MUST smokes; ES search `match`/`term` succeed; ES ILM and aggregations → not-supported (`agg_not_in_profile`); CH dictionaries / S3 versioning / WebDAV LOCK → not-supported; handshake mismatch &lt; 1 s
+- [X] T016 [P] [US1] Add `crates/conformance/tests/compat_handlers_complete.rs` behind feature `handlers-complete`: Cassandra/ES/CH/S3/WebDAV MUST smokes; ES search `match`/`term` succeed; ES ILM and aggregations → not-supported (`agg_not_in_profile`); CH dictionaries / S3 versioning / WebDAV LOCK → not-supported; handshake mismatch &lt; 1 s
+  - Residual: full native/HTTP wire clients + signature mismatch matrix still owed (dispatch/classify gate is green)
 - [ ] T017 [P] [US1] Add `crates/conformance/tests/compat_complete_product.rs` behind feature `query-distributed`: PG `BEGIN`/`COMMIT`, COPY text/csv/binary, forward-only `DECLARE`/`FETCH`/`CLOSE` succeed; `WITH HOLD`/SCROLL/portal-after-COMMIT → not-supported; ES closed aggregations `terms`/`min`/`max`/`sum`/`avg`/`histogram`/`value_count` succeed; ILM still not-supported
 
 ### Implementation for User Story 1
@@ -73,9 +74,11 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 - [X] T020 [P] [US1] Encode Elasticsearch search/aggregation lists in `crates/compat/src/matrix.rs` (or `elasticsearch.rs`) from [elasticsearch-search.md](contracts/elasticsearch-search.md): MUST search `query_string`|`match`|`term`|`range`|`bool` (clauses of those only); MUST aggregations only in CompleteProduct: `terms`,`min`,`max`,`sum`,`avg`,`histogram`,`value_count`; before CP → `agg_not_in_profile`; ILM/ingest/ML/CCR/`script`/`significant_terms`/`composite`/`date_histogram` → `MustNot`
 - [X] T021 [P] [US1] Encode COPY profile rules in `crates/compat` from [copy.md](contracts/copy.md): FB/HC → `copy_not_in_profile`; CP MUST `text`/`csv`/`binary`; MUST NOT `COPY … PROGRAM`, `FREEZE`, server-path COPY
 - [ ] T022 [US1] Wire `classify` **before** `LogicalRequest` in `crates/handler-postgresql/src/` and `crates/handler-redis/src/`: `MustNot` → existing `002` `ErrorRenderer` (PG `0A000`, Redis `-ERR unknown command`); never empty `+OK` / never PG `T`/`D`/`C` for refused verbs ([research.md](research.md) R10)
-- [ ] T023 [US1] Wire `classify` before IR in `crates/handler-cassandra/`, `crates/handler-elasticsearch/`, `crates/handler-clickhouse/` (both handlers), `crates/handler-s3/`, `crates/handler-webdav/` for HandlersComplete+ builds; ES MUST NOT never returns 200 + empty hits
-- [ ] T024 [US1] Ensure `DialectProfile::FirstBinary` entrypoint naming `elasticsearch`/`cassandra`/… fails startup `unknown_handler` via `crates/config` + `crates/release-profile` (owned seam with `016`); document in `crates/compat` that FB has no ES handler (FR-015)
-- [ ] T025 [US1] Increment `spacestorage_compat_must_not_total{protocol,verb}` on MUST NOT paths in handler wiring per [metrics.md](contracts/metrics.md); do not rename `008` labels
+- [X] T023 [US1] Wire `classify` before IR in `crates/handler-cassandra/`, `crates/handler-elasticsearch/`, `crates/handler-clickhouse/` (both handlers), `crates/handler-s3/`, `crates/handler-webdav/` for HandlersComplete+ builds; ES MUST NOT never returns 200 + empty hits
+  - Residual: full Cassandra native frames / SigV4 / Digest / CityHash wire dialects still stubs (line/dispatch dialects)
+- [X] T024 [US1] Ensure `DialectProfile::FirstBinary` entrypoint naming `elasticsearch`/`cassandra`/… fails startup `unknown_handler` via `crates/config` + `crates/release-profile` (owned seam with `016`); document in `crates/compat` that FB has no ES handler (FR-015)
+- [X] T025 [US1] Increment `spacestorage_compat_must_not_total{protocol,verb}` on MUST NOT paths in handler wiring per [metrics.md](contracts/metrics.md); do not rename `008` labels
+  - Residual: counters are process-local in `compat::metrics`; `/metrics` exposition of labeled series still owed to `008`
 - [ ] T026 [US1] For CompleteProduct, implement SQL cursor as a **held portal bound to txn id** (dropped on COMMIT/ROLLBACK/disconnect) in `crates/handler-postgresql/` + `crates/exec/` per [research.md](research.md) R6 — supersedes `002` “cursors beyond portals → not-supported” for CP only
 
 **Checkpoint**: First-binary PG/Redis MUST/MUST NOT conformance green. HC/CP suites green when those features are enabled. Matrix is the single source of truth; no silent empty successes (SC-001/SC-002).
@@ -266,3 +269,9 @@ Task: "T045–T047 introduced_in + peers_ok + format_too_new"
 
 - [X] T056 Align FirstBinary Redis K/V `classify` MUST set in `crates/compat/src/matrix.rs` to [matrix.md](contracts/matrix.md) (+ TTL-family `EXPIRE`/`PTTL` as in `crates/handler-redis`); mark `COMMAND`/`INFO`/`CONFIG`/`TYPE`/`DBSIZE`/`ECHO`/`QUIT`/`PEXPIRE` as MustNot; extend unit tests (FR-003, matrix Redis FB) (contradicts)
 - [X] T057 Add `limits` / `query` / `cluster.product_version` to `crates/config/src/reload_class.rs` as `ReloadClass::Live` (new connections/queries only) per [config-directives.md](contracts/config-directives.md) / T012 (partial)
+
+## Phase 9: Convergence (slice 6)
+
+- [X] T058 HC handler crates + `handlers-complete` feature + `compat_handlers_complete` suite (T016/T023–T025) — classify-gated MUST dialects; full wire codecs residual
+- [ ] T059 Expose `spacestorage_compat_must_not_total{protocol,verb}` on `/metrics` via `008` (process-local counters exist in `compat::metrics`)
+- [ ] T060 Stock-client wire conformance for Cassandra native / ES HTTP / CH native+HTTP / S3 SigV4 / WebDAV (beyond dispatch APIs)

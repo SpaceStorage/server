@@ -4,7 +4,7 @@ mod commands;
 mod handler;
 mod resp;
 
-pub use commands::{dispatch, RedisReply, SessionState, MUST_COMMANDS};
+pub use commands::{MUST_COMMANDS, RedisReply, SessionState, dispatch};
 pub use handler::RedisHandler;
 
 pub const WIRE_VERSION: &str = "7.2.0-spacestorage";

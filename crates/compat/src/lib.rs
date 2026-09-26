@@ -35,6 +35,7 @@ pub mod error;
 pub mod isolation;
 pub mod limits;
 pub mod matrix;
+pub mod metrics;
 pub mod profile;
 pub mod version;
 pub mod wire;
@@ -55,6 +56,7 @@ pub use matrix::{
     classify, classify_outcome, classify_pg_copy, classify_pg_cursor, classify_pg_verb,
     classify_redis_verb, ClassifyOutcome, VerbClass,
 };
+pub use metrics::{must_not_count, must_not_snapshot, record_must_not};
 pub use profile::{active_profile, profile_from_release, DialectProfile};
 pub use version::{peers_ok, ProductVersion};
 pub use wire::{

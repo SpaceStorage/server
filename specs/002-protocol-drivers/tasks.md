@@ -35,7 +35,7 @@ description: "Task list for wire protocols and datatype-aware drivers"
 - [ ] T002 [P] Create `crates/exec/Cargo.toml` (package `spacestorage-exec`) and `crates/exec/src/lib.rs` module tree for `request`, `options`, `record`, `local`
 - [ ] T003 [P] Create `crates/auth/Cargo.toml` (package `spacestorage-auth`) and `crates/auth/src/lib.rs` module tree for `users_file`, `scram`, `sigv4`, `digest`
 - [ ] T004 [P] Create `crates/protocol-core/Cargo.toml` (package `spacestorage-protocol-core`) and `crates/protocol-core/src/lib.rs` module tree for `session`, `options`, `signature`, `namespace`, `errors`, `http`, `stats`, `escape`
-- [ ] T005 [P] Create handler crate skeletons `crates/handler-{postgresql,cassandra,redis,elasticsearch,clickhouse,s3,webdav}/Cargo.toml` + `src/lib.rs` (ClickHouse crate hosts both `clickhouse` and `clickhouse-http` handlers)
+- [X] T005 [P] Create handler crate skeletons `crates/handler-{postgresql,cassandra,redis,elasticsearch,clickhouse,s3,webdav}/Cargo.toml` + `src/lib.rs` (ClickHouse crate hosts both `clickhouse` and `clickhouse-http` handlers)
 - [ ] T006 [P] Create `crates/conformance/Cargo.toml` (package `spacestorage-conformance`, test-only) and `crates/conformance/tests/harness/mod.rs` stub
 - [ ] T007 Add all Phase-1 crates to `[workspace.members]` in `Cargo.toml` with pure-Rust dependencies from plan Technical Context (`pgwire`, `sqlparser`, `cassandra-protocol`, `redis-protocol`, `axum`, `hyper`, `quick-xml`, `hmac`/`sha2`/`md-5`, `lz4_flex`, `flate2`, `serde`/`serde_json`, `ryu`, `tokio`, `async-trait`, `tracing`, `uuid`, `chrono`); forbid `*-sys` in server crates
 - [ ] T008 [P] Copy `specs/002-protocol-drivers/contracts/fixtures/node-all-protocols.conf` to `docs/examples/node-all-protocols.conf` and `users.example` to `docs/examples/users.example`
@@ -366,3 +366,12 @@ Task: "Declare per-protocol mapping() for all six interim types in each handler 
 - [X] T101 Wire PostgreSQL handler into `crates/node/` registry and entrypoint serve path (replace `stub_cluster::ClusterPortHandler` for `postgresql`; add `spacestorage-handler-postgresql` dependency) per US1/AC2, FR-002 (`missing`) — parallel to open T041 for Redis
 - [X] T102 Extend first-binary PostgreSQL smoke beyond T042's CREATE/INSERT/SELECT/DROP to include UPDATE/DELETE and simple + extended/prepared auto-commit per intent `16` / SC-001 in `crates/handler-postgresql/` (`partial`)
 - [X] T103 Complete Redis first-binary K/V MUST verbs EXISTS, SCAN, SELECT (no-op), and TTL mapping with real storage beyond T040's PING/SET/GET/DEL path per intent `16` / US1/AC4 in `crates/handler-redis/` (`partial`)
+
+## Phase 11: Convergence (slice 6 / HandlersComplete)
+
+> Slice 6 landed classify-gated MUST dialects + feature gating. Full wire DoD for open T043–T048 remains owed (do not re-check them here).
+
+- [X] T104 Scaffold `handler-{cassandra,elasticsearch,clickhouse,s3,webdav}` workspace members; ClickHouse registers both `clickhouse` and `clickhouse-http`
+- [X] T105 Feature-gate registration behind `handlers-complete` on `spacestorage-node` / `spacestoraged` / `spacestorage-conformance` so FirstBinary still yields `entrypoint_unknown_handler` for forbidden names
+- [X] T106 Classify-before-IR MUST smoke + one MUST-NOT per HC protocol (dispatch APIs; `compat_handlers_complete` suite)
+- Residual (still open above): T043 ES HTTP/Basic, T044 S3 SigV4 XML, T045 WebDAV Digest/XML, T046 Cassandra native frames, T047 CH CityHash/native+HTTP formats, T048 signature mismatch matrix via `protocol-core`

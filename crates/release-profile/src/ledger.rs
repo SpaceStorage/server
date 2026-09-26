@@ -2,7 +2,7 @@
 
 use crate::error::ValidationCode;
 use crate::profile::ReleaseProfile;
-use crate::slice::{self, SliceId, DEFERRED_AFTER_FIRST};
+use crate::slice::{self, DEFERRED_AFTER_FIRST, SliceId};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -57,11 +57,20 @@ impl MilestoneRecord {
                 }
                 validate_deferred_first_binary(&self.deferred)?;
             }
+            ReleaseProfile::HandlersComplete => {
+                if k != 6 {
+                    return Err(ValidationCode::ProfileMismatch {
+                        profile: profile.as_str().to_string(),
+                        expected_k: 6,
+                        actual_k: k,
+                    });
+                }
+                validate_deferred_handlers_complete(&self.deferred)?;
+            }
             ReleaseProfile::CompleteProduct => {
                 if k != 11 {
-                    let missing: Vec<u8> = (1..=11)
-                        .filter(|i| !self.implemented.contains(i))
-                        .collect();
+                    let missing: Vec<u8> =
+                        (1..=11).filter(|i| !self.implemented.contains(i)).collect();
                     return Err(ValidationCode::ProfileIncomplete {
                         profile: profile.as_str().to_string(),
                         missing,
@@ -108,11 +117,25 @@ fn validate_deferred_first_binary(deferred: &[DeferredSlice]) -> Result<(), Vali
     Ok(())
 }
 
+/// After slice 6: deferred `{7,8,9,10,11}`.
+fn validate_deferred_handlers_complete(deferred: &[DeferredSlice]) -> Result<(), ValidationCode> {
+    let expected: Vec<u8> = vec![7, 8, 9, 10, 11];
+    let mut got: Vec<u8> = deferred.iter().map(|d| d.id).collect();
+    got.sort_unstable();
+    if got != expected {
+        let missing: Vec<u8> = expected
+            .into_iter()
+            .filter(|i| !deferred.iter().any(|d| d.id == *i))
+            .collect();
+        return Err(ValidationCode::DeferredMissing { missing });
+    }
+    Ok(())
+}
+
 /// Validate all `*.yaml` milestone records under `docs/milestones/` (skip `fixtures/`).
 pub fn validate_milestones_dir(dir: &Path) -> Result<(), ValidationCode> {
-    let entries = fs::read_dir(dir).map_err(|_| ValidationCode::DeferredMissing {
-        missing: vec![],
-    })?;
+    let entries =
+        fs::read_dir(dir).map_err(|_| ValidationCode::DeferredMissing { missing: vec![] })?;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -121,9 +144,8 @@ pub fn validate_milestones_dir(dir: &Path) -> Result<(), ValidationCode> {
         if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
             continue;
         }
-        let record = MilestoneRecord::load_file(&path).map_err(|_| ValidationCode::SliceUnknown {
-            id: 0,
-        })?;
+        let record = MilestoneRecord::load_file(&path)
+            .map_err(|_| ValidationCode::SliceUnknown { id: 0 })?;
         record.validate()?;
     }
     Ok(())
@@ -226,6 +248,9 @@ deferred:
 changelog_ref: x.md
 "#;
         let r = MilestoneRecord::parse_yaml(yaml).unwrap();
-        assert_eq!(r.validate().unwrap_err().code(), "deferred_marked_cancelled");
+        assert_eq!(
+            r.validate().unwrap_err().code(),
+            "deferred_marked_cancelled"
+        );
     }
 }

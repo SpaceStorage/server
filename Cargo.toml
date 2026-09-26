@@ -20,6 +20,11 @@ members = [
     "crates/query",
     "crates/handler-postgresql",
     "crates/handler-redis",
+    "crates/handler-cassandra",
+    "crates/handler-elasticsearch",
+    "crates/handler-clickhouse",
+    "crates/handler-s3",
+    "crates/handler-webdav",
     "crates/authz",
     "crates/compat",
     "crates/observability",
@@ -88,7 +93,7 @@ publish = false
 [features]
 default = ["first-binary"]
 first-binary = ["handler-postgresql", "handler-redis"]
-complete-product = [
+handlers-complete = [
     "first-binary",
     "handler-cassandra",
     "handler-elasticsearch",
@@ -96,14 +101,20 @@ complete-product = [
     "handler-s3",
     "handler-webdav",
 ]
+complete-product = ["handlers-complete"]
 handler-postgresql = ["dep:spacestorage-handler-postgresql"]
 handler-redis = ["dep:spacestorage-handler-redis"]
-handler-cassandra = []
-handler-elasticsearch = []
-handler-clickhouse = []
-handler-s3 = []
-handler-webdav = []
+handler-cassandra = ["dep:spacestorage-handler-cassandra"]
+handler-elasticsearch = ["dep:spacestorage-handler-elasticsearch"]
+handler-clickhouse = ["dep:spacestorage-handler-clickhouse"]
+handler-s3 = ["dep:spacestorage-handler-s3"]
+handler-webdav = ["dep:spacestorage-handler-webdav"]
 
 [dependencies]
 spacestorage-handler-postgresql = { path = "crates/handler-postgresql", optional = true }
 spacestorage-handler-redis = { path = "crates/handler-redis", optional = true }
+spacestorage-handler-cassandra = { path = "crates/handler-cassandra", optional = true }
+spacestorage-handler-elasticsearch = { path = "crates/handler-elasticsearch", optional = true }
+spacestorage-handler-clickhouse = { path = "crates/handler-clickhouse", optional = true }
+spacestorage-handler-s3 = { path = "crates/handler-s3", optional = true }
+spacestorage-handler-webdav = { path = "crates/handler-webdav", optional = true }

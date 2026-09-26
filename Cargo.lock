@@ -1434,8 +1434,13 @@ dependencies = [
  "spacestorage-config",
  "spacestorage-conformance",
  "spacestorage-crypto",
+ "spacestorage-handler-cassandra",
+ "spacestorage-handler-clickhouse",
+ "spacestorage-handler-elasticsearch",
  "spacestorage-handler-postgresql",
  "spacestorage-handler-redis",
+ "spacestorage-handler-s3",
+ "spacestorage-handler-webdav",
  "spacestorage-internode",
  "spacestorage-membership",
  "spacestorage-node",
@@ -1468,6 +1473,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "spacestorage-handler-cassandra"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "spacestorage-compat",
+ "spacestorage-types",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "spacestorage-handler-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "spacestorage-compat",
+ "spacestorage-types",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "spacestorage-handler-elasticsearch"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "serde",
+ "serde_json",
+ "spacestorage-compat",
+ "spacestorage-types",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "spacestorage-handler-postgresql"
 version = "0.1.0"
 dependencies = [
@@ -1488,6 +1534,33 @@ dependencies = [
 
 [[package]]
 name = "spacestorage-handler-redis"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "spacestorage-compat",
+ "spacestorage-types",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "spacestorage-handler-s3"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "hex",
+ "spacestorage-compat",
+ "spacestorage-types",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "spacestorage-handler-webdav"
 version = "0.1.0"
 dependencies = [
  "bytes",
@@ -1554,8 +1627,13 @@ dependencies = [
  "spacestorage-authz",
  "spacestorage-config",
  "spacestorage-crypto",
+ "spacestorage-handler-cassandra",
+ "spacestorage-handler-clickhouse",
+ "spacestorage-handler-elasticsearch",
  "spacestorage-handler-postgresql",
  "spacestorage-handler-redis",
+ "spacestorage-handler-s3",
+ "spacestorage-handler-webdav",
  "spacestorage-internode",
  "spacestorage-membership",
  "spacestorage-observability",
@@ -1668,8 +1746,13 @@ dependencies = [
 name = "spacestorage-workspace"
 version = "0.0.0"
 dependencies = [
+ "spacestorage-handler-cassandra",
+ "spacestorage-handler-clickhouse",
+ "spacestorage-handler-elasticsearch",
  "spacestorage-handler-postgresql",
  "spacestorage-handler-redis",
+ "spacestorage-handler-s3",
+ "spacestorage-handler-webdav",
 ]
 
 [[package]]

@@ -91,7 +91,7 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 - [X] T029 [US1] Wire product default write quorum TWO / read ONE in `crates/config` query defaults; honor one-node starter `query_defaults.write_quorum ONE` without reinterpreting TWO as `min(2, live replicas)` (FR-009) in `crates/node` / placement quorum path from `004`/`012`
 - [X] T030 [US1] Select `DialectProfile::FirstBinary` for PostgreSQL in `crates/handler-postgresql` from `spacestorage-release-profile`: wire 3.0, SCRAM, simple+extended, INSERT/SELECT/UPDATE/DELETE, CREATE/DROP table, auto-commit; `BEGIN`, `COMMIT`, `ROLLBACK`, and `COPY` each → `feature_not_supported` `0A000` (no empty-transaction notices)
 - [X] T031 [US1] Select first-binary Redis dialect in `crates/handler-redis`: AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT-noop/TTL on `K/V Store`; other types (incl. Document Store) canonical blob only; type-specific verbs off the MUST list (`HGET`, `JSON.GET`, …) MUST return Redis error (unknown command or not-supported), never success or no-op
-- [ ] T032 [US1] Enable admin-create of `Document Store` and canonical-blob read/write via PostgreSQL and/or Redis for that type in the admin/catalog + protocol mapping path (`crates/node` admin create + `002` blob mapping); native document verbs MUST NOT be required
+- [X] T032 [US1] Enable admin-create of `Document Store` and canonical-blob read/write via PostgreSQL and/or Redis for that type in the admin/catalog + protocol mapping path (`crates/node` admin create + `002` blob mapping); native document verbs MUST NOT be required
 - [X] T033 [US1] Include compile-time `"release_profile": "first-binary"` and registered `handlers` in `spacestorage status --output json` and admin `GET /v1/status` (`crates/admin-proto` + `crates/node/src/admin`); there is no config knob that enables Cassandra without rebuilding with `complete-product`
 - [X] T034 [US1] Expose global `/metrics` for implemented paths only (runtime/buffer/`node_state`, postgresql/redis traffic, WAL and replication ack counters used by TWO) via the `008` exposition seam; do not emit placeholder series for unimplemented families
 - [X] T035 [US1] Ensure node `ready` for this profile additionally requires: both cluster handlers bound, master-key readable, every entrypoint has transport, membership path bootstrap or joined (`crates/node/src/lifecycle.rs`)
@@ -151,8 +151,8 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 - [X] T048 [P] Align `docs/examples/` and [quickstart.md](quickstart.md) ports/paths (`5432`–`5434`, `6379`–`6381`, `7700`–`7703`, `7800`–`7803`, `7900`–`7903`) so an operator can finish 1-node (write ONE) then 3-node (write TWO) + PG/Redis smokes + Document Store blob CRUD in under 60 minutes (SC-001)
 - [X] T049 [P] Document in `docs/milestones/README.md` that default CI is `--features first-binary` (or default features) and a `complete-product` job MUST NOT be a merge gate for slices 1–5
 - [X] T050 Ensure no published artifact, changelog title, or crate description calls the first binary a “v1” of the seven-protocol matrix (FR-002) — prefer `slices-1-5` / `first-binary`
-- [ ] T051 Run [quickstart.md](quickstart.md) steps covering validate rejects, 1-node start, PG smoke (`BEGIN`/`COMMIT`/`ROLLBACK`/`COPY` → `0A000`), Redis MUST + `HGET` error, Document Store blob (step 5b), and 3-node kill-one against the in-process or loopback binary; record the command set in `crates/conformance` so SC-001–SC-003 and SC-006 stay executable
-- [ ] T052 [P] Add `rustfmt`/`clippy` clean pass on `crates/release-profile` and new conformance tests
+- [X] T051 Run [quickstart.md](quickstart.md) steps covering validate rejects, 1-node start, PG smoke (`BEGIN`/`COMMIT`/`ROLLBACK`/`COPY` → `0A000`), Redis MUST + `HGET` error, Document Store blob (step 5b), and 3-node kill-one against the in-process or loopback binary; record the command set in `crates/conformance` so SC-001–SC-003 and SC-006 stay executable
+- [X] T052 [P] Add `rustfmt`/`clippy` clean pass on `crates/release-profile` and new conformance tests
 
 ---
 
@@ -272,7 +272,22 @@ Residual after Redis SET fix + three-node membership roster refresh + honest mil
 - [X] T053 Fix Redis K/V MUST path: SET/GET/DEL/EXISTS use `ensure_kv` (auto-create), not `ensure_blob`, in `crates/handler-redis/src/commands.rs`
 - [X] T054 FR-009 without Raft: `MembershipService::refresh_roster_from_seeds` + `boot_three_node` refresh so earlier joiners learn later admits; `_smoke_boot` three-node green
 - [X] T055 Rewrite `docs/milestones/001-first-binary.md` Changelog to list proven green vs skeleton G tests (no seven-protocol “v1” claim)
-- [ ] T056 Replace `in_process_cluster_ready()` stubs in `crates/conformance/tests/first_binary.rs`, `document_store.rs`, and the fixture-boot half of `handlers_absent.rs` with real `boot_*` / validate calls so G1/G2/G6/G7/G10/G11/G8 match `_smoke_boot` depth
-- [ ] T032 (still open) Document Store admin-create + canonical-blob CRUD end-to-end
-- [ ] T051 Quickstart command set recorded against a loopback binary
-- [ ] T052 `rustfmt`/`clippy` clean on `release-profile` + conformance
+- [X] T056 Replace `in_process_cluster_ready()` stubs in `crates/conformance/tests/first_binary.rs`, `document_store.rs`, and the fixture-boot half of `handlers_absent.rs` with real `boot_*` / validate calls so G1/G2/G6/G7/G10/G11/G8 match `_smoke_boot` depth
+- [X] T032 Document Store admin-create + canonical-blob CRUD via Redis (`ensure_data` allows Document Store; G11 + handler unit test)
+- [X] T051 Quickstart command set recorded in `crates/conformance/tests/quickstart.rs` (SC-001–SC-003/SC-006)
+- [X] T052 `rustfmt`/`clippy` clean on `release-profile` + conformance (+ handler-redis for T032)
+
+### Still open / later (not falsely checked)
+
+- G6/G7 content restore after node restart (durable-ack count is proven; full WAL→client read after reboot is still thin vs Independent Test wording)
+- PostgreSQL canonical-blob path for Document Store (Redis path is the proven G11; PG blob mapping not separately gated)
+- Slice 6+ complete-product handlers (deferred)
+
+## Convergence (2026-09-26 slice 6 in progress)
+
+Slice 6 HandlersComplete path is **in progress** (not complete-product 1..=11):
+
+- Crates + `handlers-complete` Cargo feature + classify-gated MUST/MUST-NOT dialects green
+- First-binary still forbids cassandra/ES/CH/S3/WebDAV (`entrypoint_unknown_handler`)
+- Deferred slices **7–11** still owed; do not claim complete-product
+- Residuals: full native/SigV4/Digest/CityHash wire + protocol-core signature matrix (002 T043–T048)

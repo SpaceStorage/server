@@ -4,10 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use spacestorage_compat::{classify_outcome, ClassifyOutcome, DialectProfile, ProtocolId};
-use spacestorage_types::{
-    ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError,
-};
+use spacestorage_compat::{ClassifyOutcome, DialectProfile, ProtocolId, classify_outcome};
+use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
 
 pub const MUST_COMMANDS: &[&str] = &[
     "AUTH", "PING", "GET", "SET", "DEL", "EXISTS", "SCAN", "SELECT", "TTL", "EXPIRE", "PTTL",
@@ -31,7 +29,8 @@ pub struct TtlMap {
 
 impl TtlMap {
     pub fn set(&mut self, id: ContainerId, key: &str, ttl: Duration) {
-        self.expires.insert((id, key.to_string()), Instant::now() + ttl);
+        self.expires
+            .insert((id, key.to_string()), Instant::now() + ttl);
     }
 
     pub fn clear(&mut self, id: ContainerId, key: &str) {
@@ -103,6 +102,8 @@ impl SessionState {
         }
     }
 
+    /// K/V MUST path: auto-create `K/V Store` when missing (T053 seam).
+    #[allow(dead_code)]
     fn ensure_kv(&self) -> Result<ContainerId, RedisReply> {
         self.ensure_container(&[L3Model::KvStore], true)
     }
@@ -111,6 +112,11 @@ impl SessionState {
     #[allow(dead_code)]
     fn ensure_blob(&self) -> Result<ContainerId, RedisReply> {
         self.ensure_container(&[L3Model::KvStore, L3Model::DocumentStore], false)
+    }
+
+    /// Data verbs: auto-create K/V; allow an admin-created Document Store as blob (T032).
+    fn ensure_data(&self) -> Result<ContainerId, RedisReply> {
+        self.ensure_container(&[L3Model::KvStore, L3Model::DocumentStore], true)
     }
 
     fn ensure_container(
@@ -201,7 +207,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(val) = args.get(1) else {
                 return RedisReply::Error("ERR wrong number of arguments for 'set'".into());
             };
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -240,7 +246,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(key) = args.first() else {
                 return RedisReply::Error("ERR wrong number of arguments for 'get'".into());
             };
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -256,7 +262,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             if args.is_empty() {
                 return RedisReply::Error("ERR wrong number of arguments for 'del'".into());
             }
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -276,7 +282,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             RedisReply::Integer(n)
         }
         "EXISTS" => {
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -293,10 +299,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             RedisReply::Integer(n)
         }
         "SCAN" => {
-            let cursor: u64 = args
-                .first()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            let cursor: u64 = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
             let mut count = 10usize;
             let mut pattern: Option<&str> = None;
             let mut i = 1;
@@ -314,7 +317,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                     i += 1;
                 }
             }
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -338,7 +341,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(secs) = args.get(1).and_then(|s| s.parse::<u64>().ok()) else {
                 return RedisReply::Error("ERR wrong number of arguments for 'expire'".into());
             };
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -361,7 +364,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(key) = args.first() else {
                 return RedisReply::Error("ERR wrong number of arguments for 'ttl'".into());
             };
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -380,7 +383,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(key) = args.first() else {
                 return RedisReply::Error("ERR wrong number of arguments for 'pttl'".into());
             };
-            let id = match session.ensure_kv() {
+            let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
@@ -407,7 +410,10 @@ mod tests {
     fn must_list_and_off_list() {
         let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
         let mut s = SessionState::demo(catalog);
-        assert!(matches!(dispatch(&mut s, "AUTH", &["demo", "demo"]), RedisReply::Ok));
+        assert!(matches!(
+            dispatch(&mut s, "AUTH", &["demo", "demo"]),
+            RedisReply::Ok
+        ));
         assert!(matches!(dispatch(&mut s, "PING", &[]), RedisReply::Pong));
         assert!(matches!(
             dispatch(&mut s, "SET", &["k", "v"]),
@@ -421,10 +427,7 @@ mod tests {
             dispatch(&mut s, "EXISTS", &["k"]),
             RedisReply::Integer(1)
         ));
-        assert!(matches!(
-            dispatch(&mut s, "SELECT", &["0"]),
-            RedisReply::Ok
-        ));
+        assert!(matches!(dispatch(&mut s, "SELECT", &["0"]), RedisReply::Ok));
         assert!(matches!(
             dispatch(&mut s, "EXPIRE", &["k", "60"]),
             RedisReply::Integer(1)
@@ -440,6 +443,51 @@ mod tests {
         assert!(matches!(
             dispatch(&mut s, "JSON.GET", &["k"]),
             RedisReply::Error(_)
+        ));
+    }
+
+    #[test]
+    fn document_store_admin_create_blob_crud() {
+        let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        catalog
+            .write()
+            .unwrap()
+            .create(
+                "demo",
+                "docs",
+                L3Model::DocumentStore,
+                false,
+                None,
+                StorageModeChoice::Persistent,
+            )
+            .expect("admin-create Document Store");
+        let mut s = SessionState::demo(Arc::clone(&catalog));
+        s.container = "docs".into();
+        assert!(matches!(
+            dispatch(&mut s, "AUTH", &["demo", "demo"]),
+            RedisReply::Ok
+        ));
+        assert!(matches!(
+            dispatch(&mut s, "SET", &["doc1", r#"{"a":1}"#]),
+            RedisReply::Ok
+        ));
+        match dispatch(&mut s, "GET", &["doc1"]) {
+            RedisReply::Bulk(Some(v)) => assert_eq!(v, br#"{"a":1}"#),
+            other => panic!("expected blob GET, got {other:?}"),
+        }
+        assert!(matches!(
+            dispatch(&mut s, "DEL", &["doc1"]),
+            RedisReply::Integer(1)
+        ));
+        assert!(matches!(
+            dispatch(&mut s, "JSON.GET", &["doc1"]),
+            RedisReply::Error(_)
+        ));
+        // ensure_blob: missing Document Store refuses without auto-create as Document Store
+        s.container = "missing-docs".into();
+        assert!(matches!(
+            s.ensure_blob(),
+            Err(RedisReply::Error(e)) if e.contains("admin-create")
         ));
     }
 }

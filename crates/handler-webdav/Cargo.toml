@@ -1,0 +1,20 @@
+[package]
+name = "spacestorage-handler-webdav"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "WebDAV RFC 4918 subset handler (002 HandlersComplete / slice 6)"
+publish = false
+
+[dependencies]
+spacestorage-types = { path = "../types" }
+spacestorage-compat = { path = "../compat" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

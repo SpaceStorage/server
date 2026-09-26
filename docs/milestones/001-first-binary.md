@@ -27,6 +27,26 @@ These slices remain owed (`still_owed: true`); intent files `01`–`15` are not 
 
 ## Changelog
 
+### 2026-09-26 — Phase 0 DoD: real G gates + Document Store blob
+
+**Proven green** (`CARGO_TARGET_DIR=target`):
+
+- `cargo test -p spacestorage-conformance --features first-binary` — G1–G11
+  no longer stub on `in_process_cluster_ready()`:
+  - G1/G2/G6/G7/G10 via `boot_one_node` / `boot_three_node` (+ omitted-transport validate, drain refuses new tenant accepts)
+  - G8 validates `unknown-handler-cassandra.conf` (and ES/CH/S3/WebDAV rewrites) → `entrypoint_unknown_handler`
+  - G11 admin-create Document Store on live node catalog + Redis GET/SET blob; `JSON.GET` errors
+- `crates/conformance/tests/quickstart.rs` records SC-001–SC-003/SC-006 quickstart steps as executable tests
+- Redis data verbs use `ensure_data` (auto-create K/V; allow admin-created Document Store as blob)
+- `cargo test -p spacestorage-release-profile --test ledger` green; deferred 6–11 still `still_owed: true`
+- `rustfmt`/`clippy -D warnings` clean on `release-profile`, conformance (`--no-deps`), handler-redis
+
+**Still thin / honest residuals**:
+
+- G6/G7 proves durable-ack quorum math (TWO ≠ `min(2, live)`); does not yet reboot a killed node and re-read client content from WAL
+- Document Store blob proven on Redis; PostgreSQL blob mapping for Document Store not separately gated
+- Slice 6+ handlers remain deferred (not this milestone)
+
 ### 2026-09-26 — conformance + Redis SET + membership roster
 
 **Proven green** (`CARGO_TARGET_DIR=target`):
@@ -45,14 +65,3 @@ These slices remain owed (`still_owed: true`); intent files `01`–`15` are not 
 **Membership note**: without Raft (`006`), joiners refresh the seed roster
 via `MembershipService::refresh_roster_from_seeds` so later admits reach
 earlier members (FR-009). Not a full view-push / cluster-log apply.
-
-**Still thin / not DoD-complete**:
-
-- `first_binary.rs` G1/G2/G6/G7/G10 and `document_store.rs` G11 still call
-  `in_process_cluster_ready()` (always `true`) — real cluster proof lives in
-  `_smoke_boot` only.
-- `handlers_absent.rs` asserts the profile inventory; it does not yet boot
-  `unknown-handler-cassandra.conf` through validate/startup.
-- Document Store admin-create + canonical-blob CRUD gate (G11) is not a real
-  end-to-end test yet.
-- Quickstart operator timing (T051) and clippy clean (T052) not recorded here.

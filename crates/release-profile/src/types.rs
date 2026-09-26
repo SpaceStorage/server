@@ -10,7 +10,9 @@ pub struct TypeRequirement {
 impl TypeRequirement {
     pub fn for_profile(profile: ReleaseProfile) -> Self {
         match profile {
-            ReleaseProfile::FirstBinary | ReleaseProfile::CompleteProduct => Self {
+            ReleaseProfile::FirstBinary
+            | ReleaseProfile::HandlersComplete
+            | ReleaseProfile::CompleteProduct => Self {
                 required_creatable_l3: &["K/V Store", "Relational Table", "Document Store"],
             },
         }

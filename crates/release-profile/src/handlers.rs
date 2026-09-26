@@ -8,6 +8,21 @@ pub struct HandlerBuildSet {
     pub forbidden: &'static [&'static str],
 }
 
+const HC_REQUIRED: &[&str] = &[
+    "admin",
+    "admin-http",
+    "internode",
+    "replication",
+    "postgresql",
+    "redis",
+    "cassandra",
+    "elasticsearch",
+    "clickhouse",
+    "clickhouse-http",
+    "s3",
+    "webdav",
+];
+
 impl HandlerBuildSet {
     pub fn for_profile(profile: ReleaseProfile) -> Self {
         match profile {
@@ -29,22 +44,13 @@ impl HandlerBuildSet {
                     "webdav",
                 ],
             },
+            ReleaseProfile::HandlersComplete => Self {
+                required: HC_REQUIRED,
+                forbidden: &[],
+            },
             ReleaseProfile::CompleteProduct => Self {
-                required: &[
-                    "admin",
-                    "admin-http",
-                    "internode",
-                    "replication",
-                    "postgresql",
-                    "redis",
-                    "cassandra",
-                    "elasticsearch",
-                    "clickhouse",
-                    "clickhouse-http",
-                    "s3",
-                    "webdav",
-                ],
-                // syslog is not required in either profile until slice 11
+                required: HC_REQUIRED,
+                // syslog is not required until slice 11
                 forbidden: &[],
             },
         }
@@ -70,5 +76,13 @@ mod tests {
         assert!(set.is_required("postgresql"));
         assert!(set.is_required("redis"));
         assert!(set.is_required("internode"));
+    }
+
+    #[test]
+    fn handlers_complete_requires_remaining() {
+        let set = HandlerBuildSet::for_profile(ReleaseProfile::HandlersComplete);
+        assert!(set.is_required("elasticsearch"));
+        assert!(set.is_required("clickhouse-http"));
+        assert!(!set.is_forbidden("s3"));
     }
 }

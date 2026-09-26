@@ -1,5 +1,6 @@
-
-use spacestorage_conformance::{boot_one_node, boot_three_node, quorum_two_write, scrape_metrics, tcp_bound};
+use spacestorage_conformance::{
+    boot_one_node, boot_three_node, quorum_two_write, scrape_metrics, tcp_bound,
+};
 use tempfile::tempdir;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -38,14 +39,19 @@ async fn smoke_boot_three() {
     );
     let az = a.az_labels().await;
     println!("az={az:?}");
-    assert_eq!(az, vec![String::from("a"), String::from("b"), String::from("c")]);
+    assert_eq!(
+        az,
+        vec![String::from("a"), String::from("b"), String::from("c")]
+    );
     let secret = a.join_secret_bytes().await;
     let replicas = vec![
         ("127.0.0.1".into(), a.ports.replication),
         ("127.0.0.1".into(), b.ports.replication),
         ("127.0.0.1".into(), c.ports.replication),
     ];
-    let acks = quorum_two_write(&replicas, &secret, b"payload-1").await.expect("TWO write");
+    let acks = quorum_two_write(&replicas, &secret, b"payload-1")
+        .await
+        .expect("TWO write");
     println!("durable_acks={acks}");
     assert!(acks >= 2);
     // kill c
@@ -54,7 +60,9 @@ async fn smoke_boot_three() {
         ("127.0.0.1".into(), a.ports.replication),
         ("127.0.0.1".into(), b.ports.replication),
     ];
-    let acks2 = quorum_two_write(&replicas2, &secret, b"payload-2").await.expect("TWO with one dead");
+    let acks2 = quorum_two_write(&replicas2, &secret, b"payload-2")
+        .await
+        .expect("TWO with one dead");
     println!("after kill c durable_acks={acks2}");
     assert!(acks2 >= 2);
     let replicas1 = vec![("127.0.0.1".into(), a.ports.replication)];

@@ -13,7 +13,10 @@ fn repo_root() -> PathBuf {
             break;
         }
     }
-    panic!("could not locate repo root from {}", env!("CARGO_MANIFEST_DIR"));
+    panic!(
+        "could not locate repo root from {}",
+        env!("CARGO_MANIFEST_DIR")
+    );
 }
 
 #[test]
@@ -35,7 +38,10 @@ fn missing_deferred_fixture_fails() {
     assert_eq!(err.code(), "deferred_missing");
     match err {
         ValidationCode::DeferredMissing { missing } => {
-            assert!(missing.contains(&8), "expected slice 8 missing, got {missing:?}");
+            assert!(
+                missing.contains(&8),
+                "expected slice 8 missing, got {missing:?}"
+            );
         }
         other => panic!("unexpected {other:?}"),
     }

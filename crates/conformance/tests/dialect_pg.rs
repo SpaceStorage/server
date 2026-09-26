@@ -1,7 +1,7 @@
 //! G3/G4 PostgreSQL first-binary dialect.
 
 use spacestorage_compat::DialectProfile;
-use spacestorage_handler_postgresql::{execute_sql, FEATURE_NOT_SUPPORTED};
+use spacestorage_handler_postgresql::{FEATURE_NOT_SUPPORTED, execute_sql};
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};
 

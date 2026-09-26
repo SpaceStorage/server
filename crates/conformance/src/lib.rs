@@ -3,10 +3,10 @@
 //! Behavior is supplied by sibling crates (`001`–`015`). This crate owns the
 //! gate tests under `--features first-binary`.
 
-use spacestorage_config::{parse_validate, ValidateOptions};
+use spacestorage_config::{ValidateOptions, parse_validate};
 use spacestorage_internode::{decode_frame, encode_frame, registry};
 use spacestorage_node::lifecycle::NodeState;
-use spacestorage_node::{runtime, Node};
+use spacestorage_node::{Node, runtime};
 use spacestorage_release_profile::{HandlerBuildSet, ReleaseProfile, TypeRequirement};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -37,6 +37,26 @@ pub fn first_binary_handler_names() -> &'static [&'static str] {
         "redis",
         "replication",
         "echo",
+    ]
+}
+
+/// Expanded known list when `--features handlers-complete` is enabled.
+#[cfg(feature = "handlers-complete")]
+pub fn handlers_complete_handler_names() -> &'static [&'static str] {
+    &[
+        "admin",
+        "admin-http",
+        "internode",
+        "postgresql",
+        "redis",
+        "replication",
+        "echo",
+        "cassandra",
+        "elasticsearch",
+        "clickhouse",
+        "clickhouse-http",
+        "s3",
+        "webdav",
     ]
 }
 
@@ -149,15 +169,11 @@ impl LabNode {
     pub async fn join_secret_bytes(&self) -> Vec<u8> {
         let g = self.node.membership.read().await;
         let svc = g.as_ref().expect("membership");
-        svc.accepted_join_secret()
-            .or_else(|| {
-                // Joiner before/without accepted epoch: presented secret from file.
-                None
-            })
-            .unwrap_or_else(|| {
-                let text = std::fs::read_to_string(&self.join_secret_path).unwrap();
-                hex::decode(text.trim()).unwrap_or_else(|_| text.trim().as_bytes().to_vec())
-            })
+        svc.accepted_join_secret().unwrap_or_else(|| {
+            // Joiner before/without accepted epoch: presented secret from file.
+            let text = std::fs::read_to_string(&self.join_secret_path).unwrap();
+            hex::decode(text.trim()).unwrap_or_else(|_| text.trim().as_bytes().to_vec())
+        })
     }
 
     /// Re-contact a seed so this node's membership view catches later admits (FR-009).
@@ -225,11 +241,11 @@ fn rewrite_fixture(
     }
 
     let mut out = template
-        .replace("/etc/spacestorage/admin.token", admin_token.to_str().unwrap())
         .replace(
-            "/etc/spacestorage/master.key",
-            master_key.to_str().unwrap(),
+            "/etc/spacestorage/admin.token",
+            admin_token.to_str().unwrap(),
         )
+        .replace("/etc/spacestorage/master.key", master_key.to_str().unwrap())
         .replace(
             "/etc/spacestorage/join.secret",
             join_secret.to_str().unwrap(),
@@ -252,9 +268,8 @@ fn rewrite_fixture(
         if let Some(start) = out.find("seeds {") {
             if let Some(end_rel) = out[start..].find('}') {
                 let end = start + end_rel;
-                let replacement = format!(
-                    "seeds {{\n    name seed;\n    address {addr};\n    port {port};\n  "
-                );
+                let replacement =
+                    format!("seeds {{\n    name seed;\n    address {addr};\n    port {port};\n  ");
                 out.replace_range(start..end, &replacement);
             }
         }
@@ -265,10 +280,7 @@ fn rewrite_fixture(
         if !out.contains("join_token_file") {
             out = out.replace(
                 "token_file ",
-                &format!(
-                    "join_token_file {};\n  token_file ",
-                    tf.display()
-                ),
+                &format!("join_token_file {};\n  token_file ", tf.display()),
             );
         }
     }
@@ -361,15 +373,7 @@ pub async fn boot_from_fixture(
 pub async fn boot_one_node(root: &Path) -> LabNode {
     let work = root.join("one");
     let ports = PortMap::ephemeral().await;
-    let lab = boot_from_fixture(
-        "first-binary-one-node.conf",
-        work,
-        ports,
-        None,
-        None,
-        None,
-    )
-    .await;
+    let lab = boot_from_fixture("first-binary-one-node.conf", work, ports, None, None, None).await;
     lab.wait_ready(Duration::from_secs(10)).await;
     lab
 }
@@ -470,11 +474,7 @@ pub async fn replication_durable_ack(addr: &str, secret: &[u8], payload: &[u8]) 
         Ok(s) => s,
         Err(_) => return false,
     };
-    if stream
-        .write_all(&encode_frame(0, secret))
-        .await
-        .is_err()
-    {
+    if stream.write_all(&encode_frame(0, secret)).await.is_err() {
         return false;
     }
     let mut buf = Vec::new();
@@ -527,7 +527,9 @@ pub async fn quorum_two_write(
     secret: &[u8],
     payload: &[u8],
 ) -> Result<u32, String> {
-    use spacestorage_placement::{fanout_write, FanoutAck, FanoutReplica, FanoutWrite, QuorumLevel};
+    use spacestorage_placement::{
+        FanoutAck, FanoutReplica, FanoutWrite, QuorumLevel, fanout_write,
+    };
 
     let fanout_replicas: Vec<FanoutReplica> = replicas
         .iter()
@@ -600,6 +602,8 @@ pub fn validate_fixture(rel: &str) -> Result<(), Vec<spacestorage_config::Config
 }
 
 /// Whether the in-process harness can boot nodes (always true once this module links).
+/// Prefer calling `boot_one_node` / `boot_three_node` / `validate_fixture` directly in gates.
+#[deprecated(note = "use boot_one_node / boot_three_node / validate_fixture")]
 pub fn in_process_cluster_ready() -> bool {
     true
 }

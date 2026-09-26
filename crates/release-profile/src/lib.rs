@@ -14,9 +14,7 @@ pub mod types;
 pub use error::ValidationCode;
 pub use handlers::HandlerBuildSet;
 pub use ledger::{DeferredSlice, MilestoneRecord};
-pub use nongoals::{audit_nongoals, ProductNonGoal, REQUIRED_MENTIONS};
+pub use nongoals::{ProductNonGoal, REQUIRED_MENTIONS, audit_nongoals};
 pub use profile::ReleaseProfile;
-pub use slice::{
-    validate_implemented_prefix, SliceId, DEFERRED_AFTER_FIRST, FIRST_BINARY,
-};
+pub use slice::{DEFERRED_AFTER_FIRST, FIRST_BINARY, SliceId, validate_implemented_prefix};
 pub use types::TypeRequirement;

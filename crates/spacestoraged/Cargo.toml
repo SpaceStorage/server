@@ -10,6 +10,12 @@ publish = false
 name = "spacestoraged"
 path = "src/main.rs"
 
+[features]
+default = ["first-binary"]
+first-binary = []
+handlers-complete = ["spacestorage-node/handlers-complete"]
+complete-product = ["handlers-complete"]
+
 [dependencies]
 spacestorage-config = { path = "../config" }
 spacestorage-node = { path = "../node" }

@@ -4,13 +4,17 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "First-binary conformance suite (slices-1-5); not a seven-protocol v1 gate"
+description = "Conformance suite (first-binary + handlers-complete gates)"
 publish = false
 
 [features]
 default = ["first-binary"]
 first-binary = []
-complete-product = ["first-binary"]
+handlers-complete = [
+    "spacestorage-node/handlers-complete",
+    "spacestorage-release-profile/handlers-complete",
+]
+complete-product = ["handlers-complete"]
 
 [dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
@@ -32,6 +36,11 @@ spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
 spacestorage-handler-postgresql = { path = "../handler-postgresql" }
 spacestorage-handler-redis = { path = "../handler-redis" }
+spacestorage-handler-cassandra = { path = "../handler-cassandra" }
+spacestorage-handler-elasticsearch = { path = "../handler-elasticsearch" }
+spacestorage-handler-clickhouse = { path = "../handler-clickhouse" }
+spacestorage-handler-s3 = { path = "../handler-s3" }
+spacestorage-handler-webdav = { path = "../handler-webdav" }
 spacestorage-conformance = { path = "." }
 spacestorage-node = { path = "../node" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }

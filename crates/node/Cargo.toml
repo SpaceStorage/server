@@ -6,6 +6,18 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = ["first-binary"]
+first-binary = []
+handlers-complete = [
+    "dep:spacestorage-handler-cassandra",
+    "dep:spacestorage-handler-elasticsearch",
+    "dep:spacestorage-handler-clickhouse",
+    "dep:spacestorage-handler-s3",
+    "dep:spacestorage-handler-webdav",
+]
+complete-product = ["handlers-complete"]
+
 [dependencies]
 spacestorage-config = { path = "../config" }
 spacestorage-admin-proto = { path = "../admin-proto" }
@@ -19,6 +31,11 @@ spacestorage-internode = { path = "../internode" }
 spacestorage-replication = { path = "../replication" }
 spacestorage-handler-postgresql = { path = "../handler-postgresql" }
 spacestorage-handler-redis = { path = "../handler-redis" }
+spacestorage-handler-cassandra = { path = "../handler-cassandra", optional = true }
+spacestorage-handler-elasticsearch = { path = "../handler-elasticsearch", optional = true }
+spacestorage-handler-clickhouse = { path = "../handler-clickhouse", optional = true }
+spacestorage-handler-s3 = { path = "../handler-s3", optional = true }
+spacestorage-handler-webdav = { path = "../handler-webdav", optional = true }
 spacestorage-observability = { path = "../observability" }
 tokio = { workspace = true }
 uuid = { workspace = true }

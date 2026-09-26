@@ -1,6 +1,6 @@
 //! G5/G5b Redis first-binary dialect.
 
-use spacestorage_handler_redis::{dispatch, RedisReply, SessionState};
+use spacestorage_handler_redis::{RedisReply, SessionState, dispatch};
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};
 
@@ -29,10 +29,7 @@ fn g5_kv_must_list() {
         dispatch(&mut s, "SCAN", &["0", "COUNT", "10"]),
         RedisReply::Array(_)
     ));
-    assert!(matches!(
-        dispatch(&mut s, "SELECT", &["0"]),
-        RedisReply::Ok
-    ));
+    assert!(matches!(dispatch(&mut s, "SELECT", &["0"]), RedisReply::Ok));
     assert!(matches!(
         dispatch(&mut s, "EXPIRE", &["k", "30"]),
         RedisReply::Integer(1)

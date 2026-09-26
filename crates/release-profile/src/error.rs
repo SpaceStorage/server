@@ -5,10 +5,18 @@ use std::fmt;
 /// Named validation codes reused across config, node, and release-profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationCode {
-    SliceUnknown { id: u8 },
-    SliceGap { missing: Vec<u8> },
-    DeferredMissing { missing: Vec<u8> },
-    DeferredMarkedCancelled { id: u8 },
+    SliceUnknown {
+        id: u8,
+    },
+    SliceGap {
+        missing: Vec<u8>,
+    },
+    DeferredMissing {
+        missing: Vec<u8>,
+    },
+    DeferredMarkedCancelled {
+        id: u8,
+    },
     ImplementedNotPrefix,
     ProfileMismatch {
         profile: String,

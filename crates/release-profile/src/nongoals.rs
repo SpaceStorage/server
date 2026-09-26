@@ -109,10 +109,9 @@ pub const REQUIRED_MENTIONS: &[(ProductNonGoal, &[&str])] = &[
 /// Needle phrases that count as a mention for each non-goal.
 fn needles(goal: ProductNonGoal) -> &'static [&'static str] {
     match goal {
-        ProductNonGoal::SecondQueryEnginePerProtocol => &[
-            "second query engine",
-            "SecondQueryEnginePerProtocol",
-        ],
+        ProductNonGoal::SecondQueryEnginePerProtocol => {
+            &["second query engine", "SecondQueryEnginePerProtocol"]
+        }
         ProductNonGoal::DropInReplacementOfEmulatedSystems => &[
             "drop-in replacement",
             "DropInReplacementOfEmulatedSystems",
@@ -130,10 +129,9 @@ fn needles(goal: ProductNonGoal) -> &'static [&'static str] {
             "pause-for-human",
         ],
         ProductNonGoal::ByzantineNodes => &["not Byzantine", "ByzantineNodes", "Byzantine"],
-        ProductNonGoal::PerTenantCpuHardIsolation => &[
-            "CPU hard isolation",
-            "PerTenantCpuHardIsolation",
-        ],
+        ProductNonGoal::PerTenantCpuHardIsolation => {
+            &["CPU hard isolation", "PerTenantCpuHardIsolation"]
+        }
         ProductNonGoal::NativeClientProtocol => &[
             "SpaceStorage-native",
             "NativeClientProtocol",
@@ -152,13 +150,14 @@ pub fn audit_nongoals(repo_root: &Path) -> Result<(), ValidationCode> {
     for (goal, paths) in REQUIRED_MENTIONS {
         for rel in *paths {
             let path = repo_root.join(rel);
-            let text = fs::read_to_string(&path).map_err(|_| ValidationCode::NongoalUnspecified {
-                id: goal.id().to_string(),
-                spec: rel.to_string(),
-            })?;
+            let text =
+                fs::read_to_string(&path).map_err(|_| ValidationCode::NongoalUnspecified {
+                    id: goal.id().to_string(),
+                    spec: rel.to_string(),
+                })?;
             let lower = text.to_lowercase();
             let found = needles(*goal).iter().any(|n| {
-                if n.chars().any(|c| c.is_ascii_uppercase()) && *n != &n.to_lowercase() {
+                if n.chars().any(|c| c.is_ascii_uppercase()) && *n != n.to_lowercase() {
                     // mixed / exact-ish: try both
                     text.contains(n) || lower.contains(&n.to_lowercase())
                 } else {

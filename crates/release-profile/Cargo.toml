@@ -4,8 +4,14 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "SpaceStorage release profile, slice ledger, and product non-goal audit (slices-1-5 / first-binary)"
+description = "SpaceStorage release profile, slice ledger, and product non-goal audit"
 publish = false
+
+[features]
+default = ["first-binary"]
+first-binary = []
+handlers-complete = []
+complete-product = ["handlers-complete"]
 
 [dependencies]
 serde = { workspace = true }

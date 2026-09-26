@@ -6,6 +6,8 @@ use crate::types::TypeRequirement;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReleaseProfile {
     FirstBinary,
+    /// Slice-6 gate: all eight protocol handlers at `015` HandlersComplete MUST.
+    HandlersComplete,
     CompleteProduct,
 }
 
@@ -13,6 +15,7 @@ impl ReleaseProfile {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::FirstBinary => "first-binary",
+            Self::HandlersComplete => "handlers-complete",
             Self::CompleteProduct => "complete-product",
         }
     }
@@ -20,6 +23,7 @@ impl ReleaseProfile {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "first-binary" => Some(Self::FirstBinary),
+            "handlers-complete" => Some(Self::HandlersComplete),
             "complete-product" => Some(Self::CompleteProduct),
             _ => None,
         }
@@ -37,19 +41,16 @@ impl ReleaseProfile {
     pub fn expected_implemented_max(self) -> u8 {
         match self {
             Self::FirstBinary => 5,
+            Self::HandlersComplete => 6,
             Self::CompleteProduct => 11,
         }
     }
 
     /// Map onto the 015 dialect profile name (`spacestorage-compat::DialectProfile`).
-    ///
-    /// - `first-binary` → FirstBinary
-    /// - `complete-product` → CompleteProduct
-    /// - HandlersComplete is selected via the `handlers-complete` Cargo feature /
-    ///   `spacestorage_compat::profile_from_release("handlers-complete")`, not this enum yet.
     pub fn dialect_profile_name(self) -> &'static str {
         match self {
             Self::FirstBinary => "first-binary",
+            Self::HandlersComplete => "handlers-complete",
             Self::CompleteProduct => "complete-product",
         }
     }

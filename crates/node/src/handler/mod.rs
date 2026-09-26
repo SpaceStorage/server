@@ -66,3 +66,14 @@ pub mod fabric;
 pub mod postgresql;
 pub mod redis;
 pub mod stub_cluster;
+
+#[cfg(feature = "handlers-complete")]
+pub mod cassandra;
+#[cfg(feature = "handlers-complete")]
+pub mod clickhouse;
+#[cfg(feature = "handlers-complete")]
+pub mod elasticsearch;
+#[cfg(feature = "handlers-complete")]
+pub mod s3;
+#[cfg(feature = "handlers-complete")]
+pub mod webdav;

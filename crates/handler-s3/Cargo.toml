@@ -1,0 +1,21 @@
+[package]
+name = "spacestorage-handler-s3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "S3 SigV4 handler (002 HandlersComplete / slice 6)"
+publish = false
+
+[dependencies]
+spacestorage-types = { path = "../types" }
+spacestorage-compat = { path = "../compat" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

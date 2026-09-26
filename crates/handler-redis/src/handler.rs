@@ -8,8 +8,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::commands::{dispatch, RedisReply, SessionState};
-use crate::resp::{encode, try_decode, RespError, RespValue};
+use crate::commands::{RedisReply, SessionState, dispatch};
+use crate::resp::{RespError, RespValue, encode, try_decode};
 
 pub struct RedisHandler {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
@@ -113,9 +113,7 @@ fn frame_to_args(frame: RespValue) -> Result<Vec<String>, String> {
 
 fn frame_to_string(frame: RespValue) -> Result<String, String> {
     match frame {
-        RespValue::BulkString(Some(b)) => {
-            String::from_utf8(b).map_err(|e| e.to_string())
-        }
+        RespValue::BulkString(Some(b)) => String::from_utf8(b).map_err(|e| e.to_string()),
         RespValue::BulkString(None) => Ok(String::new()),
         RespValue::SimpleString(s) => Ok(s),
         RespValue::Integer(i) => Ok(i.to_string()),
@@ -141,9 +139,7 @@ fn reply_to_value(reply: &RedisReply) -> RespValue {
         RedisReply::Bulk(None) => RespValue::BulkString(None),
         RedisReply::Bulk(Some(b)) => RespValue::BulkString(Some(b.clone())),
         RedisReply::Integer(i) => RespValue::Integer(*i),
-        RedisReply::Array(items) => {
-            RespValue::Array(items.iter().map(reply_to_value).collect())
-        }
+        RedisReply::Array(items) => RespValue::Array(items.iter().map(reply_to_value).collect()),
         RedisReply::Error(e) => RespValue::Error(e.clone()),
     }
 }
