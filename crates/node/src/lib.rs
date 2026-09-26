@@ -11,12 +11,13 @@ pub mod stats;
 
 use crate::buffer::BufferRegistry;
 use crate::effective::EffectiveStore;
-use crate::handler::{admin_http, admin_tcp, echo, postgresql, redis, stub_cluster, HandlerRegistry};
+use crate::handler::{admin_http, admin_tcp, echo, fabric, postgresql, redis, HandlerRegistry};
 use crate::lifecycle::{NodeState, NodeStateMachine};
 use crate::stats::Stats;
 use arc_swap::ArcSwap;
 use spacestorage_config::NodeConfig;
 use spacestorage_crypto::SharedKeyAuthority;
+use spacestorage_membership::MembershipService;
 use spacestorage_storage::StorageEngine;
 use spacestorage_types::ContainerCatalog;
 use std::path::PathBuf;
@@ -26,7 +27,7 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::info;
+use tracing::{info, warn};
 
 pub struct Node {
     pub config_path: PathBuf,
@@ -42,6 +43,12 @@ pub struct Node {
     pub storage: tokio::sync::RwLock<Option<Arc<StorageEngine>>>,
     /// Optional `014` envelope KeyAuthority for WAL decrypt-on-restore (T065).
     key_authority: tokio::sync::RwLock<Option<SharedKeyAuthority>>,
+    /// Cluster membership (011); `None` when no cluster bootstrap/join/name configured.
+    pub membership: Arc<tokio::sync::RwLock<Option<Arc<MembershipService>>>>,
+    /// Shared internode/replication fabric (012); join secret injected after membership.
+    pub fabric: Arc<spacestorage_internode::FabricRuntime>,
+    /// Global `/metrics` exposition (008 / 016 G1).
+    pub metrics: Arc<spacestorage_observability::Metrics>,
     /// Cancelled when drain begins — wakes `run` (does **not** stop accept loops).
     pub drain_started: CancellationToken,
     /// Cancelled to stop accept loops (after drain period, startup abort, or test shutdown).
@@ -81,8 +88,39 @@ impl Node {
         worker_threads: u32,
         threads_source: String,
     ) -> Arc<Self> {
+        let domain = cfg
+            .cluster
+            .quorum_domain
+            .clone()
+            .unwrap_or_else(|| "default".into());
         let buffers = BufferRegistry::from_config(&cfg);
         let effective = EffectiveStore::new(&cfg, worker_threads, &threads_source, vec![]);
+        let replication_dir = cfg
+            .storage_data_dir
+            .as_ref()
+            .map(|d| PathBuf::from(d).join("replication"))
+            .unwrap_or_else(|| {
+                config_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .join("data")
+                    .join("replication")
+            });
+        let fabric_cfg = spacestorage_internode::FabricConfig::require_always_on(
+            true,
+            true,
+            domain,
+        )
+        .expect("internode+replication required");
+        // Empty until membership bootstrap/restore injects the join secret (T073).
+        let fabric_rt = Arc::new(spacestorage_internode::FabricRuntime::new(
+            fabric_cfg,
+            Vec::new(),
+        ));
+        let durable = Arc::new(spacestorage_replication::DurableAccept::new(
+            replication_dir,
+            1,
+        ));
         let node = Arc::new(Self {
             config_path,
             config: Arc::new(ArcSwap::from_pointee(cfg)),
@@ -94,6 +132,9 @@ impl Node {
             catalog: Arc::new(RwLock::new(ContainerCatalog::new())),
             storage: tokio::sync::RwLock::new(None),
             key_authority: tokio::sync::RwLock::new(None),
+            membership: Arc::new(tokio::sync::RwLock::new(None)),
+            fabric: Arc::clone(&fabric_rt),
+            metrics: Arc::new(spacestorage_observability::Metrics::default()),
             drain_started: CancellationToken::new(),
             cancel: CancellationToken::new(),
             force_cancel: CancellationToken::new(),
@@ -115,10 +156,17 @@ impl Node {
             }))
             .unwrap();
             reg.register(Arc::new(echo::EchoHandler)).unwrap();
-            for name in ["internode", "replication"] {
-                reg.register(Arc::new(stub_cluster::ClusterPortHandler { name }))
-                    .unwrap();
-            }
+            // 012: real internode/replication fabric (replaces stub_cluster).
+            reg.register(Arc::new(fabric::InternodeHandler {
+                fabric: Arc::clone(&fabric_rt),
+                membership: Arc::clone(&node.membership),
+            }))
+            .unwrap();
+            reg.register(Arc::new(fabric::ReplicationHandler {
+                fabric: fabric_rt,
+                durable,
+            }))
+            .unwrap();
             // 002 first-binary: real async protocol handlers (replace byte-sink stubs).
             reg.register(Arc::new(postgresql::PostgresqlPortHandler::new(Arc::clone(
                 &node.catalog,
@@ -145,6 +193,13 @@ impl Node {
             return Err(e);
         }
 
+        // 011: membership before ready when cluster bootstrap/join/name is set.
+        if let Err(e) = lifecycle::start_membership(&self).await {
+            tracing::error!(error = %e, "membership start failed");
+            self.state.set(lifecycle::NodeState::Failed);
+            return Err(e);
+        }
+
         let handles = entrypoint::bind_all(self.clone()).await?;
         if self.is_draining() || self.cancel.is_cancelled() {
             // Stop before ready (FR-007): listeners already opened are dropped when
@@ -157,6 +212,75 @@ impl Node {
                 let _ = h.await;
             }
             return Ok(());
+        }
+        // Gate ready on membership admit (pending join must not become ready).
+        // T053: in-progress first join stays up — do not Failed / membership_not_ready.
+        let pending_wait = {
+            let g = self.membership.read().await;
+            match g.as_ref() {
+                Some(m) if !m.may_become_ready() && m.is_pending_only() => true,
+                Some(m) if !m.may_become_ready() => {
+                    warn!("membership: not admitted; refusing ready");
+                    false
+                }
+                _ => false,
+            }
+        };
+        let must_fail_not_ready = {
+            let g = self.membership.read().await;
+            match g.as_ref() {
+                Some(m) if !m.may_become_ready() && !m.is_pending_only() => true,
+                _ => false,
+            }
+        };
+        if must_fail_not_ready {
+            self.state.set(lifecycle::NodeState::Failed);
+            self.cancel.cancel();
+            self.force_cancel.cancel();
+            self.tasks.close();
+            let _ = self.tasks.wait().await;
+            for h in handles {
+                let _ = h.await;
+            }
+            return Err("membership_not_ready".into());
+        }
+        if pending_wait {
+            if let Err(e) = lifecycle::wait_pending_join(&self).await {
+                warn!(error = %e, "membership: pending wait ended without ready");
+                self.state.set(lifecycle::NodeState::Failed);
+                self.cancel.cancel();
+                self.force_cancel.cancel();
+                self.tasks.close();
+                let _ = self.tasks.wait().await;
+                for h in handles {
+                    let _ = h.await;
+                }
+                return Err(e);
+            }
+            if self.cancel.is_cancelled() || self.is_draining() {
+                self.cancel.cancel();
+                self.force_cancel.cancel();
+                self.tasks.close();
+                let _ = self.tasks.wait().await;
+                for h in handles {
+                    let _ = h.await;
+                }
+                return Ok(());
+            }
+        }
+        if let Some(m) = self.membership.read().await.as_ref() {
+            if !m.may_become_ready() {
+                warn!("membership: still not ready after pending wait");
+                self.state.set(lifecycle::NodeState::Failed);
+                self.cancel.cancel();
+                self.force_cancel.cancel();
+                self.tasks.close();
+                let _ = self.tasks.wait().await;
+                for h in handles {
+                    let _ = h.await;
+                }
+                return Err("membership_not_ready".into());
+            }
         }
         if !self.state.try_ready() {
             return Ok(());

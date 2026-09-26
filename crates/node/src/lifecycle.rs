@@ -172,6 +172,182 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
     Ok(())
 }
 
+/// 011: start membership when cluster bootstrap, join, or name is configured.
+/// Without a cluster block, first-binary lab tests may become ready without membership.
+pub async fn start_membership(node: &Node) -> Result<(), String> {
+    let cfg = node.config.load();
+    let join_set = cfg.cluster.join.is_some();
+    let needs = cfg.cluster.bootstrap || join_set || cfg.cluster.name.is_some();
+    if !needs {
+        info!("no cluster bootstrap/join/name; skipping membership");
+        return Ok(());
+    }
+    let data_dir = cfg
+        .storage_data_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            // Ephemeral identity under a node-local temp-ish path derived from config path.
+            node.config_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("data")
+        });
+    let quorum_domain = cfg
+        .cluster
+        .quorum_domain
+        .clone()
+        .unwrap_or_else(|| "default".into());
+    let ladder = if cfg.cluster.topology_ladder.is_empty() {
+        vec!["az".into()]
+    } else {
+        cfg.cluster.topology_ladder.clone()
+    };
+    let svc = Arc::new(spacestorage_membership::MembershipService::new(
+        spacestorage_membership::MembershipStartOpts {
+            data_dir,
+            node_name: cfg.node_name.clone(),
+            cluster_name: cfg
+                .cluster
+                .name
+                .clone()
+                .unwrap_or_else(|| "cluster".into()),
+            quorum_domain,
+            token_file: cfg.cluster.token_file.as_ref().map(PathBuf::from),
+            bootstrap: cfg.cluster.bootstrap,
+            join: join_set,
+            foreign_seeds: false,
+            topology_ladder: ladder,
+            labels: cfg.labels.clone(),
+        },
+    ));
+    svc.on_start().await.map_err(|e| e.to_string())?;
+    // T073: inject cluster join secret into fabric (empty↔empty must not succeed).
+    // Bootstrap/restore: accepted epochs. Join mode: presented secret from token_file.
+    if let Some(secret) = svc.accepted_join_secret() {
+        node.fabric.set_join_secret(secret);
+        info!("fabric: join secret injected from membership epochs");
+    } else if svc.is_join_mode() {
+        match svc.load_presented_secret().await {
+            Ok(secret) => {
+                node.fabric.set_join_secret(secret);
+                info!("fabric: join secret injected from token_file");
+            }
+            Err(e) => {
+                return Err(e.to_string());
+            }
+        }
+    }
+    *node.membership.write().await = Some(Arc::clone(&svc));
+
+    // T054: after on_start in join mode, contact seeds before advertising ready.
+    if svc.is_pending_only() {
+        drive_first_join(node, &svc).await?;
+    }
+    Ok(())
+}
+
+/// Build seed list + JoinRequest and drive first-join (T054).
+pub async fn drive_first_join(
+    node: &Node,
+    svc: &spacestorage_membership::MembershipService,
+) -> Result<(), String> {
+    let cfg = node.config.load();
+    let seeds: Vec<spacestorage_membership::SeedEndpoint> = cfg
+        .cluster
+        .seeds
+        .iter()
+        .map(|s| spacestorage_membership::SeedEndpoint {
+            name: s.name.clone(),
+            address: s.address.clone(),
+            port: s.port,
+        })
+        .collect();
+    if seeds.is_empty() {
+        warn!("membership: join mode with empty seeds — staying pending without contact");
+        return Ok(());
+    }
+    let internodes_address = cfg
+        .entrypoints
+        .iter()
+        .find(|e| e.handler == "internode")
+        .map(|e| format!("{}:{}", e.address, e.port))
+        .unwrap_or_else(|| "127.0.0.1:0".into());
+    let join_token = if let Some(path) = cfg.cluster.join_token_file.as_ref() {
+        let text = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| e.to_string())?;
+        Some(
+            uuid::Uuid::parse_str(text.trim())
+                .map_err(|e| format!("join_token_file: {e}"))?,
+        )
+    } else {
+        None
+    };
+    let ack = svc
+        .drive_first_join(&seeds, cfg.labels.clone(), internodes_address, join_token)
+        .await
+        .map_err(|e| e.to_string())?;
+    match ack {
+        spacestorage_membership::JoinAck::Refused { code } => {
+            Err(format!("join_refused:{code}"))
+        }
+        spacestorage_membership::JoinAck::Pending
+        | spacestorage_membership::JoinAck::Admitted { .. }
+        | spacestorage_membership::JoinAck::Replaced { .. } => {
+            // Re-inject epochs after admit so fabric matches cluster secret epochs.
+            if let Some(secret) = svc.accepted_join_secret() {
+                node.fabric.set_join_secret(secret);
+            }
+            Ok(())
+        }
+    }
+}
+
+/// T053: while pending first-join, stay up (not Failed) and re-contact seeds until
+/// admitted/token or cancel. Does not advertise ready until `may_become_ready()`.
+pub async fn wait_pending_join(node: &Arc<Node>) -> Result<(), String> {
+    loop {
+        if node.cancel.is_cancelled() || node.is_draining() {
+            return Ok(());
+        }
+        let (pending, ready) = {
+            let g = node.membership.read().await;
+            match g.as_ref() {
+                Some(m) => (m.is_pending_only(), m.may_become_ready()),
+                None => (false, true),
+            }
+        };
+        if ready {
+            return Ok(());
+        }
+        if !pending {
+            // Not an in-progress first join — refuse ready without staying forever.
+            return Err("membership_not_ready".into());
+        }
+        info!("membership: pending join — staying up without ready");
+        // Re-drive JoinRequest so post-admit seed returns Admitted.
+        if let Some(svc) = node.membership.read().await.clone() {
+            let _ = drive_first_join(node, &svc).await;
+        }
+        if node
+            .membership
+            .read()
+            .await
+            .as_ref()
+            .map(|m| m.may_become_ready())
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        tokio::select! {
+            _ = node.cancel.cancelled() => return Ok(()),
+            _ = node.drain_started.cancelled() => return Ok(()),
+            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+        }
+    }
+}
+
 /// Node seam for `014` `KeyAuthority` during WAL restore (T065).
 /// Returns resolved data keys for encrypted catalog entries; missing authority → Unavailable.
 async fn resolve_container_wal_keys(

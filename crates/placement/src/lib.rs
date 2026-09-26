@@ -1,4 +1,24 @@
-//! Topology ladder + quorum helpers (004 MVP) + durable-ack wait (013 T062).
+//! Topology ladder + placement/quorum (004 first-binary).
+
+pub mod error;
+pub mod fanout;
+pub mod planner;
+pub mod quorum;
+pub mod replica;
+pub mod stamp;
+pub mod topology;
+
+pub use error::PlacementError;
+pub use fanout::{
+    fanout_read, fanout_write, in_source_domain, FanoutAck, FanoutRead, FanoutReadOutcome,
+    FanoutReplica, FanoutWrite, FanoutWriteOutcome,
+};
+pub use planner::{
+    finest_ladder_key, plan_replicas, resolve_anti_affinity_keys, PlanRequest, PlacementPlan,
+};
+pub use quorum::{product_defaults, QuorumLevel};
+pub use stamp::VersionStamp;
+pub use topology::{TopologyLadder, TopologyView};
 
 use spacestorage_types::{AckKind, StorageModeChoice, WriteAck};
 
@@ -50,27 +70,26 @@ pub fn durable_lsn_covers(drive_durable_lsn: u64, record_lsn: u64) -> bool {
     drive_durable_lsn >= record_lsn
 }
 
-/// Count only crash-durable acks (persistent/hybrid + durable kind).
-pub fn count_durable_acks(acks: &[WriteAck]) -> u32 {
+/// Count crash-durable acks only from replicas in `source_domain` (FR-006 / T072).
+pub fn count_durable_acks(acks: &[WriteAck], source_domain: &str) -> u32 {
     acks.iter()
-        .filter(|a| a.counts_as_crash_durable())
+        .filter(|a| a.quorum_domain == source_domain && a.counts_as_crash_durable())
         .count() as u32
 }
 
-/// Quorum wait path: require counted durable acks whose LSN is covered by the
-/// replica drive’s `durable_lsn`. Memory-kind / memory-mode acks never count.
-///
-/// `drive_durable_lsn` maps `(replica, drive_id) → durable_lsn` for pinned drives.
+/// Quorum wait path: require counted durable acks in `source_domain` whose LSN is
+/// covered by the replica drive’s `durable_lsn`. Memory-kind / memory-mode acks never count.
 pub fn write_quorum_satisfied(
     required: Quorum,
     acks: &[WriteAck],
+    source_domain: &str,
     drive_durable_lsn: &dyn Fn(&str, &str) -> u64,
     live_replicas: u32,
 ) -> bool {
     let counted = acks
         .iter()
         .filter(|a| {
-            if !a.counts_as_crash_durable() {
+            if a.quorum_domain != source_domain || !a.counts_as_crash_durable() {
                 return false;
             }
             let dlsn = drive_durable_lsn(&a.replica, &a.drive_id);
@@ -88,8 +107,22 @@ pub fn label_wal_ack(
     wal_kind: AckKind,
     mode: StorageModeChoice,
     durable_lsn: u64,
+    quorum_domain: impl Into<String>,
 ) -> WriteAck {
-    WriteAck::from_wal(replica, drive_id, lsn, wal_kind, mode, durable_lsn)
+    WriteAck::from_wal(
+        replica,
+        drive_id,
+        lsn,
+        wal_kind,
+        mode,
+        durable_lsn,
+        quorum_domain,
+    )
+}
+
+/// Leaderless coordinator: any admitted member in the source quorum_domain may coordinate.
+pub fn may_coordinate(member_domain: &str, source_domain: &str, is_member: bool) -> bool {
+    is_member && member_domain == source_domain
 }
 
 #[cfg(test)]
@@ -112,6 +145,7 @@ mod tests {
                 lsn: 10,
                 kind: AckKind::Memory,
                 mode: StorageModeChoice::Persistent,
+                quorum_domain: "lab".into(),
             },
             WriteAck {
                 replica: "n2".into(),
@@ -119,11 +153,12 @@ mod tests {
                 lsn: 10,
                 kind: AckKind::Durable,
                 mode: StorageModeChoice::Memory,
+                quorum_domain: "lab".into(),
             },
         ];
         let lookup = |_r: &str, _d: &str| 100u64;
-        assert!(!write_quorum_satisfied(Quorum::One, &acks, &lookup, 2));
-        assert_eq!(count_durable_acks(&acks), 0);
+        assert!(!write_quorum_satisfied(Quorum::One, &acks, "lab", &lookup, 2));
+        assert_eq!(count_durable_acks(&acks, "lab"), 0);
     }
 
     #[test]
@@ -134,11 +169,12 @@ mod tests {
             lsn: 10,
             kind: AckKind::Durable,
             mode: StorageModeChoice::Persistent,
+            quorum_domain: "lab".into(),
         }];
         let lagging = |_r: &str, _d: &str| 5u64;
         let caught_up = |_r: &str, _d: &str| 10u64;
-        assert!(!write_quorum_satisfied(Quorum::One, &acks, &lagging, 1));
-        assert!(write_quorum_satisfied(Quorum::One, &acks, &caught_up, 1));
+        assert!(!write_quorum_satisfied(Quorum::One, &acks, "lab", &lagging, 1));
+        assert!(write_quorum_satisfied(Quorum::One, &acks, "lab", &caught_up, 1));
     }
 
     #[test]
@@ -150,8 +186,42 @@ mod tests {
             AckKind::Durable,
             StorageModeChoice::Hybrid,
             3,
+            "lab",
         );
         assert!(ack.counts_as_crash_durable());
-        assert_eq!(count_durable_acks(&[ack]), 1);
+        assert_eq!(count_durable_acks(&[ack], "lab"), 1);
+    }
+
+    #[test]
+    fn follower_domain_acks_do_not_count() {
+        let acks = vec![
+            WriteAck {
+                replica: "follower".into(),
+                drive_id: "d1".into(),
+                lsn: 10,
+                kind: AckKind::Durable,
+                mode: StorageModeChoice::Persistent,
+                quorum_domain: "other".into(),
+            },
+            WriteAck {
+                replica: "source".into(),
+                drive_id: "d1".into(),
+                lsn: 10,
+                kind: AckKind::Durable,
+                mode: StorageModeChoice::Persistent,
+                quorum_domain: "lab".into(),
+            },
+        ];
+        assert_eq!(count_durable_acks(&acks, "lab"), 1);
+        let lookup = |_r: &str, _d: &str| 100u64;
+        assert!(write_quorum_satisfied(Quorum::One, &acks, "lab", &lookup, 2));
+        assert!(!write_quorum_satisfied(Quorum::Two, &acks, "lab", &lookup, 2));
+    }
+
+    #[test]
+    fn leaderless_same_domain() {
+        assert!(may_coordinate("lab", "lab", true));
+        assert!(!may_coordinate("lab", "other", true));
+        assert!(!may_coordinate("lab", "lab", false));
     }
 }

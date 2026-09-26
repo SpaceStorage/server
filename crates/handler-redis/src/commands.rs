@@ -104,17 +104,31 @@ impl SessionState {
     }
 
     fn ensure_kv(&self) -> Result<ContainerId, RedisReply> {
+        self.ensure_container(&[L3Model::KvStore], true)
+    }
+
+    /// Canonical blob path for Document Store — no auto-create (admin-create first).
+    #[allow(dead_code)]
+    fn ensure_blob(&self) -> Result<ContainerId, RedisReply> {
+        self.ensure_container(&[L3Model::KvStore, L3Model::DocumentStore], false)
+    }
+
+    fn ensure_container(
+        &self,
+        allowed: &[L3Model],
+        auto_create_kv: bool,
+    ) -> Result<ContainerId, RedisReply> {
         let mut cat = self.catalog.write().expect("catalog");
         match cat.describe(&self.namespace, &self.container) {
             Ok(c) => {
-                if c.model != L3Model::KvStore {
+                if !allowed.contains(&c.model) {
                     return Err(RedisReply::Error(
                         "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
                     ));
                 }
                 Ok(c.id)
             }
-            Err(TypeError::NotFound) => cat
+            Err(TypeError::NotFound) if auto_create_kv => cat
                 .create(
                     &self.namespace,
                     &self.container,
@@ -124,6 +138,9 @@ impl SessionState {
                     StorageModeChoice::Persistent,
                 )
                 .map_err(|e| RedisReply::Error(format!("ERR {e:?}"))),
+            Err(TypeError::NotFound) => Err(RedisReply::Error(
+                "ERR no such container (admin-create Document Store / K/V first)".into(),
+            )),
             Err(e) => Err(RedisReply::Error(format!("ERR {e:?}"))),
         }
     }

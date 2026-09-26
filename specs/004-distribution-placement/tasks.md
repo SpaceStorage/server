@@ -25,8 +25,8 @@ description: "Task list for distribution, placement, media, and replication (L1)
 **Purpose**: Workspace member, placement module skeleton, docs/examples trees, starter fixture copies
 
 - [X] T001 Create `crates/internode/Cargo.toml` (package `spacestorage-internode`, edition 2024) and `crates/internode/src/lib.rs` that `mod`s `frame`, `rpc`, `heartbeat`, `auth`
-- [ ] T002 Add `crates/internode` to workspace `[workspace.members]` in `Cargo.toml` and depend from `crates/node` / `crates/spacestoraged` without pulling TCP into `crates/placement`
-- [ ] T003 Extend `crates/placement/src/lib.rs` to declare modules `topology`, `selector`, `planner`, `replica`, `quorum`, `stamp`, `group`, `shard`, `repair`, `rebalance`, `txn`, `error`, `director` while keeping `matrix.rs` and `local.rs` compiling for `003`
+- [X] T002 Add `crates/internode` to workspace `[workspace.members]` in `Cargo.toml` and depend from `crates/node` / `crates/spacestoraged` without pulling TCP into `crates/placement`
+- [X] T003 Extend `crates/placement/src/lib.rs` to declare modules `topology`, `selector`, `planner`, `replica`, `quorum`, `stamp`, `group`, `shard`, `repair`, `rebalance`, `txn`, `error`, `director` while keeping `matrix.rs` and `local.rs` compiling for `003`
 - [ ] T004 [P] Create `docs/placement.md` and `docs/replication.md` stubs that link to [contracts/topology.md](contracts/topology.md) and [contracts/quorum.md](contracts/quorum.md)
 - [ ] T005 [P] Copy the six FR-075 starter fixtures from `specs/004-distribution-placement/contracts/fixtures/` into `docs/examples/` (`node-single.conf`, `node-rack.conf`, `cluster-3az/`, `cluster-mixed-media/`, `cluster-two-region/`)
 
@@ -38,15 +38,15 @@ description: "Task list for distribution, placement, media, and replication (L1)
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 Implement `PlacementError` and validation codes in `crates/placement/src/error.rs` per [data-model.md](data-model.md) (`PlacementUnsatisfiable`, `AntiAffinityKeyMissing`, `InternodesRequired`, `QuorumUnsatisfiable`, `QuorumRequiresAsyncGroup`, `QuorumNotDurable`, `EachQuorumRefused`, `ShardKeyUnknown`, `DecommissionBlocked`, `SelectorSyntax`, `DriveMediaRequired`, `MemorySizeRequired`, `NodeNameConflict`, `PeerUnknown`) with FR-082 refusal fields (container, constraint/level, topology facts, resolution hint)
-- [ ] T007 [P] Implement `VersionStamp` HLC `(physical_micros, logical, node_id)` with total order and LWW compare in `crates/placement/src/stamp.rs` (skew gauge hook; default `max_stamp_skew` 500 ms configurable later)
+- [X] T006 Implement `PlacementError` and validation codes in `crates/placement/src/error.rs` per [data-model.md](data-model.md) (`PlacementUnsatisfiable`, `AntiAffinityKeyMissing`, `InternodesRequired`, `QuorumUnsatisfiable`, `QuorumRequiresAsyncGroup`, `QuorumNotDurable`, `EachQuorumRefused`, `ShardKeyUnknown`, `DecommissionBlocked`, `SelectorSyntax`, `DriveMediaRequired`, `MemorySizeRequired`, `NodeNameConflict`, `PeerUnknown`) with FR-082 refusal fields (container, constraint/level, topology facts, resolution hint)
+- [X] T007 [P] Implement `VersionStamp` HLC `(physical_micros, logical, node_id)` with total order and LWW compare in `crates/placement/src/stamp.rs` (skew gauge hook; default `max_stamp_skew` 500 ms configurable later)
 - [ ] T008 [P] Define `ClusterStore` trait + append-only `PlacementEvent` log/snapshot types in `crates/placement/src/cluster_store.rs` (or `store.rs`) covering NodeJoin/Leave, Label/Drive/MemoryChange, PlacementPut/Delete, ReplicaHealth, RebalanceStep, RepairProgress, Txn* per [data-model.md](data-model.md) §17; LWW by event `id` + HLC until `06` fronts Raft
 - [ ] T009 Grow `PlacementDirector` in `crates/placement/src/lib.rs` / `director.rs` with **default-bodied** additive methods only so `003` type-system tests keep compiling; keep `LocalDirector` in `crates/placement/src/local.rs` as RF=1 default when internodes is disabled
-- [ ] T010 Implement length-prefixed frame codec in `crates/internode/src/frame.rs` matching `001` admin envelope style (no gRPC)
-- [ ] T011 [P] Implement shared-token auth + optional TLS path wiring in `crates/internode/src/auth.rs` (token file path reference, mode ≤ 0600, never inlined; cert paths reuse `001` rules)
-- [ ] T012 Stub `InternodeHandler` + `PeerSet` in `crates/internode/src/lib.rs` registering as a `001` `Handler` on its own port (explicitly enabled like `admin`)
+- [X] T010 Implement length-prefixed frame codec in `crates/internode/src/frame.rs` matching `001` admin envelope style (no gRPC)
+- [X] T011 [P] Implement shared-token auth + optional TLS path wiring in `crates/internode/src/auth.rs` (token file path reference, mode ≤ 0600, never inlined; cert paths reuse `001` rules)
+- [X] T012 Stub `InternodeHandler` + `PeerSet` in `crates/internode/src/lib.rs` registering as a `001` `Handler` on its own port (explicitly enabled like `admin`)
 - [ ] T013 Add multi-node in-process harness helpers in `crates/conformance/src/cluster_harness.rs` (or `tests/common/mod.rs`) that boot N nodes with ephemeral internodes/admin ports, shared fixtures under `contracts/fixtures/`, and optional injected RTT delay on the internodes path
-- [ ] T014 [P] Add unit tests for `VersionStamp` ordering and `PlacementError` FR-082 shape in `crates/placement/src/stamp.rs` / `crates/placement/src/error.rs`
+- [X] T014 [P] Add unit tests for `VersionStamp` ordering and `PlacementError` FR-082 shape in `crates/placement/src/stamp.rs` / `crates/placement/src/error.rs`
 
 **Checkpoint**: `cargo test -p spacestorage-placement` and `cargo test -p spacestorage-internode` compile; `003` still green against additive director defaults. User stories can start.
 
@@ -64,11 +64,11 @@ description: "Task list for distribution, placement, media, and replication (L1)
 
 - [ ] T015 [P] [US1] Contract-validate all valid/invalid topology fixtures under `specs/004-distribution-placement/contracts/fixtures/` in `crates/conformance/tests/topology_fixtures.rs` (invalid filenames name expected codes)
 - [ ] T016 [P] [US1] Add SC-001/SC-002 conformance in `crates/conformance/tests/topology_view.rs`: three-AZ fixture topology identical on every node; domains cardinalities; starter examples match stated domains
-- [ ] T017 [P] [US1] Add unit tests for ladder fill, hierarchy integrity (`az` shared ⇒ coarser keys must match), and domain cardinality in `crates/placement/src/topology.rs`
+- [X] T017 [P] [US1] Add unit tests for ladder fill, hierarchy integrity (`az` shared ⇒ coarser keys must match), and domain cardinality in `crates/placement/src/topology.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T018 [P] [US1] Implement `Node`, `Drive`, `MemoryPool`, `PlacementDomain`, `TopologyView`, and `TopologyLadder` (ordered subsequence of reserved keys `rack`/`az`/`region`/`continent`/`planet` + optional custom append; `planet` never a voting domain) in `crates/placement/src/topology.rs` with invariants from [data-model.md](data-model.md) §§1–4
+- [X] T018 [P] [US1] Implement `Node`, `Drive`, `MemoryPool`, `PlacementDomain`, `TopologyView`, and `TopologyLadder` (ordered subsequence of reserved keys `rack`/`az`/`region`/`continent`/`planet` + optional custom append; `planet` never a voting domain) in `crates/placement/src/topology.rs` with invariants from [data-model.md](data-model.md) §§1–4
 - [ ] T019 [P] [US1] Implement `LabelSelector` parse/match AST in `crates/placement/src/selector.rs` per [contracts/label-selector.md](contracts/label-selector.md) (equality, inequality, set, presence, and/or, `media=` / `memory` sugar; no regex)
 - [ ] T020 [US1] Parse config blocks `labels {}`, `storage.drive {}`, `memory { size; labels }`, `cluster { peers; topology_ladder; }` in `crates/config` (files under `crates/config/src/`) per [contracts/config-directives.md](contracts/config-directives.md) and R2/R16; refuse `DriveMediaRequired`, `MemorySizeRequired`, `NodeNameConflict`, duplicate keys without partial apply (FR-008)
 - [ ] T021 [US1] Enforce ladder fill and hierarchy integrity on join/ready and live label changes in `crates/node` (omit ladder key ⇒ not `ready` as replica target; hierarchy break refused)
@@ -89,14 +89,14 @@ description: "Task list for distribution, placement, media, and replication (L1)
 ### Tests for User Story 2 ⚠️
 
 - [ ] T025 [P] [US2] Add SC-003 conformance in `crates/conformance/tests/anti_affinity.rs` (satisfiable spreads + Q5 refusals with required/available counts; no storage allocated on refuse)
-- [ ] T026 [P] [US2] Add planner unit tests in `crates/placement/src/planner.rs` for deterministic tie-break on `node_name`, ordered anti-affinity lists, and exclusion reasons
+- [X] T026 [P] [US2] Add planner unit tests in `crates/placement/src/planner.rs` for deterministic tie-break on `node_name`, ordered anti-affinity lists, and exclusion reasons
 
 ### Implementation for User Story 2
 
-- [ ] T027 [P] [US2] Implement `Replica`, `ReplicaSet`, health state machine (`empty`/`in_sync`/`behind`/`unavailable`/`moving`/`removed`/`content_lost`) in `crates/placement/src/replica.rs` per [data-model.md](data-model.md) §9–10
-- [ ] T028 [US2] Implement deterministic greedy planner in `crates/placement/src/planner.rs` (selector exclude → media/memory capacity → order by anti-affinity distinctness, least load, `node_name`; refuse unsatisfiable — never silent downgrade) per R4 and [contracts/placement.md](contracts/placement.md)
+- [X] T027 [P] [US2] Implement `Replica`, `ReplicaSet`, health state machine (`empty`/`in_sync`/`behind`/`unavailable`/`moving`/`removed`/`content_lost`) in `crates/placement/src/replica.rs` per [data-model.md](data-model.md) §9–10
+- [X] T028 [US2] Implement deterministic greedy planner in `crates/placement/src/planner.rs` (selector exclude → media/memory capacity → order by anti-affinity distinctness, least load, `node_name`; refuse unsatisfiable — never silent downgrade) per R4 and [contracts/placement.md](contracts/placement.md)
 - [ ] T029 [US2] Record `Placement` / `PlacementReport` (targets, exclusions, satisfied/degraded/unplaceable) in `ClusterStore` and implement `ClusterDirector` in `crates/placement/src/director.rs` as default when internodes is enabled; RF>1 without internodes ⇒ `InternodesRequired`
-- [ ] T030 [US2] Default anti-affinity for RF≥2 to finest ladder key; support ordered key lists and per-label-value replica counts (FR-020, FR-023) in `crates/placement/src/planner.rs` / constraint types
+- [X] T030 [US2] Default anti-affinity for RF≥2 to finest ladder key; support ordered key lists and per-label-value replica counts (FR-020, FR-023) in `crates/placement/src/planner.rs` / constraint types
 - [ ] T031 [US2] Wire `003` capability declarations into `ClusterDirector` so replication/node_placement/labels/persistent_placement execute or refuse with named reason; RF change places/removes replicas under constraints (FR-025) in `crates/placement` + type-system call sites
 - [ ] T032 [US2] Expose placement/replica-set describe in `crates/admin-proto` and `crates/spacestorage` CLI (`placement`, `replicas`) readable from any node (FR-018, FR-024, FR-080)
 - [ ] T033 [US2] On after-the-fact anti-affinity violation (label change / node loss), mark placement `degraded` with named constraint and keep serving (FR-026) in `crates/placement/src/director.rs` / `crates/placement/src/replica.rs`; repair deferred to US8 rebalance hook
@@ -115,13 +115,13 @@ description: "Task list for distribution, placement, media, and replication (L1)
 
 - [ ] T034 [P] [US3] Add SC-005/SC-006 conformance in `crates/conformance/tests/quorum_levels.rs` (vocabulary, defaults, explicit reject vs default clamp, durable vs memory acks Q3)
 - [ ] T035 [P] [US3] Add SC-007 conformance in `crates/conformance/tests/coordinator_any_node.rs` (identical results from replica vs non-replica coordinator; coordinator named in execution record)
-- [ ] T036 [P] [US3] Add quorum arithmetic unit tests in `crates/placement/src/quorum.rs` for factors 2–5 and `Acks(n)`
+- [X] T036 [P] [US3] Add quorum arithmetic unit tests in `crates/placement/src/quorum.rs` for factors 2–5 and `Acks(n)`
 
 ### Implementation for User Story 3
 
-- [ ] T037 [P] [US3] Implement quorum level arithmetic and durable-ack filter in `crates/placement/src/quorum.rs` per [contracts/quorum.md](contracts/quorum.md) (persistent/hybrid count drive-backed only; memory-mode counts memory; mixed report `ack_kind`)
+- [X] T037 [P] [US3] Implement quorum level arithmetic and durable-ack filter in `crates/placement/src/quorum.rs` per [contracts/quorum.md](contracts/quorum.md) (persistent/hybrid count drive-backed only; memory-mode counts memory; mixed report `ack_kind`)
 - [ ] T038 [US3] Implement precedence query → session → container → namespace → global and clamp/reject rules in `crates/placement/src/quorum.rs` + `crates/exec` option resolution (FR-029–FR-033); extend `ExecutionRecord.applied` with `QuorumDecision` fields (FR-035)
-- [ ] T039 [US3] Implement `FanoutWrite` / `FanoutRead` RPC and coordinator fan-out in `crates/internode/src/rpc.rs` and `crates/exec` `Coordinator` so any member node coordinates; replicas accept writes independently (leaderless; Clarification Q1)
+- [X] T039 [US3] Implement `FanoutWrite` / `FanoutRead` RPC and coordinator fan-out in `crates/internode/src/rpc.rs` and `crates/exec` `Coordinator` so any member node coordinates; replicas accept writes independently (leaderless; Clarification Q1)
 - [ ] T040 [US3] Implement live `PlacementInfo` against replica sets (not stub `replicas()==1`) in `crates/exec` / `crates/placement`; keep single-node `LocalDirector` path for RF=1 clamping tests
 - [ ] T041 [US3] Apply LWW by `VersionStamp` on read disagreement and record correction intent in `crates/placement/src/stamp.rs` + coordinator path (FR-037); type-supported alternate merge hook from type descriptor
 - [ ] T042 [US3] Refuse rather than guess when placement view is known stale; record coordinating node and contacted replicas (FR-047–FR-048) in `crates/exec`
@@ -392,4 +392,11 @@ Task: "T036 quorum arithmetic unit tests in crates/placement/src/quorum.rs"
 
 **Purpose**: Close gaps found by `/speckit-converge` that are not already covered by open tasks (false `[x]`, unmarked gaps, constitution violations). First-binary RF/anti-affinity/leaderless/ladder work remains tracked by open T018–T021, T025–T033, T037–T039 — do not re-list here.
 
-- [ ] T095 CRITICAL: Complete false-marked T001 — add `mod frame`, `mod rpc`, `mod heartbeat`, `mod auth` (and stub module files) under `crates/internode/src/` so `lib.rs` matches the claimed deliverable; current `FabricConfig`-only crate contradicts T001 (`contradicts`)
+- [X] T095 CRITICAL: Complete false-marked T001 — add `mod frame`, `mod rpc`, `mod heartbeat`, `mod auth` (and stub module files) under `crates/internode/src/` so `lib.rs` matches the claimed deliverable; current `FabricConfig`-only crate contradicts T001 (`contradicts`)
+
+## Phase 13: Convergence
+
+**Purpose**: Close CRITICAL/HIGH first-binary residuals after slice-5 implement (false `[x]` on T030/T039). Do not re-list open T021/T025/T029+/repair/rebalance/Raft.
+
+- [X] T096 CRITICAL: Complete false-marked T030 — when RF≥2 and anti-affinity is unset, default to the **finest** key on the cluster topology ladder (FB `[az]`); empty `anti_affinity_keys` MUST NOT place replicas that share that key's value; pass ladder into `plan_replicas` / `PlanRequest` in `crates/placement/src/planner.rs` and cover with unit tests (FR-020) (`partial`)
+- [X] T097 CRITICAL: Complete false-marked T039 — replace stub `FanoutWrite`/`FanoutRead` path with leaderless source-`quorum_domain` coordinator fan-out that waits for durable acks in-domain (library + internode helpers in `crates/internode/src/{rpc,fanout}.rs` and placement/coordinator call sites); keep ordinary containers leaderless; do **not** implement Raft (FR-045, Constitution VI) (`partial`)

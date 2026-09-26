@@ -81,20 +81,20 @@ description: "Task list for MVP cut, sequencing, and product non-goals"
 
 ### Implementation for User Story 1
 
-- [ ] T022 [US1] Register only `ReleaseProfile::FirstBinary` handlers in `crates/node/src/handler/mod.rs` via Cargo features; default `cargo build -p spacestoraged` MUST NOT link cassandra/elasticsearch/clickhouse/s3/webdav
-- [ ] T023 [US1] In `crates/config/src/validate.rs` and `crates/node` startup, a config naming a handler not in `HandlerRegistry` fails collect-all `entrypoint_unknown_handler{handler, known}` (`001` reuse)
-- [ ] T024 [US1] Reject every entrypoint missing `tls {…}` and `plaintext;` with `transport_undeclared` in `crates/config/src/validate.rs` (`014` reuse)
-- [ ] T025 [US1] Require `internode` and `replication` always listening for this profile (default bind `127.0.0.1`) via `internode_required` / `replication_required` in `crates/config/src/validate.rs`; join of remotes still requires a cluster address (`012`)
-- [ ] T026 [US1] Require `cluster { master_key_file <path>; }` with mode ≤ 0600 (`master_key_required` / `master_key_unreadable`) in `crates/config/src/validate.rs` and `crates/node` startup; no required external KMS
-- [ ] T027 [US1] Default missing `topology_ladder` to `[az]` at resolve time (`topology_ladder_required` if still missing after resolve) in `crates/config/src/resolve.rs`; starter fixtures already declare `topology_ladder az` and `quorum_domain lab`
-- [ ] T028 [US1] Refuse container create with `multi_active=on` as `multi_active_unsupported` in the catalog create path (`crates/node` / types crate from `003`/`012`); catalog flag remains, default off; create never leaves `creating`
-- [ ] T029 [US1] Wire product default write quorum TWO / read ONE in `crates/config` query defaults; honor one-node starter `query_defaults.write_quorum ONE` without reinterpreting TWO as `min(2, live replicas)` (FR-009) in `crates/node` / placement quorum path from `004`/`012`
-- [ ] T030 [US1] Select `DialectProfile::FirstBinary` for PostgreSQL in `crates/handler-postgresql` from `spacestorage-release-profile`: wire 3.0, SCRAM, simple+extended, INSERT/SELECT/UPDATE/DELETE, CREATE/DROP table, auto-commit; `BEGIN`, `COMMIT`, `ROLLBACK`, and `COPY` each → `feature_not_supported` `0A000` (no empty-transaction notices)
-- [ ] T031 [US1] Select first-binary Redis dialect in `crates/handler-redis`: AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT-noop/TTL on `K/V Store`; other types (incl. Document Store) canonical blob only; type-specific verbs off the MUST list (`HGET`, `JSON.GET`, …) MUST return Redis error (unknown command or not-supported), never success or no-op
+- [X] T022 [US1] Register only `ReleaseProfile::FirstBinary` handlers in `crates/node/src/handler/mod.rs` via Cargo features; default `cargo build -p spacestoraged` MUST NOT link cassandra/elasticsearch/clickhouse/s3/webdav
+- [X] T023 [US1] In `crates/config/src/validate.rs` and `crates/node` startup, a config naming a handler not in `HandlerRegistry` fails collect-all `entrypoint_unknown_handler{handler, known}` (`001` reuse)
+- [X] T024 [US1] Reject every entrypoint missing `tls {…}` and `plaintext;` with `transport_undeclared` in `crates/config/src/validate.rs` (`014` reuse)
+- [X] T025 [US1] Require `internode` and `replication` always listening for this profile (default bind `127.0.0.1`) via `internode_required` / `replication_required` in `crates/config/src/validate.rs`; join of remotes still requires a cluster address (`012`)
+- [X] T026 [US1] Require `cluster { master_key_file <path>; }` with mode ≤ 0600 (`master_key_required` / `master_key_unreadable`) in `crates/config/src/validate.rs` and `crates/node` startup; no required external KMS
+- [X] T027 [US1] Default missing `topology_ladder` to `[az]` at resolve time (`topology_ladder_required` if still missing after resolve) in `crates/config/src/resolve.rs`; starter fixtures already declare `topology_ladder az` and `quorum_domain lab`
+- [X] T028 [US1] Refuse container create with `multi_active=on` as `multi_active_unsupported` in the catalog create path (`crates/node` / types crate from `003`/`012`); catalog flag remains, default off; create never leaves `creating`
+- [X] T029 [US1] Wire product default write quorum TWO / read ONE in `crates/config` query defaults; honor one-node starter `query_defaults.write_quorum ONE` without reinterpreting TWO as `min(2, live replicas)` (FR-009) in `crates/node` / placement quorum path from `004`/`012`
+- [X] T030 [US1] Select `DialectProfile::FirstBinary` for PostgreSQL in `crates/handler-postgresql` from `spacestorage-release-profile`: wire 3.0, SCRAM, simple+extended, INSERT/SELECT/UPDATE/DELETE, CREATE/DROP table, auto-commit; `BEGIN`, `COMMIT`, `ROLLBACK`, and `COPY` each → `feature_not_supported` `0A000` (no empty-transaction notices)
+- [X] T031 [US1] Select first-binary Redis dialect in `crates/handler-redis`: AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT-noop/TTL on `K/V Store`; other types (incl. Document Store) canonical blob only; type-specific verbs off the MUST list (`HGET`, `JSON.GET`, …) MUST return Redis error (unknown command or not-supported), never success or no-op
 - [ ] T032 [US1] Enable admin-create of `Document Store` and canonical-blob read/write via PostgreSQL and/or Redis for that type in the admin/catalog + protocol mapping path (`crates/node` admin create + `002` blob mapping); native document verbs MUST NOT be required
-- [ ] T033 [US1] Include compile-time `"release_profile": "first-binary"` and registered `handlers` in `spacestorage status --output json` and admin `GET /v1/status` (`crates/admin-proto` + `crates/node/src/admin`); there is no config knob that enables Cassandra without rebuilding with `complete-product`
-- [ ] T034 [US1] Expose global `/metrics` for implemented paths only (runtime/buffer/`node_state`, postgresql/redis traffic, WAL and replication ack counters used by TWO) via the `008` exposition seam; do not emit placeholder series for unimplemented families
-- [ ] T035 [US1] Ensure node `ready` for this profile additionally requires: both cluster handlers bound, master-key readable, every entrypoint has transport, membership path bootstrap or joined (`crates/node/src/lifecycle.rs`)
+- [X] T033 [US1] Include compile-time `"release_profile": "first-binary"` and registered `handlers` in `spacestorage status --output json` and admin `GET /v1/status` (`crates/admin-proto` + `crates/node/src/admin`); there is no config knob that enables Cassandra without rebuilding with `complete-product`
+- [X] T034 [US1] Expose global `/metrics` for implemented paths only (runtime/buffer/`node_state`, postgresql/redis traffic, WAL and replication ack counters used by TWO) via the `008` exposition seam; do not emit placeholder series for unimplemented families
+- [X] T035 [US1] Ensure node `ready` for this profile additionally requires: both cluster handlers bound, master-key readable, every entrypoint has transport, membership path bootstrap or joined (`crates/node/src/lifecycle.rs`)
 
 **Checkpoint**: `cargo test -p spacestorage-conformance --features first-binary` passes G1–G11 against in-process nodes. `spacestorage status --output json` reports `"first-binary"`. Unknown-handler and omitted-transport fixtures fail as specified. Do not brand this artifact as seven-protocol “v1”.
 
@@ -262,3 +262,17 @@ Task: "T045 REQUIRED_MENTIONS"
 - Product write quorum stays TWO; one-node starter override is ONE; never reinterpret TWO as `min(2, live replicas)`
 - Verify tests fail before implementing
 - Stop at any checkpoint to validate a story independently
+
+---
+
+## Convergence (2026-09-26)
+
+Residual after Redis SET fix + three-node membership roster refresh + honest milestone.
+
+- [X] T053 Fix Redis K/V MUST path: SET/GET/DEL/EXISTS use `ensure_kv` (auto-create), not `ensure_blob`, in `crates/handler-redis/src/commands.rs`
+- [X] T054 FR-009 without Raft: `MembershipService::refresh_roster_from_seeds` + `boot_three_node` refresh so earlier joiners learn later admits; `_smoke_boot` three-node green
+- [X] T055 Rewrite `docs/milestones/001-first-binary.md` Changelog to list proven green vs skeleton G tests (no seven-protocol “v1” claim)
+- [ ] T056 Replace `in_process_cluster_ready()` stubs in `crates/conformance/tests/first_binary.rs`, `document_store.rs`, and the fixture-boot half of `handlers_absent.rs` with real `boot_*` / validate calls so G1/G2/G6/G7/G10/G11/G8 match `_smoke_boot` depth
+- [ ] T032 (still open) Document Store admin-create + canonical-blob CRUD end-to-end
+- [ ] T051 Quickstart command set recorded against a loopback binary
+- [ ] T052 `rustfmt`/`clippy` clean on `release-profile` + conformance

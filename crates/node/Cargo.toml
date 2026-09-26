@@ -14,9 +14,14 @@ spacestorage-storage = { path = "../storage" }
 spacestorage-crypto = { path = "../crypto" }
 spacestorage-types = { path = "../types" }
 spacestorage-authz = { path = "../authz" }
+spacestorage-membership = { path = "../membership" }
+spacestorage-internode = { path = "../internode" }
+spacestorage-replication = { path = "../replication" }
 spacestorage-handler-postgresql = { path = "../handler-postgresql" }
 spacestorage-handler-redis = { path = "../handler-redis" }
+spacestorage-observability = { path = "../observability" }
 tokio = { workspace = true }
+uuid = { workspace = true }
 axum = { workspace = true }
 hyper = { workspace = true }
 serde = { workspace = true }

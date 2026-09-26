@@ -29,6 +29,7 @@ pub async fn put_durable(
         ack.kind,
         mode,
         wal.durable_lsn(),
+        "",
     );
     debug_assert!(
         !(matches!(mode, StorageModeChoice::Persistent | StorageModeChoice::Hybrid)

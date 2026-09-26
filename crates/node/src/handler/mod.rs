@@ -62,6 +62,7 @@ impl Default for HandlerRegistry {
 pub mod admin_http;
 pub mod admin_tcp;
 pub mod echo;
+pub mod fabric;
 pub mod postgresql;
 pub mod redis;
 pub mod stub_cluster;

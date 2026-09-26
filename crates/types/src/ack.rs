@@ -22,6 +22,9 @@ pub struct WriteAck {
     pub kind: AckKind,
     /// Container storage mode that produced this ack.
     pub mode: StorageModeChoice,
+    /// Member `quorum_domain` that produced this ack (012 FR-006).
+    #[serde(default)]
+    pub quorum_domain: String,
 }
 
 impl WriteAck {
@@ -42,6 +45,7 @@ impl WriteAck {
         wal_kind: AckKind,
         mode: StorageModeChoice,
         durable_lsn: u64,
+        quorum_domain: impl Into<String>,
     ) -> Self {
         let kind = match mode {
             StorageModeChoice::Memory => AckKind::Memory,
@@ -59,6 +63,7 @@ impl WriteAck {
             lsn,
             kind,
             mode,
+            quorum_domain: quorum_domain.into(),
         }
     }
 }

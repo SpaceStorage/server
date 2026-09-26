@@ -1,10 +1,10 @@
 [package]
-name = "spacestorage-identity"
+name = "spacestorage-clocks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Cluster identity / membership (011)"
+description = "Hybrid logical clocks (012)"
 publish = false
 
 [dependencies]
@@ -14,3 +14,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }

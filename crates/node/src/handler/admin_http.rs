@@ -6,7 +6,7 @@ use crate::Node;
 use async_trait::async_trait;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -66,7 +66,7 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/stop", post(stop))
         .route("/v1/health/live", get(live))
         .route("/v1/health/ready", get(ready))
-        .route("/metrics", get(metrics_404))
+        .route("/metrics", get(metrics))
         .fallback(fallback)
         .layer(DefaultBodyLimit::max(ADMIN_HTTP_BODY_LIMIT))
         .with_state(node)
@@ -191,15 +191,13 @@ async fn ready(State(node): State<Arc<Node>>) -> axum::response::Response {
     resp
 }
 
-async fn metrics_404() -> impl IntoResponse {
-    // Feature 001 reserves `/metrics` as HTTP 404; exposition is owned by feature 08.
+async fn metrics(State(node): State<Arc<Node>>) -> impl IntoResponse {
+    // First-binary (016 G1 / T034): expose implemented-path Prometheus text via 008 seam.
+    let body = node.metrics.render_prometheus();
     (
-        StatusCode::NOT_FOUND,
-        Json(ErrorBody {
-            code: "unknown_op".into(),
-            message: "metrics exposition is not enabled in this feature".into(),
-            details: serde_json::json!({}),
-        }),
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
     )
 }
 

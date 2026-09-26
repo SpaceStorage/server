@@ -183,7 +183,7 @@ async fn status_config_threads_buffers_match_across_transports() {
     let tcp_buffers = tcp_op(admin_port, token, AdminOp::Buffers).await;
     assert_eq!(http_buffers, tcp_buffers, "buffers parity");
 
-    // /metrics reserved 404 for feature 001
+    // /metrics first-binary exposition (016 G1 / T034)
     let mut stream = TcpStream::connect(("127.0.0.1", http_port)).await.unwrap();
     stream
         .write_all(
@@ -194,7 +194,11 @@ async fn status_config_threads_buffers_match_across_transports() {
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.unwrap();
     let text = String::from_utf8_lossy(&buf);
-    assert!(text.contains("404"), "metrics must be 404 in 001: {text}");
+    assert!(text.contains("HTTP/1.1 200"), "metrics must be scrapeable: {text}");
+    assert!(
+        text.contains("spacestorage_process_uptime_seconds"),
+        "metrics body: {text}"
+    );
 
     node.cancel.cancel();
     node.force_cancel.cancel();

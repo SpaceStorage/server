@@ -61,6 +61,14 @@ pub struct DriveDecl {
     pub path: String,
 }
 
+/// Seed discovery endpoint (`cluster { seeds { name; address; port; } }`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SeedDecl {
+    pub name: String,
+    pub address: String,
+    pub port: u16,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClusterDecl {
     pub name: Option<String>,
@@ -70,7 +78,12 @@ pub struct ClusterDecl {
     /// Alias for `keys.master_key_file` (first-binary starters). Prefer `keys {}`.
     pub master_key_file: Option<String>,
     pub token_file: Option<String>,
+    /// `Some(_)` when `cluster { join; }` is declared (arg optional / unused).
     pub join: Option<String>,
+    /// Optional one-time join token file path (`join_token_file`).
+    pub join_token_file: Option<String>,
+    /// First-join seed list (`seeds` / `peers`).
+    pub seeds: Vec<SeedDecl>,
     pub admin_login: Option<String>,
     pub admin_password_file: Option<String>,
     /// Optional override; default compiled-in product version = 1 (015).

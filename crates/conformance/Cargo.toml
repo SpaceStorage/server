@@ -14,7 +14,17 @@ complete-product = ["first-binary"]
 
 [dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+spacestorage-config = { path = "../config" }
+spacestorage-node = { path = "../node" }
+spacestorage-crypto = { path = "../crypto" }
+spacestorage-internode = { path = "../internode" }
+spacestorage-placement = { path = "../placement" }
+spacestorage-membership = { path = "../membership" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+uuid = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+tempfile = { workspace = true }
 
 [dev-dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
@@ -22,3 +32,7 @@ spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
 spacestorage-handler-postgresql = { path = "../handler-postgresql" }
 spacestorage-handler-redis = { path = "../handler-redis" }
+spacestorage-conformance = { path = "." }
+spacestorage-node = { path = "../node" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+tempfile = { workspace = true }

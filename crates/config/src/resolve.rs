@@ -236,37 +236,51 @@ pub fn resolve(
                 }
                 "cluster" => {
                     for it in &b.items {
-                        if let Item::Directive(d) = it {
-                            match d.name.as_str() {
-                                "name" => {
-                                    cfg.cluster.name = d.args.first().map(|a| a.as_str());
-                                }
-                                "bootstrap" => cfg.cluster.bootstrap = true,
-                                "topology_ladder" => {
-                                    cfg.cluster.topology_ladder =
-                                        d.args.iter().map(|a| a.as_str()).collect();
-                                }
-                                "quorum_domain" => {
-                                    cfg.cluster.quorum_domain = d.args.first().map(|a| a.as_str());
-                                }
-                                "master_key_file" => {
-                                    cfg.cluster.master_key_file = d.args.first().map(|a| a.as_str());
-                                }
-                                "token_file" => {
-                                    cfg.cluster.token_file = d.args.first().map(|a| a.as_str());
-                                }
-                                "join" => {
-                                    cfg.cluster.join = d.args.first().map(|a| a.as_str());
-                                }
-                                "admin_login" => {
-                                    cfg.cluster.admin_login = d.args.first().map(|a| a.as_str());
-                                }
-                                "admin_password_file" => {
-                                    cfg.cluster.admin_password_file =
-                                        d.args.first().map(|a| a.as_str());
-                                }
-                                "product_version" => {
-                                    match d.args.first() {
+                        match it {
+                            Item::Directive(d) => {
+                                match d.name.as_str() {
+                                    "name" => {
+                                        cfg.cluster.name = d.args.first().map(|a| a.as_str());
+                                    }
+                                    "bootstrap" => cfg.cluster.bootstrap = true,
+                                    "topology_ladder" => {
+                                        cfg.cluster.topology_ladder =
+                                            d.args.iter().map(|a| a.as_str()).collect();
+                                    }
+                                    "quorum_domain" => {
+                                        cfg.cluster.quorum_domain =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
+                                    "master_key_file" => {
+                                        cfg.cluster.master_key_file =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
+                                    "token_file" => {
+                                        cfg.cluster.token_file =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
+                                    "join" => {
+                                        // Flag: `join;` → Some(""); optional arg preserved.
+                                        cfg.cluster.join = Some(
+                                            d.args
+                                                .first()
+                                                .map(|a| a.as_str())
+                                                .unwrap_or_default(),
+                                        );
+                                    }
+                                    "join_token_file" => {
+                                        cfg.cluster.join_token_file =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
+                                    "admin_login" => {
+                                        cfg.cluster.admin_login =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
+                                    "admin_password_file" => {
+                                        cfg.cluster.admin_password_file =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
+                                    "product_version" => match d.args.first() {
                                         Some(Arg::Number(0)) => {
                                             errors.push(ConfigError::new(
                                                 file,
@@ -281,10 +295,43 @@ pub fn resolve(
                                             cfg.cluster.product_version = Some(*n as u16);
                                         }
                                         _ => {}
+                                    },
+                                    _ => {}
+                                }
+                            }
+                            Item::Block(sb) if sb.name == "seeds" || sb.name == "peers" => {
+                                let mut seed = crate::model::SeedDecl::default();
+                                for sit in &sb.items {
+                                    if let Item::Directive(sd) = sit {
+                                        match sd.name.as_str() {
+                                            "name" => {
+                                                seed.name = sd
+                                                    .args
+                                                    .first()
+                                                    .map(|a| a.as_str())
+                                                    .unwrap_or_default();
+                                            }
+                                            "address" => {
+                                                seed.address = sd
+                                                    .args
+                                                    .first()
+                                                    .map(|a| a.as_str())
+                                                    .unwrap_or_default();
+                                            }
+                                            "port" => {
+                                                if let Some(Arg::Number(n)) = sd.args.first() {
+                                                    seed.port = *n as u16;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                 }
-                                _ => {}
+                                if !seed.address.is_empty() && seed.port != 0 {
+                                    cfg.cluster.seeds.push(seed);
+                                }
                             }
+                            Item::Block(_) => {}
                         }
                     }
                 }
