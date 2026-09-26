@@ -24,11 +24,11 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 **Purpose**: Crate/module skeletons, workspace membership, fixture docs, config surface stubs per [plan.md](plan.md) project structure
 
-- [ ] T001 Create `crates/storage/src/wal/mod.rs` exporting `DriveWal` module stubs and empty `record.rs`, `group_commit.rs`, `replay.rs` under `crates/storage/src/wal/` (package `spacestorage-storage`, edition 2024)
-- [ ] T002 [P] Create `crates/backup/Cargo.toml` (package `spacestorage-backup`, edition 2024) and `crates/backup/src/lib.rs` that `mod`s `manifest`, `snapshot`, `pitr`, `restore`
-- [ ] T003 Add `crates/backup` to workspace `[workspace.members]` in `Cargo.toml` and depend on it from `crates/node` / `crates/admin-proto` only via public `SnapshotService` / `RestoreService` APIs (no compaction pull-through)
-- [ ] T004 [P] Add empty modules `crates/storage/src/checkpoint.rs`, `crates/storage/src/tombstone.rs`, `crates/storage/src/ttl.rs`, `crates/storage/src/disk.rs`, `crates/storage/src/quarantine.rs`, and extend `crates/storage/src/restore.rs` / `crates/storage/src/compaction.rs` module declarations in `crates/storage/src/lib.rs`
-- [ ] T005 [P] Copy [contracts/fixtures/single-drive.conf](contracts/fixtures/single-drive.conf) and [contracts/fixtures/two-drive.conf](contracts/fixtures/two-drive.conf) to `docs/examples/durability/{single-drive,two-drive}.conf` and document [contracts/fixtures/invalid/](contracts/fixtures/invalid/) (`sync-none.conf`) as negative startup cases
+- [X] T001 Create `crates/storage/src/wal/mod.rs` exporting `DriveWal` module stubs and empty `record.rs`, `group_commit.rs`, `replay.rs` under `crates/storage/src/wal/` (package `spacestorage-storage`, edition 2024)
+- [X] T002 [P] Create `crates/backup/Cargo.toml` (package `spacestorage-backup`, edition 2024) and `crates/backup/src/lib.rs` that `mod`s `manifest`, `snapshot`, `pitr`, `restore`
+- [X] T003 Add `crates/backup` to workspace `[workspace.members]` in `Cargo.toml` and depend on it from `crates/node` / `crates/admin-proto` only via public `SnapshotService` / `RestoreService` APIs (no compaction pull-through)
+- [X] T004 [P] Add empty modules `crates/storage/src/checkpoint.rs`, `crates/storage/src/tombstone.rs`, `crates/storage/src/ttl.rs`, `crates/storage/src/disk.rs`, `crates/storage/src/quarantine.rs`, and extend `crates/storage/src/restore.rs` / `crates/storage/src/compaction.rs` module declarations in `crates/storage/src/lib.rs`
+- [X] T005 [P] Copy [contracts/fixtures/single-drive.conf](contracts/fixtures/single-drive.conf) and [contracts/fixtures/two-drive.conf](contracts/fixtures/two-drive.conf) to `docs/examples/durability/{single-drive,two-drive}.conf` and document [contracts/fixtures/invalid/](contracts/fixtures/invalid/) (`sync-none.conf`) as negative startup cases
 
 ---
 
@@ -38,13 +38,13 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 Implement `DriveWal` and `WalRecord` field structs in `crates/storage/src/wal/mod.rs` and `crates/storage/src/wal/record.rs` per [data-model.md](data-model.md): `drive_id` string (`default` if only `data_dir`); `path` `{drive.path}/wal/`; `next_lsn`/`durable_lsn` `u64`; `format_major` `u16` currently `1`; `sync` `fdatasync` \| `fsync` (`none` not a production value); record `lsn`, `container_id` UUID, `stamp` HlcStamp, `type` `put` \| `delete` \| `txn_marker`, `payload` bytes
-- [ ] T007 [P] Implement on-disk WAL segment header (magic `WAL1`, `format_major`, `drive_id`, creating node id) and record framing `u32le length | u32 crc32 | u16 format_major | u8 type | u64 lsn | uuid container_id | HlcStamp | u32 payload_len | payload` in `crates/storage/src/wal/record.rs` per [contracts/wal.md](contracts/wal.md) and [contracts/format.md](contracts/format.md)
-- [ ] T008 [P] Implement `DurableAck { replica, drive_id, lsn, kind: durable|memory }`, `Checkpoint { drive_id, covered_lsn, at }`, and `DriveDiskState { drive_id, state: ok|full|corrupt, quarantined }` in `crates/storage/src/lib.rs` (or `ack.rs` / `disk.rs`) per [data-model.md](data-model.md)
-- [ ] T009 Parse `storage { sync; gc_grace; wal_segment; group_commit { max_wait; max_bytes; }; drive … }` in `crates/config/src/` with defaults `sync=fdatasync`, `gc_grace=24h`, `wal_segment=64MiB`, `max_wait=2ms`, `max_bytes=1MiB`; refuse `gc_grace 0` as `gc_grace_too_small`; `sync none` without `SPACESTORAGE_TEST=1` → `sync_none_not_durable` per [contracts/config-directives.md](contracts/config-directives.md)
-- [ ] T010 [P] Export validation/error codes in `crates/storage/src/lib.rs` (or `error.rs`): `sync_none_not_durable`, `wal_format_unsupported` / `format_unsupported`, `disk_full`, `wal_corrupt`, `pitr_unmappable`, `RestoreDestinationHasContent`, `BackupSlice10Required`, `gc_grace_too_small`
-- [ ] T011 [P] Register additive metric series hooks in `crates/storage` (exposition via `008`): reserved `db_wal_*`, `db_checkpoint_*`, `db_dirty_*`, `db_unflushed_bytes`, `db_wal_lag_bytes`, `db_wal_replay_duration_seconds`, `db_wal_recovery_duration_seconds`, `db_recovery_*` plus additive `db_wal_torn_total`, `db_wal_disk_full_total` per [contracts/metrics.md](contracts/metrics.md) — MUST NOT rename `08` names
-- [ ] T012 Supersede `003` per-container `ns/.../wal/` with drive-level path `{drive.path}/wal/<seq>.wal` (implicit drive `default` = `storage.data_dir`) in `crates/storage` layout helpers and document the migration note in `crates/storage/src/wal/mod.rs` per research R2
+- [X] T006 Implement `DriveWal` and `WalRecord` field structs in `crates/storage/src/wal/mod.rs` and `crates/storage/src/wal/record.rs` per [data-model.md](data-model.md): `drive_id` string (`default` if only `data_dir`); `path` `{drive.path}/wal/`; `next_lsn`/`durable_lsn` `u64`; `format_major` `u16` currently `1`; `sync` `fdatasync` \| `fsync` (`none` not a production value); record `lsn`, `container_id` UUID, `stamp` HlcStamp, `type` `put` \| `delete` \| `txn_marker`, `payload` bytes
+- [X] T007 [P] Implement on-disk WAL segment header (magic `WAL1`, `format_major`, `drive_id`, creating node id) and record framing `u32le length | u32 crc32 | u16 format_major | u8 type | u64 lsn | uuid container_id | HlcStamp | u32 payload_len | payload` in `crates/storage/src/wal/record.rs` per [contracts/wal.md](contracts/wal.md) and [contracts/format.md](contracts/format.md)
+- [X] T008 [P] Implement `DurableAck { replica, drive_id, lsn, kind: durable|memory }`, `Checkpoint { drive_id, covered_lsn, at }`, and `DriveDiskState { drive_id, state: ok|full|corrupt, quarantined }` in `crates/storage/src/lib.rs` (or `ack.rs` / `disk.rs`) per [data-model.md](data-model.md)
+- [X] T009 Parse `storage { sync; gc_grace; wal_segment; group_commit { max_wait; max_bytes; }; drive … }` in `crates/config/src/` with defaults `sync=fdatasync`, `gc_grace=24h`, `wal_segment=64MiB`, `max_wait=2ms`, `max_bytes=1MiB`; refuse `gc_grace 0` as `gc_grace_too_small`; `sync none` without `SPACESTORAGE_TEST=1` → `sync_none_not_durable` per [contracts/config-directives.md](contracts/config-directives.md)
+- [X] T010 [P] Export validation/error codes in `crates/storage/src/lib.rs` (or `error.rs`): `sync_none_not_durable`, `wal_format_unsupported` / `format_unsupported`, `disk_full`, `wal_corrupt`, `pitr_unmappable`, `RestoreDestinationHasContent`, `BackupSlice10Required`, `gc_grace_too_small`
+- [X] T011 [P] Register additive metric series hooks in `crates/storage` (exposition via `008`): reserved `db_wal_*`, `db_checkpoint_*`, `db_dirty_*`, `db_unflushed_bytes`, `db_wal_lag_bytes`, `db_wal_replay_duration_seconds`, `db_wal_recovery_duration_seconds`, `db_recovery_*` plus additive `db_wal_torn_total`, `db_wal_disk_full_total` per [contracts/metrics.md](contracts/metrics.md) — MUST NOT rename `08` names
+- [X] T012 Supersede `003` per-container `ns/.../wal/` with drive-level path `{drive.path}/wal/<seq>.wal` (implicit drive `default` = `storage.data_dir`) in `crates/storage` layout helpers and document the migration note in `crates/storage/src/wal/mod.rs` per research R2
 
 **Checkpoint**: `cargo test -p spacestorage-storage` and `cargo test -p spacestorage-backup` compile. Config validates single-/two-drive fixtures. User stories can start.
 
@@ -60,20 +60,20 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T013 [P] [US1] Add unit tests for group-commit coalesce (`max_wait` 2 ms / `max_bytes` 1 MiB) and `spawn_blocking` fsync fence in `crates/storage/src/wal/group_commit.rs` (or `crates/storage/tests/group_commit.rs`)
+- [X] T013 [P] [US1] Add unit tests for group-commit coalesce (`max_wait` 2 ms / `max_bytes` 1 MiB) and `spawn_blocking` fsync fence in `crates/storage/src/wal/group_commit.rs` (or `crates/storage/tests/group_commit.rs`)
 - [ ] T014 [P] [US1] Add unit tests that `sync none` yields `sync_none_not_durable` outside `SPACESTORAGE_TEST=1` and even under test never produces a counted durable ack for persistent/hybrid in `crates/storage/tests/sync_none.rs`
 - [ ] T015 [P] [US1] Add conformance SC-001 crash+restart of acknowledging replicas for persistent `TWO` in `crates/conformance/tests/durability_ack.rs` using [contracts/fixtures/single-drive.conf](contracts/fixtures/single-drive.conf) / three-node `012` harness (`SPACESTORAGE_TEST=1`)
 - [ ] T016 [P] [US1] Add conformance that memory-mode counted acks are `kind=memory` and execution records distinguish durable vs memory in mixed sets in `crates/conformance/tests/durability_ack.rs` per [contracts/ack.md](contracts/ack.md)
 
 ### Implementation for User Story 1
 
-- [ ] T017 [P] [US1] Implement per-drive append path and LSN assignment in `crates/storage/src/wal/mod.rs`: records multiplex containers on that drive only; path `{drive.path}/wal/<seq>.wal`; segment rotation default 64 MiB
-- [ ] T018 [US1] Implement group commit in `crates/storage/src/wal/group_commit.rs`: coalesce until `max_wait` or `max_bytes`; durability syscall (`fdatasync` default; `fsync` allowed; macOS `F_FULLFSYNC` in durability tests) exclusively via `001` `spawn_blocking` pool; advance `durable_lsn` monotonically; state machine `buffered → fsyncing → durable | failed`
-- [ ] T019 [US1] Encrypt WAL payloads for encrypted containers with container data key (`014`/`003` crypto) and AAD `drive_id ‖ lsn ‖ container_id` in `crates/storage/src/wal/record.rs`; leave header/`container_id` plaintext; unencrypted containers yield plaintext payload
-- [ ] T020 [US1] Wire counted persistent/hybrid ack to wait `durable_lsn ≥ record.lsn` on the replica’s pinned drive in `crates/storage` + replication/placement ack path (`crates/placement` / `crates/types`); memory-mode acks stay memory-only and MUST NOT be labelled crash-durable
+- [X] T017 [P] [US1] Implement per-drive append path and LSN assignment in `crates/storage/src/wal/mod.rs`: records multiplex containers on that drive only; path `{drive.path}/wal/<seq>.wal`; segment rotation default 64 MiB
+- [X] T018 [US1] Implement group commit in `crates/storage/src/wal/group_commit.rs`: coalesce until `max_wait` or `max_bytes`; durability syscall (`fdatasync` default; `fsync` allowed; macOS `F_FULLFSYNC` in durability tests) exclusively via `001` `spawn_blocking` pool; advance `durable_lsn` monotonically; state machine `buffered → fsyncing → durable | failed`
+- [X] T019 [US1] Encrypt WAL payloads for encrypted containers with container data key (`014`/`003` crypto) and AAD `drive_id ‖ lsn ‖ container_id` in `crates/storage/src/wal/record.rs`; leave header/`container_id` plaintext; unencrypted containers yield plaintext payload
+- [X] T020 [US1] Wire counted persistent/hybrid ack to wait `durable_lsn ≥ record.lsn` on the replica’s pinned drive in `crates/storage` + replication/placement ack path (`crates/placement` / `crates/types`); memory-mode acks stay memory-only and MUST NOT be labelled crash-durable
 - [ ] T021 [US1] Ensure hybrid counted ack covers the write (including memory portion that `WriteBuffer`/`HotSet` would lose) in `crates/storage` / `crates/types` per research R16; do not treat hybrid like memory-mode
 - [ ] T022 [US1] Implement admin/CLI `spacestorage storage` and `spacestorage wal [DRIVE]` showing per-drive `durable_lsn`, lag, and disk state in `crates/admin-proto` + `crates/spacestorage` per [contracts/admin-cli.md](contracts/admin-cli.md) (slice 2)
-- [ ] T023 [US1] Increment `db_wal_bytes_total`, `db_wal_fsync_total`, `db_wal_fsync_duration_seconds` on group commit in `crates/storage/src/wal/group_commit.rs` per [contracts/metrics.md](contracts/metrics.md)
+- [X] T023 [US1] Increment `db_wal_bytes_total`, `db_wal_fsync_total`, `db_wal_fsync_duration_seconds` on group commit in `crates/storage/src/wal/group_commit.rs` per [contracts/metrics.md](contracts/metrics.md)
 
 **Checkpoint**: Persistent `TWO` write survives kill-9+restart of acknowledging replicas. Memory-mode is not claimed crash-durable. Fsync never runs on a Tokio worker. Drive-1 ack independent of drive-2 WAL.
 
@@ -87,19 +87,19 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T024 [P] [US2] Add unit tests for torn-tail skip (short/CRC-invalid last record), `db_wal_torn_total` increment, and mid-log CRC → quarantine in `crates/storage/src/wal/replay.rs` / `crates/storage/tests/replay.rs`
+- [X] T024 [P] [US2] Add unit tests for torn-tail skip (short/CRC-invalid last record), `db_wal_torn_total` increment, and mid-log CRC → quarantine in `crates/storage/src/wal/replay.rs` / `crates/storage/tests/replay.rs`
 - [ ] T025 [P] [US2] Add conformance SC-002 unreplicated memory-mode empty after restart with volatility notice in `crates/conformance/tests/recovery_boot.rs`
 - [ ] T026 [P] [US2] Add conformance SC-003 disk-full on drive 1 refuses durable writes for containers on that drive while drive 2 still accepts, `node_state=degraded`, prior acks readable in `crates/conformance/tests/disk_full.rs` using [contracts/fixtures/two-drive.conf](contracts/fixtures/two-drive.conf)
 - [ ] T027 [P] [US2] Add conformance SC-004 unknown major refuses start and N nodes refuse writing N+1 format in `crates/conformance/tests/format_version.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T028 [US2] Implement boot content restore sequence in `crates/storage/src/restore.rs` and wire before `ready` in `crates/node/src/lifecycle.rs`: (1) catalog restore `003`/`006`, (2) open each drive WAL, skip torn tail, replay `lsn > checkpoint` for persistent/hybrid in LSN order, (3) memory-mode empty unless `004` re-populates, (4) hybrid memory portion rebuilt per `003` HybridPolicy; parallelize per drive on blocking pool
-- [ ] T029 [P] [US2] Implement torn-tail and mid-log corruption handling in `crates/storage/src/wal/replay.rs` and quarantine rename `{path}.corrupt.{unix_ts}` in `crates/storage/src/quarantine.rs` per [contracts/recovery.md](contracts/recovery.md); no crash-loop; container `degraded` or rebuild from replica
+- [X] T028 [US2] Implement boot content restore sequence in `crates/storage/src/restore.rs` and wire before `ready` in `crates/node/src/lifecycle.rs`: (1) catalog restore `003`/`006`, (2) open each drive WAL, skip torn tail, replay `lsn > checkpoint` for persistent/hybrid in LSN order, (3) memory-mode empty unless `004` re-populates, (4) hybrid memory portion rebuilt per `003` HybridPolicy; parallelize per drive on blocking pool
+- [X] T029 [P] [US2] Implement torn-tail and mid-log corruption handling in `crates/storage/src/wal/replay.rs` and quarantine rename `{path}.corrupt.{unix_ts}` in `crates/storage/src/quarantine.rs` per [contracts/recovery.md](contracts/recovery.md); no crash-loop; container `degraded` or rebuild from replica
 - [ ] T030 [US2] Implement ENOSPC / write-error → `DriveDiskState::full`, refuse new durable writes for containers on that drive, continue other drives and servable reads, set `node_state=degraded`, fail unfsynced group-commit waiters without counted ack in `crates/storage/src/disk.rs`; increment `db_wal_disk_full_total`
-- [ ] T031 [P] [US2] Enforce `format_major` on open: unknown major → refuse node start naming the path (`format_unsupported`); refuse writing a major belonging to product N+1 on node N in `crates/storage/src/wal/mod.rs` per [contracts/format.md](contracts/format.md) / `015`
+- [X] T031 [P] [US2] Enforce `format_major` on open: unknown major → refuse node start naming the path (`format_unsupported`); refuse writing a major belonging to product N+1 on node N in `crates/storage/src/wal/mod.rs` per [contracts/format.md](contracts/format.md) / `015`
 - [ ] T032 [US2] Implement checkpoint persist of `covered_lsn` and conditional WAL prefix truncate in `crates/storage/src/checkpoint.rs` only when R5 retain rules pass (`gc_grace`, replica/follower lag, snapshot pins)
-- [ ] T033 [US2] Increment `db_wal_replay_duration_seconds`, `db_wal_recovery_duration_seconds`, `db_recovery_total`, `db_recovery_duration_seconds`, `db_recovery_records_total` during boot in `crates/storage/src/restore.rs` / `crates/node`
+- [X] T033 [US2] Increment `db_wal_replay_duration_seconds`, `db_wal_recovery_duration_seconds`, `db_recovery_total`, `db_recovery_duration_seconds`, `db_recovery_records_total` during boot in `crates/storage/src/restore.rs` / `crates/node`
 
 **Checkpoint**: Restart restores durable content; memory-mode empty; torn tail skipped; one full drive degrades without killing the node or other drives; unknown major refuses start.
 
@@ -276,3 +276,32 @@ With multiple developers:
 - First binary (`016` slices 1–5 / slice 2): US1 + US2 (+ local US3) required; US4 library+tests in-tree, admin backup jobs slice 10
 - `010` MUST call this snapshot/PITR API (position **map**); do not invent a second snapshot format
 - Avoid: fsync on Tokio workers, node-global disk-full, cluster-wide snapshot freeze, memory-mode content in snapshots, silent overwrite restore, renaming `08` metrics
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: Close gaps found by `/speckit.converge` against the live codebase that are not already covered by open T001–T057 (constitution violation in the provisional WAL crate; plan-owned storage ownership; metric name drift).
+
+- [X] T058 CRITICAL Stop durability syscalls on Tokio workers in `crates/wal/src/lib.rs` (`append_durable` currently calls `sync_all().await`); move fsync/fdatasync to `spawn_blocking` immediately, or delete the stub so no async-path fsync remains once `DriveWal` group commit lands per Constitution II / FR-005 (contradicts)
+- [X] T059 Retire or fold workspace package `crates/wal` (`spacestorage-wal`, single `wal.log`) into plan-owned per-drive `DriveWal` under `crates/storage` (`{drive.path}/wal/<seq>.wal`) and remove the parallel member from workspace `Cargo.toml` once storage owns the path per FR-003 / plan: Project Structure (unrequested)
+- [X] T060 Replace provisional `spacestorage_wal_acks_total` in `crates/observability/src/lib.rs` with reserved `db_wal_*` increments from [contracts/metrics.md](contracts/metrics.md) (do not invent a parallel WAL ack series) per Observability Contract / plan: metrics (unrequested)
+
+---
+
+## Phase 9: Convergence
+
+**Purpose**: Close first-binary US1/US2 residuals after slice-2 implement — T058–T060 verified done (Constitution II / `crates/wal` retired / `db_wal_*`); remaining gaps are falsely marked [X] tasks and missing content restore (do not reopen US3/US4/PITR or open T014–T016/T021–T022/T025–T027/T030/T032).
+
+- [X] T061 CRITICAL Complete boot content restore before `ready`: catalog restore (`003`/`006`), replay `lsn > checkpoint` into persistent/hybrid content (not a discarded `Vec`), leave memory-mode empty, rebuild hybrid memory per HybridPolicy, retain `StorageEngine` on `Node` — `crates/storage/src/restore.rs` + `crates/node/src/lifecycle.rs` currently open/replay then drop the engine with no applied content (false [X] T028) per FR-006 / US2/AC1 / Constitution XII (partial)
+- [X] T062 Wire counted persistent/hybrid write acks through `crates/placement` / `crates/types` so quorum waits `durable_lsn ≥ record.lsn` on the replica’s pinned drive and labels memory acks as non-crash-durable — `DurableAck`/`put_durable` exist only inside `crates/storage` today (false [X] T020) per FR-001 / US1/AC1–AC3 (partial)
+- [X] T063 Call `maybe_encrypt_payload` (AAD `drive_id ‖ lsn ‖ container_id`) from the WAL append path for encrypted containers; keep unencrypted containers plaintext — helper is `#[allow(dead_code)]` and unused (false [X] T019) per FR-004 (partial)
+- [X] T064 On mid-log CRC/`WalCorrupt` during open/replay, quarantine via `{path}.corrupt.{unix_ts}`, avoid crash-loop, mark container degraded or rebuild from replica; add the missing mid-log→quarantine unit coverage claimed by T024 — `quarantine()` is never called from replay/open (false [X] T029 / T024) per FR-007 / US2/AC3 (partial)
+
+---
+
+## Phase 10: Convergence
+
+**Purpose**: First-binary US1/US2 after Phase 9 T061–T064 — verified done (restore-before-ready retains `StorageEngine`, placement/`WriteAck` durable_lsn quorum, encrypt-on-append, mid-log quarantine). Do not reopen US3/US4/PITR or open T014–T016/T021–T022/T025–T027/T030/T032. Remaining FB residual: encrypted WAL payloads are written but never decrypted on replay (ciphertext applied as content).
+
+- [X] T065 Decrypt encrypted WAL payloads on replay/restore (AAD `drive_id ‖ lsn ‖ container_id`) via container data key / `014` `KeyAuthority` before applying to `ContentStore`; unencrypted stay plaintext; missing/unreadable key → skip that container as `Unavailable` (do not store ciphertext as truth) in `crates/storage/src/wal/record.rs` + `crates/storage/src/restore.rs` (+ node key resolve seam) per FR-004 / FR-006 / R4 / US2/AC1 (partial)

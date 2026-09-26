@@ -248,3 +248,11 @@ Task: "Implement drain.rs, decommission.rs, replace.rs in parallel"
 - Commit after each task or logical group
 - Stop at any checkpoint to validate the story independently
 - Do not put MI6/firewall, tenant WAL, or Raft election internals in this crate
+
+---
+
+## Phase 7: Convergence
+
+**Purpose**: Close unmarked gaps found by `/speckit-converge` against the live tree (do not duplicate T001–T051).
+
+- [ ] T052 CRITICAL Retire or fold `crates/identity` (`spacestorage-identity`) into the planned `crates/membership` crate and remove the secret-only `MembershipView::join` path that adds members without admit/token, per FR-006/FR-007 and Constitution XIII (contradicts)

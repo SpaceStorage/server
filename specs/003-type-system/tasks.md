@@ -31,8 +31,8 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 **Purpose**: Workspace members, crate skeletons, and dependency inventory from the plan (pure Rust only; `cargo-deny` ban on `*-sys`).
 
 - [ ] T001 Create `crates/codec/Cargo.toml` (package `spacestorage-codec`, edition 2024) and `crates/codec/src/lib.rs` with module stubs `encoding`, `compression`
-- [ ] T002 [P] Create `crates/crypto/Cargo.toml` (package `spacestorage-crypto`) and `crates/crypto/src/lib.rs` with module stubs `aead`, `key_authority`, `keyring_file`
-- [ ] T003 [P] Create `crates/storage/Cargo.toml` (package `spacestorage-storage`) and `crates/storage/src/lib.rs` with module stubs `mode`, `block`, `memtable`, `wal`, `sstable`, `segment`, `lsm`, `cache`, `catalog_store`, `restore`
+- [X] T002 [P] Create `crates/crypto/Cargo.toml` (package `spacestorage-crypto`) and `crates/crypto/src/lib.rs` with module stubs `aead`, `key_authority`, `keyring_file`
+- [X] T003 [P] Create `crates/storage/Cargo.toml` (package `spacestorage-storage`) and `crates/storage/src/lib.rs` with module stubs `mode`, `block`, `memtable`, `wal`, `sstable`, `segment`, `lsm`, `cache`, `catalog_store`, `restore`
 - [ ] T004 [P] Create `crates/placement/Cargo.toml` (package `spacestorage-placement`) and `crates/placement/src/lib.rs` with module stubs `matrix`, `director`, `local`
 - [ ] T005 [P] Create `crates/l0/Cargo.toml` (package `spacestorage-l0`), `crates/l2/Cargo.toml`, `crates/l3/Cargo.toml`, `crates/l4/Cargo.toml`, and `crates/typeset/Cargo.toml` with empty `src/lib.rs` each
 - [ ] T006 Add all nine new crates to workspace `[workspace.members]` in `Cargo.toml` and declare shared deps from plan Technical Context (`snap`, `structured-zstd`, `lz4_flex`, `aes-gcm`, `chacha20poly1305`, `hkdf`, `sha2`, `zeroize`, `subtle`, `roaring`, `kiddo`, `rstar`, `unicode-segmentation`, `unicode-normalization`, `crc32fast`, `xxhash-rust`, `memmap2`, `serde`, `bytes`, `tokio`, `async-trait`, `tracing`, `uuid`, `chrono`, `parking_lot`) plus `cargo-deny` ban on `*-sys`
@@ -47,14 +47,14 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T009 Implement closed `Level` (`L0`…`L4`) and `Kind` enums in `crates/types/src/descriptor.rs` with derived `creatable` (`DataStructure | Abstraction | StorageModel | Composition` only; `StoragePrimitive`/`StorageLayout`/`SharedCapability` never creatable) per [data-model.md](data-model.md) §1 and FR-001/FR-014
-- [ ] T010 Implement `TypeDescriptor` and `OperationSpec` in `crates/types/src/descriptor.rs` with all mandatory fields from [type-catalog.md](contracts/type-catalog.md) (`name`, `display_name`, `level`, `kind`, `storage_modes`, `schema_kind`, `schema_required_elements`, `operations`, `capabilities`, `composed_from`, `default_layout`, `encodings`, `codecs`, `default_codec`, `encryption`, `canonical`, `deprecation`, `availability`, `starter_example`)
-- [ ] T011 [P] Implement identity types `NamespaceName`, `ContainerName`, `ContainerRef`, `ContainerId` (UUID v7) in `crates/types/src/ident.rs`
-- [ ] T012 [P] Implement `TypeError` in `crates/types/src/error.rs` preserving all `002` variants and adding codes from [container-definition.md](contracts/container-definition.md) (`UnknownType`, `NotCreatable`, `TypeDeprecated`, `AlreadyExists`, `SchemaRequired`, `UnsupportedStorageMode`, `LayoutComponentNotAllowed`, `EncodingNotApplicable`, `UnknownCodec`, `UnknownAlgorithm`, `EncryptionScopeInvalid`, `KeyUnresolvable`, `CapabilityUnsupported`, `CapabilityConflict`, `CompositionCycle`, `CompositionCrossNamespace`, `CompositionDepthExceeded`, `TypeImmutable`, `IncompatibleSchemaChange`, `IncompleteDescriptor`, `MultipleLevels`)
-- [ ] T013 Implement `ContainerDefinition`, `Layout`, `EncodingChoice`, `CompressionChoice`, `EncryptionChoice` flat option namespace in `crates/types/src/definition.rs` matching [container-definition.md](contracts/container-definition.md) (`type` mandatory; `mode` ∈ `memory|persistent|hybrid`; `encryption.scope` ∈ `drives|drives_and_memory` default `drives`; `compression` ∈ `none|snappy|zstd|lz4`)
-- [ ] T014 Implement `ContainerSchema`, `Field`, `ValueDomain`, `KeyDef` in `crates/types/src/schema.rs` with domains at least `bool`, `int32`, `int64`, `uint64`, `float32`, `float64`, `decimal`, `utf8`, `bytes`, `uuid`, `timestamp` (UTC µs), `date`, `jsonb`, `null` and distinct null/missing/tombstone states per FR-024a; vector domains require `dimension` and `metric ∈ l2|cosine|inner_product`
+- [X] T009 Implement closed `Level` (`L0`…`L4`) and `Kind` enums in `crates/types/src/descriptor.rs` with derived `creatable` (`DataStructure | Abstraction | StorageModel | Composition` only; `StoragePrimitive`/`StorageLayout`/`SharedCapability` never creatable) per [data-model.md](data-model.md) §1 and FR-001/FR-014
+- [X] T010 Implement `TypeDescriptor` and `OperationSpec` in `crates/types/src/descriptor.rs` with all mandatory fields from [type-catalog.md](contracts/type-catalog.md) (`name`, `display_name`, `level`, `kind`, `storage_modes`, `schema_kind`, `schema_required_elements`, `operations`, `capabilities`, `composed_from`, `default_layout`, `encodings`, `codecs`, `default_codec`, `encryption`, `canonical`, `deprecation`, `availability`, `starter_example`)
+- [X] T011 [P] Implement identity types `NamespaceName`, `ContainerName`, `ContainerRef`, `ContainerId` (UUID v7) in `crates/types/src/ident.rs`
+- [X] T012 [P] Implement `TypeError` in `crates/types/src/error.rs` preserving all `002` variants and adding codes from [container-definition.md](contracts/container-definition.md) (`UnknownType`, `NotCreatable`, `TypeDeprecated`, `AlreadyExists`, `SchemaRequired`, `UnsupportedStorageMode`, `LayoutComponentNotAllowed`, `EncodingNotApplicable`, `UnknownCodec`, `UnknownAlgorithm`, `EncryptionScopeInvalid`, `KeyUnresolvable`, `CapabilityUnsupported`, `CapabilityConflict`, `CompositionCycle`, `CompositionCrossNamespace`, `CompositionDepthExceeded`, `TypeImmutable`, `IncompatibleSchemaChange`, `IncompleteDescriptor`, `MultipleLevels`)
+- [X] T013 Implement `ContainerDefinition`, `Layout`, `EncodingChoice`, `CompressionChoice`, `EncryptionChoice` flat option namespace in `crates/types/src/definition.rs` matching [container-definition.md](contracts/container-definition.md) (`type` mandatory; `mode` ∈ `memory|persistent|hybrid`; `encryption.scope` ∈ `drives|drives_and_memory` default `drives`; `compression` ∈ `none|snappy|zstd|lz4`)
+- [X] T014 Implement `ContainerSchema`, `Field`, `ValueDomain`, `KeyDef` in `crates/types/src/schema.rs` with domains at least `bool`, `int32`, `int64`, `uint64`, `float32`, `float64`, `decimal`, `utf8`, `bytes`, `uuid`, `timestamp` (UTC µs), `date`, `jsonb`, `null` and distinct null/missing/tombstone states per FR-024a; vector domains require `dimension` and `metric ∈ l2|cosine|inner_product`
 - [ ] T015 Implement whole-definition validation pipeline stages 1–11 in `crates/types/src/validate.rs` (allocation-free on failure; no catalog/storage/placement until all stages pass) per [container-definition.md](contracts/container-definition.md) §2
-- [ ] T016 Implement `TypeCatalog` / `ContainerCatalog` / `TypeSystem` builder in `crates/types/src/catalog.rs` and `crates/types/src/lib.rs` with registries for types, encodings, codecs, algorithms, capabilities and `release` id (FR-010, FR-011, FR-045–FR-048)
+- [X] T016 Implement `TypeCatalog` / `ContainerCatalog` / `TypeSystem` builder in `crates/types/src/catalog.rs` and `crates/types/src/lib.rs` with registries for types, encodings, codecs, algorithms, capabilities and `release` id (FR-010, FR-011, FR-045–FR-048)
 - [ ] T017 [P] Extend `Datatype` / `Container` / `ObjectOps` in `crates/types/src/datatype.rs` **additively only** (default-bodied methods; never rename) per [abstract-datatype-interface.md](contracts/abstract-datatype-interface.md) — CI must keep `002` handlers compiling
 - [ ] T018 [P] Implement capability-descriptor ops dispatch and `NotSupportedByType` in `crates/types/src/ops.rs` (metadata-only answers, FR-039–FR-041)
 - [ ] T019 [P] Implement canonical representation registry v1 extension hooks in `crates/types/src/canonical.rs` (FR-042)
@@ -95,7 +95,7 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 - [ ] T036 [P] [US1] Implement L2 abstractions used by L3 defaults in `crates/l2/src/{map,ordered_map,kv_collection,document,field_index,field_path,bitmap_index,ngram_index,range_index,spatial_index,vector_collection,timeseries_segment,object,object_collection,multimap,set,ordered_set,sequence}.rs` preserving `002` machine names and ops for the six continuity types
 - [ ] T037 [US1] Implement ten L3 storage models in `crates/l3/src/{relational_table,columnar_table,document_store,fulltext_search,vector_search,spatial_search,kv_store,timeseries,object_storage,log_stream}.rs` with default layouts from [type-inventory.md](contracts/type-inventory.md); `relational_table`/`columnar_table`/`vector_search`/`spatial_search`/`timeseries` are schema-**Required**; `document_store`/`fulltext_search`/`log_stream` Optional; `kv_store`/`object_storage` Free
 - [ ] T038 [US1] Register L0+L2+L3 descriptors and implementations through `crates/typeset/src/lib.rs` so option-free create succeeds for every creatable type registered so far (FR-029)
-- [ ] T039 [US1] Implement container create / describe / alter / drop against `ContainerCatalog` + `CatalogStore` in `crates/types/src/catalog.rs` (and node wiring): type fixed for life; drop refused when dependants exist without cascade (FR-015–FR-019); description never includes key material (FR-017)
+- [X] T039 [US1] Implement container create / describe / alter / drop against `ContainerCatalog` + `CatalogStore` in `crates/types/src/catalog.rs` (and node wiring): type fixed for life; drop refused when dependants exist without cascade (FR-015–FR-019); description never includes key material (FR-017)
 - [ ] T040 [US1] Enforce schema ownership on write/read for schema-required/optional types in `crates/types/src/schema.rs` + each L3 impl; additive live evolution without data rewrite; incompatible changes refused with transform hint (FR-017a, FR-017b)
 - [ ] T041 [US1] Wire create/describe/drop and type-specific ops through `crates/types/src/datatype.rs` so at least one `002` protocol path exercises each of the ten L3 models; delete in-memory-only stub bodies for the six continuity names under `crates/types/src/` (or the `002` stub module) when real impls are registered
 - [ ] T042 [US1] Expose container type name on every listing path used by protocols (FR-020) in `crates/types/src/datatype.rs` and `crates/node` list APIs
@@ -372,3 +372,23 @@ Task: "CLI types/type/codecs/capabilities/catalog commands"
 - Do not over-claim in descriptors: Preview types (e.g. `scann`) must under-claim until oracles pass
 - Interim seams only: `keyring_file`, single-node `PlacementDirector`, node-local `CatalogStore`
 - Commit after each task or logical group; stop at any checkpoint to validate independently
+
+---
+
+## Phase 11: Convergence
+
+- [X] T099 Store per-type `multi_active` flag (default off; ordered/log types forced off) on descriptors and container definitions in `crates/types/src/{descriptor,definition,schema,validate,catalog}.rs` per FR-024b (`partial`); keep create-with-`on` refusal as first-binary behaviour owned by `12`/`16`
+
+
+---
+
+## Phase 12: Convergence
+
+**Purpose**: First-binary residuals after slice-2 implement (three L3 models + T099). Does **not** duplicate open L0–L4 inventory / full-catalog work (T015, T017–T038, T040–T098).
+
+- [X] T100 Wire `ContainerCatalog::create` through `validate_definition` + `TypeCatalog` lookup (refuse unknown / unregistered names); make `Default` equivalent to `new()`/`first_binary()` in `crates/types/src/{catalog,validate}.rs` per FR-016 / T039 (`partial`)
+- [X] T101 Implement FB `alter` on `ContainerCatalog` in `crates/types/src/catalog.rs`: refuse type change with `TypeImmutable`; allow additive option/schema updates without data rewrite for the three FB models per FR-016 / FR-017b / T039 (`partial`)
+- [X] T102 Add unit tests in `crates/types/src/lib.rs` (or `catalog` tests) for create → describe → put/get/delete → drop on `kv_store`, `relational_table` (with schema), and `document_store`, plus `multi_active=on` → `MultiActiveUnsupported`, per US1/AC1–AC2 FB subset / SC-002 / FR-024b (`partial`)
+- [X] T103 Hold `ContainerCatalog` on first-binary node boot (`Node::boot_first_binary`) in `crates/node/src/lib.rs` so create/describe/CRUD/drop for the three L3 models are reachable before protocol wiring (T041), per FR-016 / FR-020 / T039 (`partial`)
+- [X] T104 Replace `Uuid::new_v4` container ids with UUID v7 in `crates/types/src/catalog.rs` + `ident.rs` per T011 / data-model identity (`partial`)
+- [X] T105 Drive `crates/conformance/tests/multi_active.rs` against `spacestorage-types` create-with-`multi_active=on` → `MultiActiveUnsupported` (not only `in_process_cluster_ready`), per FR-024b / T099 (`partial`)

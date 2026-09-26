@@ -382,27 +382,100 @@ pub fn validate(
     }
 
     if opts.require_master_key {
-        match &cfg.cluster.master_key_file {
+        match cfg.effective_master_key_file() {
             None if cfg.cluster.name.is_some() || cfg.cluster.bootstrap => {
                 errors.push(ConfigError::new(
                     file,
                     0,
                     0,
-                    "cluster.master_key_file",
+                    "keys.master_key_file",
                     ErrorCode::MasterKeyRequired,
-                    "cluster { master_key_file } is required",
+                    "keys { master_key_file } (or cluster alias) is required",
                 ));
             }
             Some(p) if opts.check_secrets_readable => {
-                if let Err(e) = std::fs::read(p) {
-                    errors.push(ConfigError::new(
-                        file,
-                        0,
-                        0,
-                        "cluster.master_key_file",
-                        ErrorCode::MasterKeyUnreadable,
-                        format!("cannot read master key '{p}': {e}"),
-                    ));
+                let path = Path::new(p);
+                // FR-008 / T051: optional laptop bootstrap generates a 32-byte 0600 master.
+                if !path.exists() {
+                    if cfg.keys.create_master_if_absent {
+                        if let Err(e) =
+                            spacestorage_crypto::MasterKey::generate_and_write_blocking(path)
+                        {
+                            errors.push(ConfigError::new(
+                                file,
+                                0,
+                                0,
+                                "keys.master_key_file",
+                                ErrorCode::MasterKeyUnreadable,
+                                format!("cannot create master key '{p}': {e}"),
+                            ));
+                        }
+                    } else {
+                        errors.push(ConfigError::new(
+                            file,
+                            0,
+                            0,
+                            "keys.master_key_file",
+                            ErrorCode::MasterKeyRequired,
+                            format!(
+                                "master key '{p}' is missing (set create_master_if_absent to generate)"
+                            ),
+                        ));
+                    }
+                }
+                if path.exists() {
+                    match std::fs::metadata(path) {
+                        Err(e) => {
+                            errors.push(ConfigError::new(
+                                file,
+                                0,
+                                0,
+                                "keys.master_key_file",
+                                ErrorCode::MasterKeyUnreadable,
+                                format!("cannot read master key '{p}': {e}"),
+                            ));
+                        }
+                        Ok(meta) => {
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                let mode = meta.permissions().mode() & 0o777;
+                                if mode != 0o600 {
+                                    errors.push(ConfigError::new(
+                                        file,
+                                        0,
+                                        0,
+                                        "keys.master_key_file",
+                                        ErrorCode::MasterKeyPermissions,
+                                        format!("master key '{p}' must be mode 0600"),
+                                    ));
+                                }
+                            }
+                            match std::fs::read(path) {
+                                Err(e) => {
+                                    errors.push(ConfigError::new(
+                                        file,
+                                        0,
+                                        0,
+                                        "keys.master_key_file",
+                                        ErrorCode::MasterKeyUnreadable,
+                                        format!("cannot read master key '{p}': {e}"),
+                                    ));
+                                }
+                                Ok(bytes) if bytes.len() != 32 => {
+                                    errors.push(ConfigError::new(
+                                        file,
+                                        0,
+                                        0,
+                                        "keys.master_key_file",
+                                        ErrorCode::MasterKeyUnreadable,
+                                        format!("master key '{p}' must be exactly 32 bytes"),
+                                    ));
+                                }
+                                Ok(_) => {}
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
@@ -419,5 +492,150 @@ pub fn validate(
         }
     }
 
+    // storage.sync none refused outside SPACESTORAGE_TEST=1
+    if let Some(sync) = cfg.storage.sync.as_deref() {
+        if sync.eq_ignore_ascii_case("none") {
+            let test = std::env::var("SPACESTORAGE_TEST").ok().as_deref() == Some("1");
+            if !test {
+                errors.push(ConfigError::new(
+                    file,
+                    0,
+                    0,
+                    "storage.sync",
+                    ErrorCode::SyncNoneNotDurable,
+                    "storage { sync none; } is not durable outside SPACESTORAGE_TEST=1",
+                ));
+            }
+        }
+    }
+    if let Some(0) = cfg.storage.gc_grace_ms {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "storage.gc_grace",
+            ErrorCode::GcGraceTooSmall,
+            "gc_grace must be > 0",
+        ));
+    }
+
+    // 015: limits zeros and product_version 0 (also caught at resolve)
+    if let Err(e) = cfg.limits.limits.validate_nonzero() {
+        let knob = match &e {
+            spacestorage_compat::CompatError::LimitsZero { knob } => knob.clone(),
+            _ => "limits".into(),
+        };
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            format!("limits.{knob}"),
+            ErrorCode::LimitsZero,
+            format!("limits_zero{{knob:{knob}}}"),
+        ));
+    }
+    if let Some(0) = cfg.cluster.product_version {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "cluster.product_version",
+            ErrorCode::ProductVersionZero,
+            "product_version_zero",
+        ));
+    }
+
     errors
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{ClusterDecl, KeysDecl, QueryDefaults, StorageDecl};
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    fn bare_cfg(master_path: &str, create_if_absent: bool) -> NodeConfig {
+        NodeConfig {
+            node_name: "n1".into(),
+            threads: None,
+            drain_timeout: Duration::from_secs(30),
+            log_level: "info".into(),
+            log_format: "text".into(),
+            admin_token_file: None,
+            disable_admin: true,
+            disable_admin_http: true,
+            entrypoints: Vec::new(),
+            buffers: BTreeMap::new(),
+            cluster: ClusterDecl {
+                name: Some("c".into()),
+                bootstrap: true,
+                topology_ladder: vec!["node".into()],
+                ..ClusterDecl::default()
+            },
+            keys: KeysDecl {
+                master_key_file: Some(master_path.into()),
+                create_master_if_absent: create_if_absent,
+            },
+            query_defaults: QueryDefaults::default(),
+            labels: BTreeMap::new(),
+            storage_data_dir: None,
+            storage: StorageDecl::default(),
+            limits: crate::model::EffectiveLimits::built_in(),
+            query: crate::model::QueryDecl::default(),
+        }
+    }
+
+    #[test]
+    fn create_master_if_absent_generates_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("master.key");
+        let cfg = bare_cfg(path.to_str().unwrap(), true);
+        let opts = ValidateOptions {
+            check_secrets_readable: true,
+            require_transport: false,
+            require_cluster_ports: false,
+            require_master_key: true,
+        };
+        assert!(!path.exists());
+        let errors = validate(&cfg, "test.conf", &[], &opts);
+        assert!(
+            errors.iter().all(|e| {
+                e.code != ErrorCode::MasterKeyRequired.as_str()
+                    && e.code != ErrorCode::MasterKeyUnreadable.as_str()
+            }),
+            "{errors:?}"
+        );
+        assert!(path.exists());
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), 32);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn missing_master_without_flag_is_required() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("master.key");
+        let cfg = bare_cfg(path.to_str().unwrap(), false);
+        let opts = ValidateOptions {
+            check_secrets_readable: true,
+            require_transport: false,
+            require_cluster_ports: false,
+            require_master_key: true,
+        };
+        let errors = validate(&cfg, "test.conf", &[], &opts);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.code == ErrorCode::MasterKeyRequired.as_str()),
+            "{errors:?}"
+        );
+        assert!(!path.exists());
+    }
 }

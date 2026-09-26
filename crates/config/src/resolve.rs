@@ -1,8 +1,10 @@
 use crate::ast::{Arg, Document, Item};
 use crate::error::{ConfigError, ErrorCode};
 use crate::model::{
-    ClusterDecl, EntrypointDecl, NodeConfig, QueryDefaults, TlsDecl, Transport,
+    ClusterDecl, DriveDecl, EntrypointDecl, KeysDecl, NodeConfig, QueryDecl, QueryDefaults,
+    StorageDecl, TlsDecl, Transport,
 };
+use spacestorage_compat::{EffectiveLimits, Limits};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -24,9 +26,13 @@ pub fn resolve(
         entrypoints: Vec::new(),
         buffers: BTreeMap::new(),
         cluster: ClusterDecl::default(),
+        keys: KeysDecl::default(),
         query_defaults: QueryDefaults::default(),
         labels: BTreeMap::new(),
         storage_data_dir: None,
+        storage: StorageDecl::default(),
+        limits: EffectiveLimits::built_in(),
+        query: QueryDecl::default(),
     };
 
     for item in &doc.items {
@@ -252,6 +258,187 @@ pub fn resolve(
                                 "join" => {
                                     cfg.cluster.join = d.args.first().map(|a| a.as_str());
                                 }
+                                "admin_login" => {
+                                    cfg.cluster.admin_login = d.args.first().map(|a| a.as_str());
+                                }
+                                "admin_password_file" => {
+                                    cfg.cluster.admin_password_file =
+                                        d.args.first().map(|a| a.as_str());
+                                }
+                                "product_version" => {
+                                    match d.args.first() {
+                                        Some(Arg::Number(0)) => {
+                                            errors.push(ConfigError::new(
+                                                file,
+                                                d.line,
+                                                d.col,
+                                                "cluster.product_version",
+                                                ErrorCode::ProductVersionZero,
+                                                "product_version_zero",
+                                            ));
+                                        }
+                                        Some(Arg::Number(n)) => {
+                                            cfg.cluster.product_version = Some(*n as u16);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                "limits" => {
+                    let mut lim = Limits::default();
+                    for it in &b.items {
+                        if let Item::Directive(d) = it {
+                            let size_or_num = |args: &[Arg]| -> Result<Option<u64>, ()> {
+                                match args.first() {
+                                    Some(Arg::Size(n)) | Some(Arg::Number(n)) => Ok(Some(*n)),
+                                    Some(Arg::Ident(_)) | Some(Arg::String(_)) => Err(()),
+                                    _ => Ok(None),
+                                }
+                            };
+                            match d.name.as_str() {
+                                "max_key" => match size_or_num(&d.args) {
+                                    Ok(Some(n)) => lim.max_key = n,
+                                    Err(()) => errors.push(ConfigError::new(
+                                        file,
+                                        d.line,
+                                        d.col,
+                                        "limits.max_key",
+                                        ErrorCode::LimitsUnknownUnit,
+                                        "limits_unknown_unit",
+                                    )),
+                                    Ok(None) => {}
+                                },
+                                "max_value" => match size_or_num(&d.args) {
+                                    Ok(Some(n)) => lim.max_value = n,
+                                    Err(()) => errors.push(ConfigError::new(
+                                        file,
+                                        d.line,
+                                        d.col,
+                                        "limits.max_value",
+                                        ErrorCode::LimitsUnknownUnit,
+                                        "limits_unknown_unit",
+                                    )),
+                                    Ok(None) => {}
+                                },
+                                "max_query_text" => match size_or_num(&d.args) {
+                                    Ok(Some(n)) => lim.max_query_text = n,
+                                    Err(()) => errors.push(ConfigError::new(
+                                        file,
+                                        d.line,
+                                        d.col,
+                                        "limits.max_query_text",
+                                        ErrorCode::LimitsUnknownUnit,
+                                        "limits_unknown_unit",
+                                    )),
+                                    Ok(None) => {}
+                                },
+                                "max_result" => match size_or_num(&d.args) {
+                                    Ok(Some(n)) => lim.max_result = n,
+                                    Err(()) => errors.push(ConfigError::new(
+                                        file,
+                                        d.line,
+                                        d.col,
+                                        "limits.max_result",
+                                        ErrorCode::LimitsUnknownUnit,
+                                        "limits_unknown_unit",
+                                    )),
+                                    Ok(None) => {}
+                                },
+                                "max_connections_per_entrypoint" => {
+                                    if let Some(Arg::Number(n)) = d.args.first() {
+                                        lim.max_connections_per_entrypoint = *n as u32;
+                                    }
+                                }
+                                "max_connections_per_principal" => {
+                                    if let Some(Arg::Number(n)) = d.args.first() {
+                                        lim.max_connections_per_principal = *n as u32;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    if let Err(e) = lim.validate_nonzero() {
+                        let knob = match &e {
+                            spacestorage_compat::CompatError::LimitsZero { knob } => knob.clone(),
+                            _ => "limits".into(),
+                        };
+                        errors.push(ConfigError::new(
+                            file,
+                            b.line,
+                            b.col,
+                            format!("limits.{knob}"),
+                            ErrorCode::LimitsZero,
+                            format!("limits_zero{{knob:{knob}}}"),
+                        ));
+                    }
+                    cfg.limits = EffectiveLimits::configured(lim);
+                }
+                "query" => {
+                    for it in &b.items {
+                        if let Item::Directive(d) = it {
+                            match d.name.as_str() {
+                                "max_concurrent_per_node" => {
+                                    if let Some(Arg::Number(n)) = d.args.first() {
+                                        cfg.query.max_concurrent_per_node = Some(*n as u32);
+                                    }
+                                }
+                                "max_concurrent_per_namespace" => {
+                                    if let Some(Arg::Number(n)) = d.args.first() {
+                                        cfg.query.max_concurrent_per_namespace = Some(*n as u32);
+                                    }
+                                }
+                                "max_memory" => {
+                                    if let Some(Arg::Size(n)) = d.args.first() {
+                                        cfg.query.max_memory = Some(*n);
+                                    } else if let Some(Arg::Number(n)) = d.args.first() {
+                                        cfg.query.max_memory = Some(*n);
+                                    }
+                                }
+                                "spill" => {
+                                    match d.args.first().map(|a| a.as_str().to_ascii_lowercase()) {
+                                        Some(s) if s == "on" || s == "true" => {
+                                            cfg.query.spill = Some(true);
+                                        }
+                                        Some(s) if s == "off" || s == "false" => {
+                                            cfg.query.spill = Some(false);
+                                        }
+                                        // bare `spill;` → on
+                                        None if d.args.is_empty() => {
+                                            cfg.query.spill = Some(true);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                "keys" => {
+                    for it in &b.items {
+                        if let Item::Directive(d) = it {
+                            match d.name.as_str() {
+                                "master_key_file" => {
+                                    cfg.keys.master_key_file = d.args.first().map(|a| a.as_str());
+                                }
+                                "create_master_if_absent" => {
+                                    cfg.keys.create_master_if_absent = true;
+                                }
+                                "keyring_file" => {
+                                    errors.push(ConfigError::new(
+                                        file,
+                                        d.line,
+                                        d.col,
+                                        "keys.keyring_file",
+                                        ErrorCode::KeyringRemoved,
+                                        "keys { keyring_file } removed; use master_key_file",
+                                    ));
+                                }
                                 _ => {}
                             }
                         }
@@ -278,15 +465,95 @@ pub fn resolve(
                 }
                 "storage" => {
                     for it in &b.items {
-                        if let Item::Directive(d) = it {
-                            if d.name == "data_dir" {
-                                cfg.storage_data_dir = d.args.first().map(|a| a.as_str());
+                        match it {
+                            Item::Directive(d) => match d.name.as_str() {
+                                "data_dir" => {
+                                    cfg.storage_data_dir = d.args.first().map(|a| a.as_str());
+                                }
+                                "sync" => {
+                                    cfg.storage.sync = d.args.first().map(|a| a.as_str());
+                                }
+                                "gc_grace" => {
+                                    if let Some(Arg::DurationMs(ms)) = d.args.first() {
+                                        cfg.storage.gc_grace_ms = Some(*ms);
+                                    }
+                                }
+                                "wal_segment" => {
+                                    if let Some(Arg::Size(n)) = d.args.first() {
+                                        cfg.storage.wal_segment_bytes = Some(*n);
+                                    } else if let Some(Arg::Number(n)) = d.args.first() {
+                                        cfg.storage.wal_segment_bytes = Some(*n);
+                                    }
+                                }
+                                _ => {}
+                            },
+                            Item::Block(sb) if sb.name == "group_commit" => {
+                                for git in &sb.items {
+                                    if let Item::Directive(d) = git {
+                                        match d.name.as_str() {
+                                            "max_wait" => {
+                                                if let Some(Arg::DurationMs(ms)) = d.args.first() {
+                                                    cfg.storage.group_commit_max_wait_ms = Some(*ms);
+                                                }
+                                            }
+                                            "max_bytes" => {
+                                                if let Some(Arg::Size(n)) = d.args.first() {
+                                                    cfg.storage.group_commit_max_bytes = Some(*n);
+                                                } else if let Some(Arg::Number(n)) = d.args.first()
+                                                {
+                                                    cfg.storage.group_commit_max_bytes = Some(*n);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
                             }
+                            Item::Block(sb) if sb.name == "drive" => {
+                                let mut id = String::new();
+                                let mut path = String::new();
+                                for dit in &sb.items {
+                                    if let Item::Directive(d) = dit {
+                                        match d.name.as_str() {
+                                            "id" | "name" => {
+                                                id = d
+                                                    .args
+                                                    .first()
+                                                    .map(|a| a.as_str())
+                                                    .unwrap_or_default();
+                                            }
+                                            "path" => {
+                                                path = d
+                                                    .args
+                                                    .first()
+                                                    .map(|a| a.as_str())
+                                                    .unwrap_or_default();
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                // drive "name" { path … } — name may be block arg
+                                if id.is_empty() {
+                                    if let Some(Arg::Ident(n)) = sb.args.first() {
+                                        id = n.clone();
+                                    } else if let Some(a) = sb.args.first() {
+                                        id = a.as_str();
+                                    }
+                                }
+                                if !path.is_empty() {
+                                    if id.is_empty() {
+                                        id = format!("drive{}", cfg.storage.drives.len());
+                                    }
+                                    cfg.storage.drives.push(DriveDecl { id, path });
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
                 // reserved foreign blocks accepted for first-binary fixtures / later features
-                "labels" | "memory" | "namespace" | "metrics" | "ingest" | "replication" => {}
+                "labels" | "memory" | "namespace" | "metrics" | "ingest" | "replication" | "types" => {}
                 other => {
                     errors.push(ConfigError::new(
                         file,

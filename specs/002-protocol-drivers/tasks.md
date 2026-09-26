@@ -99,9 +99,9 @@ description: "Task list for wire protocols and datatype-aware drivers"
 
 ### Implementation for User Story 1
 
-- [ ] T040 [US1] Implement Redis handler handshake, AUTH (credential-bound namespace), PING/SET/GET/DEL smoke path in `crates/handler-redis/src/{handler.rs,auth.rs,commands/,lower.rs,render.rs}` registering handler name `redis`
-- [ ] T041 [US1] Wire Redis handler into node registry and entrypoint serve path in `crates/node/` so `entrypoint.handler redis` listens
-- [ ] T042 [US1] Implement PostgreSQL handler via `pgwire` (SSLRequest/TLS, SCRAM-SHA-256, database name = namespace) with simple CREATE/INSERT/SELECT/DROP smoke in `crates/handler-postgresql/src/{handler.rs,auth.rs,lower/,render.rs,catalog_views.rs}`
+- [X] T040 [US1] Implement Redis handler handshake, AUTH (credential-bound namespace), PING/SET/GET/DEL smoke path in `crates/handler-redis/src/{handler.rs,auth.rs,commands/,lower.rs,render.rs}` registering handler name `redis`
+- [X] T041 [US1] Wire Redis handler into node registry and entrypoint serve path in `crates/node/` so `entrypoint.handler redis` listens
+- [X] T042 [US1] Implement PostgreSQL handler via `pgwire` (SSLRequest/TLS, SCRAM-SHA-256, database name = namespace) with simple CREATE/INSERT/SELECT/DROP smoke in `crates/handler-postgresql/src/{handler.rs,auth.rs,lower/,render.rs,catalog_views.rs}`
 - [ ] T043 [US1] Implement Elasticsearch HTTP handler (Basic auth, `GET /`, index create, doc index, search smoke) in `crates/handler-elasticsearch/src/{router.rs,auth.rs,api/,dsl/,render.rs}`
 - [ ] T044 [P] [US1] Implement S3 handler (SigV4, CreateBucket/PutObject/GetObject/List/Delete including multipart) in `crates/handler-s3/src/{router.rs,sigv4_extract.rs,xml.rs,ops/,render.rs}`
 - [ ] T045 [P] [US1] Implement WebDAV handler (Basic/Digest, PROPFIND/MKCOL/PUT/GET/MOVE/DELETE smoke) in `crates/handler-webdav/src/{router.rs,auth.rs,methods/,props.rs,locks.rs,xml.rs,render.rs}`
@@ -357,3 +357,12 @@ Task: "Declare per-protocol mapping() for all six interim types in each handler 
 - SC-007 remains `#[ignore]` until `04`/`06`
 - Commit after each task or logical group; stop at checkpoints to validate independently
 - Avoid: protocol-private engines, per-protocol type systems, secrets inlined in config, altering canonical bytes in drivers
+
+## Phase 10: Convergence
+
+> First-binary scope only (intent `16`): PostgreSQL smoke + Redis K/V MUST. Slice-6 handlers remain tracked by existing open tasks (T043–T047); not re-listed here.
+
+- [X] T100 CRITICAL Ensure `crates/handler-postgresql` and `crates/handler-redis` expose async `Handler::serve` on the Tokio runtime with no blocking worker-thread database work per Constitution II (`contradicts`) — current sync `PostgresqlHandler::exec_sql` / sync `dispatch` are not a legal request path
+- [X] T101 Wire PostgreSQL handler into `crates/node/` registry and entrypoint serve path (replace `stub_cluster::ClusterPortHandler` for `postgresql`; add `spacestorage-handler-postgresql` dependency) per US1/AC2, FR-002 (`missing`) — parallel to open T041 for Redis
+- [X] T102 Extend first-binary PostgreSQL smoke beyond T042's CREATE/INSERT/SELECT/DROP to include UPDATE/DELETE and simple + extended/prepared auto-commit per intent `16` / SC-001 in `crates/handler-postgresql/` (`partial`)
+- [X] T103 Complete Redis first-binary K/V MUST verbs EXISTS, SCAN, SELECT (no-op), and TTL mapping with real storage beyond T040's PING/SET/GET/DEL path per intent `16` / US1/AC4 in `crates/handler-redis/` (`partial`)

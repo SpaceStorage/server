@@ -1,39 +1,10 @@
-//! Redis first-binary dialect (002) — K/V MUST list; off-list errors.
+//! Redis first-binary dialect (002) — RESP2 K/V MUST on `K/V Store`.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RedisReply {
-    Ok,
-    Bulk(Option<Vec<u8>>),
-    Integer(i64),
-    Error(String),
-}
+mod commands;
+mod handler;
+mod resp;
 
-const MUST: &[&str] = &[
-    "AUTH", "PING", "GET", "SET", "DEL", "EXISTS", "SCAN", "SELECT", "TTL", "EXPIRE", "PTTL",
-];
+pub use commands::{dispatch, RedisReply, SessionState, MUST_COMMANDS};
+pub use handler::RedisHandler;
 
-pub fn dispatch(cmd: &str, _args: &[&str]) -> RedisReply {
-    let c = cmd.to_ascii_uppercase();
-    if MUST.iter().any(|m| *m == c) {
-        match c.as_str() {
-            "PING" => RedisReply::Bulk(Some(b"PONG".to_vec())),
-            "SELECT" => RedisReply::Ok, // no-op
-            "AUTH" => RedisReply::Ok,
-            _ => RedisReply::Bulk(None),
-        }
-    } else {
-        RedisReply::Error(format!("ERR unknown command '{cmd}'"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hget_errors() {
-        assert!(matches!(dispatch("HGET", &["k", "f"]), RedisReply::Error(_)));
-        assert!(matches!(dispatch("JSON.GET", &["k"]), RedisReply::Error(_)));
-        assert!(matches!(dispatch("PING", &[]), RedisReply::Bulk(Some(_))));
-    }
-}
+pub const WIRE_VERSION: &str = "7.2.0-spacestorage";

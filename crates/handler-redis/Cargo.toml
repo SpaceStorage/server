@@ -8,5 +8,13 @@ description = "Redis protocol handler (002 first-binary)"
 publish = false
 
 [dependencies]
+spacestorage-types = { path = "../types" }
+spacestorage-compat = { path = "../compat" }
 tokio = { workspace = true }
 tracing = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

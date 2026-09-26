@@ -38,9 +38,13 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
         ],
         buffers: BTreeMap::new(),
         cluster: ClusterDecl::default(),
+        keys: Default::default(),
         query_defaults: QueryDefaults::default(),
         labels: BTreeMap::new(),
         storage_data_dir: None,
+        storage: Default::default(),
+        limits: spacestorage_config::model::EffectiveLimits::built_in(),
+        query: Default::default(),
     }
 }
 

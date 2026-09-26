@@ -385,3 +385,11 @@ Task: "T036 quorum arithmetic unit tests in crates/placement/src/quorum.rs"
 - Verify tests fail before implementing
 - Commit after each task or logical group
 - Stop at any checkpoint to validate a story independently
+
+---
+
+## Phase 12: Convergence
+
+**Purpose**: Close gaps found by `/speckit-converge` that are not already covered by open tasks (false `[x]`, unmarked gaps, constitution violations). First-binary RF/anti-affinity/leaderless/ladder work remains tracked by open T018–T021, T025–T033, T037–T039 — do not re-list here.
+
+- [ ] T095 CRITICAL: Complete false-marked T001 — add `mod frame`, `mod rpc`, `mod heartbeat`, `mod auth` (and stub module files) under `crates/internode/src/` so `lib.rs` matches the claimed deliverable; current `FabricConfig`-only crate contradicts T001 (`contradicts`)

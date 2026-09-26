@@ -1,5 +1,6 @@
 use crate::admin::auth::check_bearer;
 use crate::admin::AdminService;
+use crate::handler::ClientStream;
 use crate::Node;
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -7,7 +8,6 @@ use spacestorage_admin_proto::{decode_frame, encode_frame, AdminOp, ErrorBody};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
@@ -27,7 +27,7 @@ impl Handler for AdminTcpHandler {
         "admin"
     }
 
-    async fn serve(&self, mut stream: TcpStream, cancel: CancellationToken) {
+    async fn serve(&self, mut stream: ClientStream, cancel: CancellationToken) {
         let mut buf = BytesMut::with_capacity(4096);
         // Hello timeout 5s
         let hello = tokio::time::timeout(Duration::from_secs(5), async {
@@ -58,11 +58,12 @@ impl Handler for AdminTcpHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let cfg = self.node.config.load();
-        let expected = cfg
-            .admin_token_file
-            .as_ref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .unwrap_or_default();
+        let expected = match cfg.admin_token_file.as_ref() {
+            Some(p) => tokio::fs::read_to_string(p)
+                .await
+                .unwrap_or_default(),
+            None => String::new(),
+        };
         if !check_bearer(token, expected.trim()) {
             let err = ErrorBody {
                 code: "unauthorized".into(),

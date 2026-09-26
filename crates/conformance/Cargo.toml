@@ -18,3 +18,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
+spacestorage-types = { path = "../types" }
+spacestorage-compat = { path = "../compat" }
+spacestorage-handler-postgresql = { path = "../handler-postgresql" }
+spacestorage-handler-redis = { path = "../handler-redis" }

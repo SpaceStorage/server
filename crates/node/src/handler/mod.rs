@@ -1,8 +1,14 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::sync::CancellationToken;
+
+/// Accepted connection after optional TLS termination (FR-027: no plaintext fallback).
+pub trait IoStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> IoStream for T {}
+
+pub type ClientStream = Box<dyn IoStream>;
 
 #[async_trait]
 pub trait Handler: Send + Sync {
@@ -13,7 +19,7 @@ pub trait Handler: Send + Sync {
     fn owner(&self) -> &str {
         "01-runtime-cli-api"
     }
-    async fn serve(&self, stream: TcpStream, cancel: CancellationToken);
+    async fn serve(&self, stream: ClientStream, cancel: CancellationToken);
 }
 
 pub struct HandlerRegistry {
@@ -56,4 +62,6 @@ impl Default for HandlerRegistry {
 pub mod admin_http;
 pub mod admin_tcp;
 pub mod echo;
+pub mod postgresql;
+pub mod redis;
 pub mod stub_cluster;

@@ -40,4 +40,17 @@ impl ReleaseProfile {
             Self::CompleteProduct => 11,
         }
     }
+
+    /// Map onto the 015 dialect profile name (`spacestorage-compat::DialectProfile`).
+    ///
+    /// - `first-binary` → FirstBinary
+    /// - `complete-product` → CompleteProduct
+    /// - HandlersComplete is selected via the `handlers-complete` Cargo feature /
+    ///   `spacestorage_compat::profile_from_release("handlers-complete")`, not this enum yet.
+    pub fn dialect_profile_name(self) -> &'static str {
+        match self {
+            Self::FirstBinary => "first-binary",
+            Self::CompleteProduct => "complete-product",
+        }
+    }
 }

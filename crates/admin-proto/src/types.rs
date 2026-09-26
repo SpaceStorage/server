@@ -56,6 +56,16 @@ pub struct BufferRange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingReport {
+    pub setting: String,
+    pub value: serde_json::Value,
+    /// `"live"` or `"restart_required"` (FR-012).
+    pub reload_class: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_restart: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectiveConfig {
     pub node_name: String,
     pub threads: u32,
@@ -67,6 +77,9 @@ pub struct EffectiveConfig {
     pub entrypoints: Vec<EntrypointStatus>,
     pub buffers: Vec<BufferReport>,
     pub pending_restart: Vec<String>,
+    /// Per-setting reload classification (FR-012).
+    #[serde(default)]
+    pub settings: Vec<SettingReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_profile: Option<String>,
 }

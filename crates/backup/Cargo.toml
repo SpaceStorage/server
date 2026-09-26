@@ -1,17 +1,18 @@
 [package]
-name = "spacestorage-wal"
+name = "spacestorage-backup"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Durable WAL and crash restore (013)"
+description = "Snapshot / PITR / restore-fill (013; slice 10 ops)"
 publish = false
 
 [dependencies]
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

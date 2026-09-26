@@ -1,10 +1,11 @@
 use crate::admin::auth::check_bearer;
 use crate::admin::AdminService;
+use crate::handler::ClientStream;
 use crate::lifecycle::NodeState;
 use crate::Node;
 use async_trait::async_trait;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -13,7 +14,6 @@ use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use spacestorage_admin_proto::{AdminOp, ErrorBody};
 use std::sync::Arc;
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use tracing::debug;
@@ -34,7 +34,7 @@ impl Handler for AdminHttpHandler {
         "admin"
     }
 
-    async fn serve(&self, stream: TcpStream, cancel: CancellationToken) {
+    async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         let io = TokioIo::new(stream);
         let app = router(self.node.clone());
         let hyper_service = hyper::service::service_fn(move |req| {
@@ -53,6 +53,9 @@ impl Handler for AdminHttpHandler {
     }
 }
 
+/// Admin-http request body ceiling (contracts/admin-http.md / T087).
+const ADMIN_HTTP_BODY_LIMIT: usize = 1024 * 1024; // 1 MiB
+
 fn router(node: Arc<Node>) -> Router {
     Router::new()
         .route("/v1/status", get(status))
@@ -65,21 +68,21 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/health/ready", get(ready))
         .route("/metrics", get(metrics_404))
         .fallback(fallback)
+        .layer(DefaultBodyLimit::max(ADMIN_HTTP_BODY_LIMIT))
         .with_state(node)
 }
 
-fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
+async fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
     let auth = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let token = auth.strip_prefix("Bearer ").unwrap_or("");
     let cfg = node.config.load();
-    let expected = cfg
-        .admin_token_file
-        .as_ref()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .unwrap_or_default();
+    let expected = match cfg.admin_token_file.as_ref() {
+        Some(p) => tokio::fs::read_to_string(p).await.unwrap_or_default(),
+        None => String::new(),
+    };
     if check_bearer(token, expected.trim()) {
         Ok(())
     } else {
@@ -103,7 +106,7 @@ fn with_headers(node: &Node, mut resp: axum::response::Response) -> axum::respon
 }
 
 async fn status(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node) {
+    if let Err(e) = auth(&headers, &node).await {
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     match AdminService::execute(&node, AdminOp::Status).await {
@@ -113,7 +116,7 @@ async fn status(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::resp
 }
 
 async fn config(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node) {
+    if let Err(e) = auth(&headers, &node).await {
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     match AdminService::execute(&node, AdminOp::Config).await {
@@ -123,7 +126,7 @@ async fn config(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::resp
 }
 
 async fn threads(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node) {
+    if let Err(e) = auth(&headers, &node).await {
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     match AdminService::execute(&node, AdminOp::Threads).await {
@@ -133,7 +136,7 @@ async fn threads(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::res
 }
 
 async fn buffers(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node) {
+    if let Err(e) = auth(&headers, &node).await {
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     match AdminService::execute(&node, AdminOp::Buffers).await {
@@ -143,7 +146,7 @@ async fn buffers(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::res
 }
 
 async fn reload(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node) {
+    if let Err(e) = auth(&headers, &node).await {
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     match AdminService::execute(&node, AdminOp::Reload).await {
@@ -157,7 +160,7 @@ async fn stop(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node) {
+    if let Err(e) = auth(&headers, &node).await {
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     let wait = serde_json::from_slice::<serde_json::Value>(&body)
@@ -189,12 +192,14 @@ async fn ready(State(node): State<Arc<Node>>) -> axum::response::Response {
 }
 
 async fn metrics_404() -> impl IntoResponse {
-    // 008 US1: global /metrics for implemented paths (was 404 placeholder in 001).
-    let body = spacestorage_observability::Metrics::default().render_prometheus();
+    // Feature 001 reserves `/metrics` as HTTP 404; exposition is owned by feature 08.
     (
-        StatusCode::OK,
-        [("content-type", "text/plain; version=0.0.4")],
-        body,
+        StatusCode::NOT_FOUND,
+        Json(ErrorBody {
+            code: "unknown_op".into(),
+            message: "metrics exposition is not enabled in this feature".into(),
+            details: serde_json::json!({}),
+        }),
     )
 }
 

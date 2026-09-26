@@ -96,6 +96,22 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Consume optional `iB` / `ib` / `B` after k/m/g so `1KiB` and `16MiB` lex as one Size.
+    fn skip_iec_ib_suffix(&mut self) {
+        let rest = &self.src[self.i..];
+        if rest.starts_with("iB")
+            || rest.starts_with("ib")
+            || rest.starts_with("IB")
+            || rest.starts_with("Ib")
+        {
+            self.bump();
+            self.bump();
+        } else if rest.starts_with('B') || rest.starts_with('b') {
+            // bare `kB` / `MB`
+            self.bump();
+        }
+    }
+
     /// Public bump for parser recovery.
     pub fn force_bump(&mut self) {
         self.bump();
@@ -191,8 +207,10 @@ impl<'a> Lexer<'a> {
             }
             // SIZE units (MiB etc.). Duration minutes also use 'm' in the grammar;
             // first-binary configs use `Ns` for drain_timeout and `Nm` for buffers.
+            // Also accept IEC forms KiB/MiB/GiB (015 limits fixtures).
             'k' | 'K' => {
                 self.bump();
+                self.skip_iec_ib_suffix();
                 Ok(Token {
                     kind: TokenKind::Size(num.saturating_mul(1024)),
                     line,
@@ -201,6 +219,7 @@ impl<'a> Lexer<'a> {
             }
             'm' | 'M' => {
                 self.bump();
+                self.skip_iec_ib_suffix();
                 Ok(Token {
                     kind: TokenKind::Size(num.saturating_mul(1024 * 1024)),
                     line,
@@ -209,6 +228,7 @@ impl<'a> Lexer<'a> {
             }
             'g' | 'G' => {
                 self.bump();
+                self.skip_iec_ib_suffix();
                 Ok(Token {
                     kind: TokenKind::Size(num.saturating_mul(1024 * 1024 * 1024)),
                     line,

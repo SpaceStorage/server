@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+pub use spacestorage_compat::{EffectiveLimits, LimitProvenance, Limits};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
     pub node_name: String,
@@ -15,9 +17,48 @@ pub struct NodeConfig {
     pub entrypoints: Vec<EntrypointDecl>,
     pub buffers: BTreeMap<String, u64>,
     pub cluster: ClusterDecl,
+    pub keys: KeysDecl,
     pub query_defaults: QueryDefaults,
     pub labels: BTreeMap<String, String>,
     pub storage_data_dir: Option<String>,
+    pub storage: StorageDecl,
+    /// Size/connection limits (`limits { }`); missing → built-in defaults (015).
+    pub limits: EffectiveLimits,
+    /// Optional `query { spill; max_concurrent_*; max_memory; }` (005 owned; parsed here).
+    pub query: QueryDecl,
+}
+
+impl NodeConfig {
+    /// Normative 014 path is `keys.master_key_file`; `cluster.master_key_file`
+    /// remains an accepted first-binary (016) alias.
+    pub fn effective_master_key_file(&self) -> Option<&str> {
+        self.keys
+            .master_key_file
+            .as_deref()
+            .or(self.cluster.master_key_file.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KeysDecl {
+    pub master_key_file: Option<String>,
+    pub create_master_if_absent: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StorageDecl {
+    pub sync: Option<String>,
+    pub gc_grace_ms: Option<u64>,
+    pub wal_segment_bytes: Option<u64>,
+    pub group_commit_max_wait_ms: Option<u64>,
+    pub group_commit_max_bytes: Option<u64>,
+    pub drives: Vec<DriveDecl>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriveDecl {
+    pub id: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -26,9 +67,35 @@ pub struct ClusterDecl {
     pub bootstrap: bool,
     pub topology_ladder: Vec<String>,
     pub quorum_domain: Option<String>,
+    /// Alias for `keys.master_key_file` (first-binary starters). Prefer `keys {}`.
     pub master_key_file: Option<String>,
     pub token_file: Option<String>,
     pub join: Option<String>,
+    pub admin_login: Option<String>,
+    pub admin_password_file: Option<String>,
+    /// Optional override; default compiled-in product version = 1 (015).
+    pub product_version: Option<u16>,
+}
+
+/// Query admission knobs (`query { }`) — policy defaults from compat; owned by 005.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueryDecl {
+    pub max_concurrent_per_node: Option<u32>,
+    pub max_concurrent_per_namespace: Option<u32>,
+    pub max_memory: Option<u64>,
+    /// `Some(true)` = spill on; `Some(false)` = off; `None` = profile default.
+    pub spill: Option<bool>,
+}
+
+impl Default for QueryDecl {
+    fn default() -> Self {
+        Self {
+            max_concurrent_per_node: None,
+            max_concurrent_per_namespace: None,
+            max_memory: None,
+            spill: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

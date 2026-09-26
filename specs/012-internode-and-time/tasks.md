@@ -303,3 +303,8 @@ Task: "Model ContainerReplication catalog fields"
 - Stop at any checkpoint to validate story independently
 - Do not implement membership bootstrap/join/leave (`011`), placement RF/anti-affinity (`004`), or durable-ack disk meaning (`013`) beyond the seams this feature owns
 - Avoid: vague tasks, same-file conflicts, treating `planet`/`region` as a `quorum_domain`, follower local WAL, phi-accrual FD, cross-domain HLC compare
+
+## Phase 8: Convergence
+
+- [ ] T069 CRITICAL Ensure source-log / replication durable-ack fsync runs via `spawn_blocking` (Tokio blocking pool), never on an async worker, in `crates/replication/src/source_log.rs` (and any 012-owned apply path that waits for durability) per Constitution II / plan Technical Context (`missing`)
+- [ ] T070 [US2] On bootstrap, create the quorum domain named by `cluster.quorum_domain` when set (first-binary starters use `lab`); create `default` only when the directive is omitted, in `crates/controlplane` / `crates/membership` / `crates/config` per FR-005 / [config-directives.md](contracts/config-directives.md) (`partial`)

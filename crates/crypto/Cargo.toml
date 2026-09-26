@@ -1,0 +1,27 @@
+[package]
+name = "spacestorage-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Envelope keys, AEAD, KeyAuthority (003/014)"
+publish = false
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+zeroize = { workspace = true }
+aes-gcm = { workspace = true }
+chacha20poly1305 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+async-trait = { workspace = true }
+subtle = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

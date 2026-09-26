@@ -1,15 +1,15 @@
 pub mod auth;
 
-use crate::lifecycle::NodeState;
+use crate::lifecycle::{self, NodeState};
 use crate::reload;
 use crate::Node;
 use spacestorage_admin_proto::{
-    AdminOp, EffectiveConfig, EntrypointStatus, ErrorBody, Status, StopResult,
+    AdminOp, EffectiveConfig, EntrypointStatus, ErrorBody, SettingReport, Status, StopResult,
     ThreadsReport,
 };
 use spacestorage_config::model::Transport;
 use spacestorage_release_profile::ReleaseProfile;
-use std::sync::atomic::Ordering;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct AdminService;
@@ -45,9 +45,14 @@ impl AdminService {
                 Ok(serde_json::to_value(report).unwrap())
             }
             AdminOp::Stop { wait: _ } => {
-                node.drain_flag.store(true, Ordering::SeqCst);
-                node.state.begin_drain();
-                node.cancel.cancel();
+                if node.state.get() == NodeState::Draining {
+                    return Err(ErrorBody {
+                        code: "invalid_state".into(),
+                        message: "already draining".into(),
+                        details: serde_json::json!({"state": "draining"}),
+                    });
+                }
+                lifecycle::request_drain(node);
                 Ok(serde_json::to_value(StopResult {
                     accepted: true,
                     state: "draining".into(),
@@ -74,7 +79,7 @@ fn entrypoint_statuses(node: &Node) -> Vec<EntrypointStatus> {
                 Transport::Undeclared => "undeclared",
             }
             .into(),
-            cert_expired: false,
+            cert_expired: node.effective.cert_expired(&ep.name),
             connections_active: 0,
         })
         .collect()
@@ -102,6 +107,62 @@ fn status(node: &Node) -> Status {
     }
 }
 
+fn settings_report(node: &Node) -> Vec<SettingReport> {
+    let cfg = node.config.load();
+    let pending: HashSet<String> = node.effective.pending_restart().into_iter().collect();
+    let mark = |name: &str| -> Option<serde_json::Value> {
+        if pending.contains(name) {
+            Some(serde_json::Value::Bool(true))
+        } else {
+            None
+        }
+    };
+    vec![
+        SettingReport {
+            setting: "runtime.threads".into(),
+            value: serde_json::json!(node.worker_threads),
+            reload_class: "restart_required".into(),
+            pending_restart: mark("runtime.threads"),
+        },
+        SettingReport {
+            setting: "runtime.drain_timeout".into(),
+            value: serde_json::json!(cfg.drain_timeout.as_secs()),
+            reload_class: "live".into(),
+            pending_restart: mark("runtime.drain_timeout"),
+        },
+        SettingReport {
+            setting: "log.level".into(),
+            value: serde_json::json!(cfg.log_level),
+            reload_class: "live".into(),
+            pending_restart: mark("log.level"),
+        },
+        SettingReport {
+            setting: "log.format".into(),
+            value: serde_json::json!(cfg.log_format),
+            reload_class: "restart_required".into(),
+            pending_restart: mark("log.format"),
+        },
+        SettingReport {
+            setting: "admin.token_file".into(),
+            value: serde_json::json!(cfg.admin_token_file),
+            reload_class: "live".into(),
+            pending_restart: mark("admin.token_file"),
+        },
+        SettingReport {
+            setting: "entrypoints".into(),
+            value: serde_json::to_value(&cfg.entrypoints).unwrap_or(serde_json::Value::Null),
+            reload_class: "restart_required".into(),
+            pending_restart: mark("entrypoints"),
+        },
+        SettingReport {
+            setting: "buffers".into(),
+            value: serde_json::to_value(&cfg.buffers).unwrap_or(serde_json::Value::Null),
+            reload_class: "live".into(),
+            pending_restart: mark("buffers"),
+        },
+    ]
+}
+
 fn config(node: &Node) -> EffectiveConfig {
     EffectiveConfig {
         node_name: node.config.load().node_name.clone(),
@@ -114,6 +175,7 @@ fn config(node: &Node) -> EffectiveConfig {
         entrypoints: entrypoint_statuses(node),
         buffers: node.buffers.reports(),
         pending_restart: node.effective.pending_restart(),
+        settings: settings_report(node),
         release_profile: Some(ReleaseProfile::FirstBinary.as_str().into()),
     }
 }

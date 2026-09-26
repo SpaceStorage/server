@@ -11,6 +11,8 @@ publish = false
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+# First-binary compiles authz (no authz-custom / RolePut).
+spacestorage-authz = { path = "../authz" }
 
 [dev-dependencies]
 tempfile = "3"

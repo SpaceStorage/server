@@ -297,3 +297,41 @@ Task: "Implement HTTP AdminClient in crates/spacestorage/src/client/http.rs"
 - Interim auth is `admin.token_file` only; role system is feature `07`
 - Metric exposition is feature `08`; this feature only tracks figures and reserves names
 - Commit after each task or logical group; stop at any checkpoint to validate independently
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: Close gaps where claimed-done (`[X]`) work or constitution MUST rules are unmet in code; does not duplicate open US3/US4/polish tasks (T048–T065, T067–T070)
+
+- [X] T072 CRITICAL Move admin token and config file reads off Tokio worker threads (`tokio::fs` or `spawn_blocking`) in `crates/node/src/handler/admin_tcp.rs`, `crates/node/src/handler/admin_http.rs`, and `crates/node/src/reload.rs` per Constitution II (contradicts)
+- [X] T073 CRITICAL Fix graceful drain per FR-006 / US1/AC5–AC6: on stop/SIGTERM/SIGINT enter `draining`, stop new tenant accepts, let in-flight finish until `drain_timeout`, then force-cancel; wire signals in `crates/node/src/lifecycle.rs` + `crates/node/src/lib.rs` (do not share one cancel that aborts handlers immediately) (partial)
+- [X] T074 Implement rustls acceptor from file-referenced PEM cert/key with leaf validity check at startup in `crates/node/src/entrypoint/tls.rs` and wire bind path so TLS entrypoints work (no plaintext fallback) per FR-027 / FR-028 / SC-006 / T039 (partial)
+- [X] T075 Keep running structural settings on reload (threads/entrypoints): apply only live fields and mark restart-required as `pending_restart` without `store`ing a full incoming config that mutates structure in `crates/node/src/reload.rs` per FR-014 / T047 (contradicts)
+- [X] T076 Log startup notice that `admin` / `admin-http` is disabled by administrator choice when `disable` is set in `crates/node/src/entrypoint/mod.rs` per FR-024 / T044 (missing)
+- [X] T077 Add missing drain/stop integration tests claimed by T029 in `crates/node/tests/drain.rs` (SC-010, FR-006/007) (missing)
+- [X] T078 Add missing admin parity tests claimed by T037 in `crates/node/tests/admin_parity.rs` (FR-020) (missing)
+- [X] T079 Add missing TLS/plaintext entrypoint tests claimed by T038 in `crates/node/tests/tls.rs` (SC-006) (missing)
+- [X] T080 Sample busy worker-thread count into `Stats` (RuntimeMetrics or in-flight task fallback) so status/threads report non-zero busy under load in `crates/node/src/stats.rs` / lifecycle per FR-025 / T035 (partial)
+- [X] T081 Draft missing `docs/configuration.md` from `contracts/config-grammar.md` (T066 left only `docs/examples/node.conf`) per Constitution XI / T066 (partial)
+- [X] T082 Reconcile `/metrics` behavior with T071/plan (001 reserved HTTP 404; `admin_http.rs` now returns 200 via `spacestorage-observability`) — restore 404 for this feature’s contract or explicitly hand exposition to `008` without breaking first-binary expectations (contradicts)
+- [X] T083 Expose each setting’s reload class (`live` | `restart_required`) in effective configuration reported by AdminService per FR-012 in `crates/node/src/admin/mod.rs` / `crates/admin-proto/src/types.rs` (missing)
+
+---
+
+## Phase 9: Convergence
+
+**Purpose**: Residual first-binary gaps after Phase 8 verification; does not duplicate open US3/US4/polish (T048–T065, T067–T070)
+
+- [X] T084 CRITICAL Move hourly TLS leaf-expiry probe I/O off the Tokio worker (`spawn_blocking` around `leaf_expired` / PEM read) in `crates/node/src/entrypoint/mod.rs` + `crates/node/src/entrypoint/tls.rs` per Constitution II / FR-028 (contradicts)
+- [X] T085 CRITICAL Run reload-time secret/filesystem validation off the async worker (`spawn_blocking` for `parse_validate` with `check_secrets_readable`, or async pre-checks) in `crates/node/src/reload.rs` per Constitution II (contradicts)
+- [X] T086 Apply live `log.level` changes to the tracing subscriber on reload (today only stored in `NodeConfig`) in `crates/node/src/reload.rs` / startup logging setup per FR-013 / T047 (partial)
+- [X] T087 Enforce admin-http request body limit 1 MiB → HTTP 413 in `crates/node/src/handler/admin_http.rs` per `contracts/admin-http.md` / T043 (missing)
+
+---
+
+## Phase 10: Convergence
+
+**Purpose**: Residual after Phase 9 verification (Constitution II CRITICAL clean); does not duplicate open US3/US4/polish (T048–T065, T067–T070)
+
+- [X] T088 Keep admin / admin-http accept loops alive during `draining` so FR-015 reload reject and draining-state status remain reachable; refuse only new tenant-protocol accepts via `is_draining` (do not `cancel` all listeners on first stop) in `crates/node/src/lifecycle.rs` + `crates/node/src/entrypoint/mod.rs` per FR-006 / FR-015 / T073 (partial)

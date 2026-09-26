@@ -1,6 +1,6 @@
+use crate::handler::ClientStream;
 use async_trait::async_trait;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
 use super::Handler;
@@ -13,7 +13,7 @@ impl Handler for EchoHandler {
         "echo"
     }
 
-    async fn serve(&self, mut stream: TcpStream, cancel: CancellationToken) {
+    async fn serve(&self, mut stream: ClientStream, cancel: CancellationToken) {
         let mut buf = vec![0u8; 4096];
         loop {
             tokio::select! {

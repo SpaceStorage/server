@@ -1,19 +1,23 @@
-//! AuthZ / keys — first-binary bootstrap admin, SCRAM default 16384, master-key (014).
+//! AuthZ — principals, SCRAM, permissions, sessions, bootstrap, audit (014).
+//! Master-key / envelope live in `spacestorage-crypto`, not here.
+
+pub mod audit;
+pub mod bootstrap;
+pub mod error;
+pub mod permission;
+pub mod principal;
+pub mod scram;
+pub mod session;
+
+pub use error::AuthzError;
+pub use permission::{Authorizer, Verb};
+pub use principal::{LoginName, PrincipalId, PrincipalRecord};
 
 pub const SCRAM_ITERATIONS_DEFAULT: u32 = 16384;
 
-pub struct MasterKey {
-    pub bytes: Vec<u8>,
-}
-
-impl MasterKey {
-    pub fn load(path: &std::path::Path) -> std::io::Result<Self> {
-        let bytes = std::fs::read(path)?;
-        Ok(Self { bytes })
-    }
-}
-
-/// FR-017: implicit grant for bootstrap admin on first-binary.
-pub fn bootstrap_admin_implicit_grant() -> bool {
-    true
+/// First-binary FR-017: namespace-bound non-admin principals get implicit
+/// `{READ,WRITE,CREATE,DROP,CONFIGURE}` on that namespace only — not a stored role.
+/// (Master-key material is `spacestorage_crypto::MasterKey`.)
+pub fn first_binary_implicit_tenant_verbs() -> Verb {
+    Verb::READ | Verb::WRITE | Verb::CREATE | Verb::DROP | Verb::CONFIGURE
 }

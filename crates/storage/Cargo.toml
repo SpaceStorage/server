@@ -1,0 +1,27 @@
+[package]
+name = "spacestorage-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Per-drive WAL, restore, compaction seams (013)"
+publish = false
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+crc32fast = { workspace = true }
+bytes = { workspace = true }
+async-trait = { workspace = true }
+spacestorage-crypto = { path = "../crypto" }
+spacestorage-types = { path = "../types" }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

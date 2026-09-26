@@ -85,7 +85,15 @@ pub enum ErrorCode {
     ReplicationRequired,
     MasterKeyRequired,
     MasterKeyUnreadable,
+    MasterKeyPermissions,
+    KeyringRemoved,
+    KeyMaterialForbidden,
     TopologyLadderRequired,
+    SyncNoneNotDurable,
+    GcGraceTooSmall,
+    LimitsZero,
+    LimitsUnknownUnit,
+    ProductVersionZero,
 }
 
 impl ErrorCode {
@@ -120,7 +128,15 @@ impl ErrorCode {
             Self::ReplicationRequired => "replication_required",
             Self::MasterKeyRequired => "master_key_required",
             Self::MasterKeyUnreadable => "master_key_unreadable",
+            Self::MasterKeyPermissions => "master_key_permissions",
+            Self::KeyringRemoved => "KeyringRemoved",
+            Self::KeyMaterialForbidden => "KeyMaterialForbidden",
             Self::TopologyLadderRequired => "topology_ladder_required",
+            Self::SyncNoneNotDurable => "sync_none_not_durable",
+            Self::GcGraceTooSmall => "gc_grace_too_small",
+            Self::LimitsZero => "limits_zero",
+            Self::LimitsUnknownUnit => "limits_unknown_unit",
+            Self::ProductVersionZero => "product_version_zero",
         }
     }
 }

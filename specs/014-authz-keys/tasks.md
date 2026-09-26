@@ -25,8 +25,8 @@ description: "Task list for authentication, authorization, envelope keys, and au
 **Purpose**: Workspace member, crate skeleton, feature flags, fixture docs tree
 
 - [X] T001 Create `crates/authz/Cargo.toml` (package `spacestorage-authz`, edition 2024) with workspace deps `tokio`, `async-trait`, `serde`, `serde_json`, `bytes`, `tracing`, `uuid`, `parking_lot`, `subtle`, `zeroize`, `hmac`, `sha2`, `pbkdf2` and `crates/authz/src/lib.rs` that `mod`s `principal`, `scram`, `permission`, `session`, `bootstrap`, `audit`
-- [ ] T002 Add `crates/authz` to workspace `[workspace.members]` in `Cargo.toml` and declare Cargo feature `authz-custom` (slice 7; off by default) in `crates/authz/Cargo.toml` and wire `first-binary` compile of `authz` (without custom RolePut) in `crates/release-profile`
-- [ ] T003 [P] Ensure `docs/examples/` (or feature docs tree) references [contracts/fixtures/bootstrap-admin.conf](contracts/fixtures/bootstrap-admin.conf) and [contracts/fixtures/master-key.conf](contracts/fixtures/master-key.conf); keep invalid fixtures under `specs/014-authz-keys/contracts/fixtures/invalid/`
+- [X] T002 Add `crates/authz` to workspace `[workspace.members]` in `Cargo.toml` and declare Cargo feature `authz-custom` (slice 7; off by default) in `crates/authz/Cargo.toml` and wire `first-binary` compile of `authz` (without custom RolePut) in `crates/release-profile`
+- [X] T003 [P] Ensure `docs/examples/` (or feature docs tree) references [contracts/fixtures/bootstrap-admin.conf](contracts/fixtures/bootstrap-admin.conf) and [contracts/fixtures/master-key.conf](contracts/fixtures/master-key.conf); keep invalid fixtures under `specs/014-authz-keys/contracts/fixtures/invalid/`
 
 ---
 
@@ -36,17 +36,17 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Implement closed `Verb` bitmask in `crates/authz/src/permission.rs` with exactly `CLUSTER_ADMIN`, `NAMESPACE_ADMIN`, `READ`, `WRITE`, `CREATE`, `DROP`, `CONFIGURE`, `REPLICATE`, `MIGRATE`, `AUDIT_READ`, `METRICS_READ`; `CLUSTER_ADMIN` **implies every other verb** and every namespace
-- [ ] T005 [P] Implement `PrincipalId` (UUID, immutable) and `LoginName` in `crates/authz/src/principal.rs` with login constraint verbatim: unique cluster-wide, case-sensitive, `^[A-Za-z][A-Za-z0-9_]*$`, 1–63 chars; **renameable**
+- [X] T004 Implement closed `Verb` bitmask in `crates/authz/src/permission.rs` with exactly `CLUSTER_ADMIN`, `NAMESPACE_ADMIN`, `READ`, `WRITE`, `CREATE`, `DROP`, `CONFIGURE`, `REPLICATE`, `MIGRATE`, `AUDIT_READ`, `METRICS_READ`; `CLUSTER_ADMIN` **implies every other verb** and every namespace
+- [X] T005 [P] Implement `PrincipalId` (UUID, immutable) and `LoginName` in `crates/authz/src/principal.rs` with login constraint verbatim: unique cluster-wide, case-sensitive, `^[A-Za-z][A-Za-z0-9_]*$`, 1–63 chars; **renameable**
 - [ ] T006 [P] Implement `PrincipalRecord` in `crates/authz/src/principal.rs` with fields `id`, `login`, `scram` (salt, iteration count, StoredKey, ServerKey — never plaintext), `credential_generation` (u64, starts at 1; +1 on password change), `enabled` (bool, default true), `created_hlc`, `bootstrap` (bool, true only for the first CLUSTER_ADMIN mint); unique login index; duplicate → `LoginExists`
 - [ ] T007 [P] Implement in-memory `Session` in `crates/authz/src/session.rs` with `principal_id`, optional `namespace_id`, `credential_generation` copied at AUTH, `protocol`; export `recheck` that loads PrincipalRecord and refuses on `!enabled` (`PrincipalDisabled`) or generation mismatch (`AuthGenerationMismatch`) then `authorize` on current bindings
 - [ ] T008 [P] Implement optional `SessionToken` row type in `crates/authz/src/session.rs` (cluster log): `token_hash` SHA-256 of presented secret, `principal_id`, `generation` at issue, `expires_hlc` (TTL default 12 h)
-- [ ] T009 Export normative validation codes in `crates/authz/src/lib.rs` (or `error.rs`): `BootstrapAdminRequired`, `JoinSecretNotAdmin`, `UnboundCredential`, `ReplicationNotTenant`, `LoginExists`, `LoginNotFound`, `BuiltinRoleImmutable`, `RoleNameReserved`, `Slice7Required`, `AuthGenerationMismatch`, `PrincipalDisabled`, `MasterKeyRequired`, `MasterKeyPermissions`, `KeyUnresolvable`, `KeyMaterialForbidden`, `TransportOmitted`, `AdminTokenRemoved`, `UsersFileRemoved`, `KeyringRemoved`, `DataKeyRewriteNotFirstBinary`
+- [X] T009 Export normative validation codes in `crates/authz/src/lib.rs` (or `error.rs`): `BootstrapAdminRequired`, `JoinSecretNotAdmin`, `UnboundCredential`, `ReplicationNotTenant`, `LoginExists`, `LoginNotFound`, `BuiltinRoleImmutable`, `RoleNameReserved`, `Slice7Required`, `AuthGenerationMismatch`, `PrincipalDisabled`, `MasterKeyRequired`, `MasterKeyPermissions`, `KeyUnresolvable`, `KeyMaterialForbidden`, `TransportOmitted`, `AdminTokenRemoved`, `UsersFileRemoved`, `KeyringRemoved`, `DataKeyRewriteNotFirstBinary`
 - [ ] T010 Register cluster-log body types for `Principal*` / `Kek*` / `Audit*` / `SessionToken*` in `crates/controlplane` (or authz→controlplane bridge) so bodies apply from the **cluster** Raft group `{data_dir}/raft/cluster/`
-- [ ] T011 [P] Implement `MasterKey` file IO in `crates/crypto/src/master_file.rs`: 32 bytes at `keys.master_key_file`, mode `0600`, never logged; missing/wrong mode → `MasterKeyRequired` / `MasterKeyPermissions`
-- [ ] T012 [P] Implement `KekRecord` and wrap/unwrap helpers in `crates/crypto/src/envelope.rs`: `namespace_id`, `wrapped` AEAD blob under current master, `kek_epoch` (u64; +1 on master rewrap only); AES-256-GCM wrap of 32-byte KEK
-- [ ] T013 Define `DataKey` shape on container definition seam in `crates/crypto/src/envelope.rs` (or `003` container types): `key_ref` (opaque string id), `algorithm` `aes-256-gcm` (default) \| `chacha20-poly1305`, `wrapped` under namespace KEK, `version` u32 (old versions retained until `010`); lost/missing → `KeyUnresolvable{key_ref}`
-- [ ] T014 [P] Implement `AuditEntry` struct in `crates/authz/src/audit.rs` with `id` UUID, `principal_id` (or nil for failed AUTH with unknown login), optional `login_at_event`, `action`, `target`, optional `namespace_id`, `time` Hlc; key material MUST NEVER appear
+- [X] T011 [P] Implement `MasterKey` file IO in `crates/crypto/src/master_file.rs`: 32 bytes at `keys.master_key_file`, mode `0600`, never logged; missing/wrong mode → `MasterKeyRequired` / `MasterKeyPermissions`
+- [X] T012 [P] Implement `KekRecord` and wrap/unwrap helpers in `crates/crypto/src/envelope.rs`: `namespace_id`, `wrapped` AEAD blob under current master, `kek_epoch` (u64; +1 on master rewrap only); AES-256-GCM wrap of 32-byte KEK
+- [X] T013 Define `DataKey` shape on container definition seam in `crates/crypto/src/envelope.rs` (or `003` container types): `key_ref` (opaque string id), `algorithm` `aes-256-gcm` (default) \| `chacha20-poly1305`, `wrapped` under namespace KEK, `version` u32 (old versions retained until `010`); lost/missing → `KeyUnresolvable{key_ref}`
+- [X] T014 [P] Implement `AuditEntry` struct in `crates/authz/src/audit.rs` with `id` UUID, `principal_id` (or nil for failed AUTH with unknown login), optional `login_at_event`, `action`, `target`, optional `namespace_id`, `time` Hlc; key material MUST NEVER appear
 
 **Checkpoint**: `cargo check -p spacestorage-authz` and `cargo check -p spacestorage-crypto` compile with types and codes. User stories can start.
 
@@ -132,8 +132,8 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 - [ ] T048 [US3] Confirm/consume `001` transport validation in `crates/config` / `crates/node`: every entrypoint `tls {…}` or `plaintext;`; omitted → `TransportOmitted` (SC-003 already `001`); TLS-declared refuses plaintext with no silent fallback — no duplicate grammar in authz
 - [ ] T049 [P] [US3] Implement optional mTLS in `crates/config` + `crates/node` + `crates/authz`: `tls { client_ca P; }` maps CN (else first DNS SAN) to principal login; default mTLS additional to password; `mtls_replace_password` makes cert sufficient; certs referenced never inlined (`KeyMaterialForbidden`) per [contracts/tls.md](contracts/tls.md)
-- [ ] T050 [US3] Implement `EnvelopeAuthority` implementing `KeyAuthority` in `crates/crypto/src/key_authority.rs`: resolve master→KEK→data key into `Zeroizing<[u8;32]>`; cache unwrapped data keys only for hosted containers; delete interim `keyring_file` provider once wired
-- [ ] T051 [US3] Add `keys { master_key_file P; }` and optional `create_master_if_absent;` in `crates/config`; reject `keys { keyring_file … }` → `KeyringRemoved`; if any container encrypts or directive set without create-if-absent → require 32-byte `0600` file
+- [X] T050 [US3] Implement `EnvelopeAuthority` implementing `KeyAuthority` in `crates/crypto/src/key_authority.rs`: resolve master→KEK→data key into `Zeroizing<[u8;32]>`; cache unwrapped data keys only for hosted containers; delete interim `keyring_file` provider once wired
+- [X] T051 [US3] Add `keys { master_key_file P; }` and optional `create_master_if_absent;` in `crates/config`; reject `keys { keyring_file … }` → `KeyringRemoved`; if any container encrypts or directive set without create-if-absent → require 32-byte `0600` file
 - [ ] T052 [US3] On namespace create in `crates/tenancy` / controlplane apply: generate 32-byte KEK, wrap under master, append `KekRecord` to cluster log
 - [ ] T053 [US3] Bind `key_ref` on container (`CLUSTER_ADMIN` any namespace, first binary) via admin `KeysBind` in `crates/admin-proto` + `crates/crypto`; algorithms `aes-256-gcm` (default) and `chacha20-poly1305`; store wrapped data key on container definition (`003`)
 - [ ] T054 [US3] Implement `KeysRotateMaster { new_file }` in `crates/crypto` + admin CLI `spacestorage keys rotate-master --new-file P`: rewrap every `KekRecord`, bump `kek_epoch`, data keys unchanged, 0 table rewrites
@@ -177,7 +177,7 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 - [ ] T068 [P] Ensure `release-profile` first binary compiles principal store + envelope + audit append and keeps `authz-custom` off by default in `crates/release-profile`
 - [ ] T069 [P] Run full [quickstart.md](quickstart.md) validation path (config invalid fixtures §0 through audit §6) against in-process node and fix any drift in fixtures under `specs/014-authz-keys/contracts/fixtures/`
-- [ ] T070 Confirm PBKDF2/SCRAM on `spawn_blocking` when iterations are high and file reads via `tokio::fs` in `crates/authz` / `crates/crypto` (constitution II)
+- [X] T070 Confirm PBKDF2/SCRAM on `spawn_blocking` when iterations are high and file reads via `tokio::fs` in `crates/authz` / `crates/crypto` (constitution II)
 - [ ] T071 [P] Sweep logs/describe/admin status paths so key material, plaintext passwords, and bearer tokens never appear (`KeyMaterialForbidden` / zeroize drop)
 - [ ] T072 Code cleanup: remove leftover dual-path reads of `users_file` / `keyring_file` / `admin.token_file` once seams are wired in handlers, crypto, and config
 - [ ] T073 [P] Add slice-7 note tasks only as feature-gated stubs already present — do not implement LDAP/SSO, external KMS, data-key rewrite (`010`), or UI chrome (`09`) in this feature
@@ -291,3 +291,22 @@ Task: "Document master-key backup = copy file"
 - Verify listed tests fail before implementing
 - Commit after each task or logical group
 - Stop at any checkpoint to validate the story independently
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: Gaps found by `/speckit.converge` that are not already covered by open T002–T073 (false `[X]`, unmarked path conflict, missing crypto prerequisite). Full principal/SCRAM/Authorizer/audit/custom-role work remains on existing open tasks; slice-7 vocabulary stays deferred.
+
+- [X] T074 CRITICAL Complete falsely closed T001: restore `crates/authz` skeleton so `src/lib.rs` declares `mod principal`, `scram`, `permission`, `session`, `bootstrap`, `audit` (stub modules OK) and `Cargo.toml` lists the T001 workspace deps (`async-trait`, `serde_json`, `bytes`, `uuid`, `parking_lot`, `subtle`, `zeroize`, `hmac`, `sha2`, `pbkdf2`); remove or relocate the interim `MasterKey`/`bootstrap_admin_implicit_grant` stubs that mis-state FR-017 and belong in `crates/crypto` per plan (partial)
+- [X] T075 Reconcile first-binary master-key directive path: live config/starters use `cluster { master_key_file }` (016) while 014 contracts/fixtures/T011/T051 specify `keys { master_key_file }`; pick one normative path (or explicit alias) and align `crates/config` resolve/validate, `docs/examples/first-binary-*.conf`, and `contracts/fixtures/master-key.conf` so FR-008/SC-004 first-binary DoD is unambiguous (partial)
+- [X] T076 Unblock envelope/master-file work: `crates/crypto` is absent from the workspace (003 T002 not landed) while T011–T013/T050 require `master_file.rs` / `envelope.rs` / `EnvelopeAuthority`; land the 003 crypto skeleton or a minimal 014-scoped crypto crate with those modules before implementing master-key wrap (missing)
+
+---
+
+## Phase 9: Convergence
+
+**Purpose**: Post–slice-2 `/speckit.converge` on first-binary master-key / FR-008 crypto DoD only. Verified Phase 8 T074–T076 and T011–T013/T050–T051 primitives against code; do not restate open T045–T058 (tests, KEK persist, bind/rotate/restore, refuse-start) or SCRAM/principal/full-authz work.
+
+- [X] T077 Enforce hosted-only data-key cache on falsely closed T050: `EnvelopeAuthority` in `crates/crypto/src/key_authority.rs` currently caches every successful `resolve` with no hosted-container gate; add an explicit hosted-set (or equivalent) so unwrap/cache is refused or skipped for non-hosted containers per FR-008 / [contracts/keys.md](contracts/keys.md), while `CLUSTER_ADMIN` restore/admin unwrap remains outside that cache (partial)
+- [X] T078 Honor `create_master_if_absent` on falsely closed T051: flag is parsed into `KeysDecl` but never consulted — wire `crates/config` validate and/or `crates/node` startup so absent path with the flag generates a 32-byte `0600` master via `MasterKey::generate_and_write`, and without the flag (or when encrypting) still requires an existing readable 32-byte `0600` file per FR-008 / T051 (partial)
