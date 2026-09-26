@@ -10,7 +10,7 @@ pub mod scram;
 pub mod session;
 
 pub use error::AuthzError;
-pub use permission::{Authorizer, Verb};
+pub use permission::{role_put_custom, Authorizer, CustomRole, Resource, Verb};
 pub use principal::{LoginName, PrincipalId, PrincipalRecord};
 
 pub const SCRAM_ITERATIONS_DEFAULT: u32 = 16384;
@@ -19,5 +19,5 @@ pub const SCRAM_ITERATIONS_DEFAULT: u32 = 16384;
 /// `{READ,WRITE,CREATE,DROP,CONFIGURE}` on that namespace only — not a stored role.
 /// (Master-key material is `spacestorage_crypto::MasterKey`.)
 pub fn first_binary_implicit_tenant_verbs() -> Verb {
-    Verb::READ | Verb::WRITE | Verb::CREATE | Verb::DROP | Verb::CONFIGURE
+    Verb::IMPLICIT_TENANT
 }

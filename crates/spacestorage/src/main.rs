@@ -47,5 +47,91 @@ fn main() -> ExitCode {
             eprintln!("status: remote admin client not fully wired in this slice");
             ExitCode::from(exit::USAGE)
         }
+        args::Command::Executions { .. } => {
+            eprintln!("executions: use GET /v1/executions on admin (005)");
+            ExitCode::from(exit::USAGE)
+        }
+        args::Command::Explain { sql, .. } => {
+            eprintln!("explain: POST /v1/explain — local: {sql}");
+            ExitCode::from(exit::USAGE)
+        }
+        args::Command::Jobs { .. } => {
+            eprintln!("jobs: GET /v1/jobs | wait | cancel (005 slice 8)");
+            ExitCode::from(exit::USAGE)
+        }
+        args::Command::Job { action, .. } => {
+            let svc = spacestorage_migrate::stub_service();
+            if !svc.slice10_enabled {
+                eprintln!("MigrateSlice10Required: data_* jobs require slice 10");
+                return ExitCode::from(exit::SLICE10_REQUIRED);
+            }
+            match action {
+                args::JobAction::List => {
+                    println!("{{\"jobs\":[]}}");
+                    ExitCode::from(exit::OK)
+                }
+                args::JobAction::Status { id }
+                | args::JobAction::Cancel { id }
+                | args::JobAction::Resume { id } => {
+                    eprintln!("job {id}: use admin-http /v1/jobs");
+                    ExitCode::from(exit::USAGE)
+                }
+            }
+        }
+        args::Command::Migrate { .. }
+        | args::Command::Transform { .. }
+        | args::Command::Backup { .. }
+        | args::Command::Restore { .. } => {
+            if cfg!(feature = "migration-backup") {
+                eprintln!("use POST /v1/migrate|/v1/transform|/v1/backup|/v1/restore");
+                ExitCode::from(exit::USAGE)
+            } else {
+                eprintln!(
+                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
+                );
+                ExitCode::from(exit::SLICE10_REQUIRED)
+            }
+        }
+        args::Command::QueryStats { .. } => {
+            eprintln!("query-stats: see /metrics query-processing series (008)");
+            ExitCode::from(exit::USAGE)
+        }
+        args::Command::Ui { endpoint } => {
+            if cfg!(feature = "complete-product") {
+                print!("{}", spacestorage_admin_ui::ui_cli_hint(&endpoint));
+                ExitCode::from(exit::OK)
+            } else {
+                eprintln!("UiIngestSlice11Required: enable complete-product profile");
+                ExitCode::from(exit::CONFIG_INVALID)
+            }
+        }
+        args::Command::Ingest { action } => {
+            if !cfg!(feature = "complete-product") {
+                eprintln!("UiIngestSlice11Required: enable complete-product profile");
+                return ExitCode::from(exit::CONFIG_INVALID);
+            }
+            match action {
+                args::IngestAction::Syslog => {
+                    println!(
+                        "syslog bind is node entrypoint config (handler syslog + ingest {{}}); see docs/examples/ingest/ingest-syslog.conf"
+                    );
+                    ExitCode::from(exit::OK)
+                }
+                args::IngestAction::Kafka { action } => match action {
+                    args::IngestKafkaAction::List => {
+                        println!("{{\"kafka\":[]}}");
+                        ExitCode::from(exit::OK)
+                    }
+                    args::IngestKafkaAction::Add { .. } => {
+                        eprintln!("use POST /v1/ingest/kafka");
+                        ExitCode::from(exit::USAGE)
+                    }
+                    args::IngestKafkaAction::Delete { id } => {
+                        eprintln!("use DELETE /v1/ingest/kafka/{id}");
+                        ExitCode::from(exit::USAGE)
+                    }
+                },
+            }
+        }
     }
 }

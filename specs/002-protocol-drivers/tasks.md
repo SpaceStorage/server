@@ -102,12 +102,12 @@ description: "Task list for wire protocols and datatype-aware drivers"
 - [X] T040 [US1] Implement Redis handler handshake, AUTH (credential-bound namespace), PING/SET/GET/DEL smoke path in `crates/handler-redis/src/{handler.rs,auth.rs,commands/,lower.rs,render.rs}` registering handler name `redis`
 - [X] T041 [US1] Wire Redis handler into node registry and entrypoint serve path in `crates/node/` so `entrypoint.handler redis` listens
 - [X] T042 [US1] Implement PostgreSQL handler via `pgwire` (SSLRequest/TLS, SCRAM-SHA-256, database name = namespace) with simple CREATE/INSERT/SELECT/DROP smoke in `crates/handler-postgresql/src/{handler.rs,auth.rs,lower/,render.rs,catalog_views.rs}`
-- [ ] T043 [US1] Implement Elasticsearch HTTP handler (Basic auth, `GET /`, index create, doc index, search smoke) in `crates/handler-elasticsearch/src/{router.rs,auth.rs,api/,dsl/,render.rs}`
-- [ ] T044 [P] [US1] Implement S3 handler (SigV4, CreateBucket/PutObject/GetObject/List/Delete including multipart) in `crates/handler-s3/src/{router.rs,sigv4_extract.rs,xml.rs,ops/,render.rs}`
-- [ ] T045 [P] [US1] Implement WebDAV handler (Basic/Digest, PROPFIND/MKCOL/PUT/GET/MOVE/DELETE smoke) in `crates/handler-webdav/src/{router.rs,auth.rs,methods/,props.rs,locks.rs,xml.rs,render.rs}`
-- [ ] T046 [US1] Implement Cassandra CQL v4/v5 frames, SASL PLAIN auth, keyspace=namespace, CREATE/INSERT/SELECT/DROP smoke in `crates/handler-cassandra/src/{handler.rs,auth.rs,cql/,lower.rs,render.rs,system_tables.rs}`
-- [ ] T047 [US1] Implement ClickHouse native (`clickhouse`) Hello/Query/Data path with CityHash 1.0.2 in `crates/handler-clickhouse/src/native/` and HTTP (`clickhouse-http`) router/formats in `crates/handler-clickhouse/src/http/`; register both handler names from `crates/handler-clickhouse/src/lib.rs`
-- [ ] T048 [US1] Apply signature detection + protocol mismatch refusal (FR-004/FR-005) and TLS entrypoint behaviour (FR-008) across all handlers using `crates/protocol-core/src/signature.rs`
+- [X] T043 [US1] Implement Elasticsearch HTTP handler (Basic auth, `GET /`, index create, doc index, search smoke) in `crates/handler-elasticsearch/src/{router.rs,auth.rs,api/,dsl/,render.rs}`
+- [X] T044 [P] [US1] Implement S3 handler (SigV4, CreateBucket/PutObject/GetObject/List/Delete including multipart) in `crates/handler-s3/src/{router.rs,sigv4_extract.rs,xml.rs,ops/,render.rs}`
+- [X] T045 [P] [US1] Implement WebDAV handler (Basic/Digest, PROPFIND/MKCOL/PUT/GET/MOVE/DELETE smoke) in `crates/handler-webdav/src/{router.rs,auth.rs,methods/,props.rs,locks.rs,xml.rs,render.rs}`
+- [X] T046 [US1] Implement Cassandra CQL v4/v5 frames, SASL PLAIN auth, keyspace=namespace, CREATE/INSERT/SELECT/DROP smoke in `crates/handler-cassandra/src/{handler.rs,auth.rs,cql/,lower.rs,render.rs,system_tables.rs}`
+- [X] T047 [US1] Implement ClickHouse native (`clickhouse`) Hello/Query/Data path with CityHash 1.0.2 in `crates/handler-clickhouse/src/native/` and HTTP (`clickhouse-http`) router/formats in `crates/handler-clickhouse/src/http/`; register both handler names from `crates/handler-clickhouse/src/lib.rs`
+- [X] T048 [US1] Apply signature detection + protocol mismatch refusal (FR-004/FR-005) and TLS entrypoint behaviour (FR-008) across all handlers using `crates/protocol-core/src/signature.rs`
 - [ ] T049 [US1] Enforce credential-bound namespace refusal when `Principal.namespace` is `None` on redis/s3/webdav/elasticsearch in `crates/handler-redis/src/auth.rs`, `crates/handler-s3/src/sigv4_extract.rs`, `crates/handler-webdav/src/auth.rs`, and `crates/handler-elasticsearch/src/auth.rs` (FR-009a)
 - [ ] T050 [US1] Honour node drain for protocol sessions (refuse new, finish in-flight, close idle) in `crates/protocol-core/src/session.rs` and handler serve loops
 
@@ -369,9 +369,9 @@ Task: "Declare per-protocol mapping() for all six interim types in each handler 
 
 ## Phase 11: Convergence (slice 6 / HandlersComplete)
 
-> Slice 6 landed classify-gated MUST dialects + feature gating. Full wire DoD for open T043–T048 remains owed (do not re-check them here).
+> Slice 6 landed classify-gated MUST dialects + feature gating. Wire DoD for T043–T048 is closed (see checkboxes above).
 
 - [X] T104 Scaffold `handler-{cassandra,elasticsearch,clickhouse,s3,webdav}` workspace members; ClickHouse registers both `clickhouse` and `clickhouse-http`
 - [X] T105 Feature-gate registration behind `handlers-complete` on `spacestorage-node` / `spacestoraged` / `spacestorage-conformance` so FirstBinary still yields `entrypoint_unknown_handler` for forbidden names
 - [X] T106 Classify-before-IR MUST smoke + one MUST-NOT per HC protocol (dispatch APIs; `compat_handlers_complete` suite)
-- Residual (still open above): T043 ES HTTP/Basic, T044 S3 SigV4 XML, T045 WebDAV Digest/XML, T046 Cassandra native frames, T047 CH CityHash/native+HTTP formats, T048 signature mismatch matrix via `protocol-core`
+- Residual (closed): T043–T048 wire dialects + protocol-core signature matrix

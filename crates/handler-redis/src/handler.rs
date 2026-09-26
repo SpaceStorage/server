@@ -34,6 +34,21 @@ impl RedisHandler {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
+        let peeked = match spacestorage_protocol_core::peek_signature(
+            &mut stream,
+            spacestorage_protocol_core::ProtocolFamily::Redis,
+            spacestorage_protocol_core::default_timeout(),
+        )
+        .await
+        {
+            Ok(buf) => buf,
+            Err((_err, refusal)) => {
+                let _ = stream.write_all(&refusal.body).await;
+                let _ = stream.shutdown().await;
+                return;
+            }
+        };
+
         let mut session = SessionState {
             catalog: Arc::clone(&self.catalog),
             ttls: Arc::new(RwLock::new(Default::default())),
@@ -45,39 +60,39 @@ impl RedisHandler {
             expected_user: self.expected_user.clone(),
         };
 
-        let mut buf = BytesMut::with_capacity(4096);
+        let mut buf = BytesMut::from(peeked.as_slice());
         let mut read_buf = vec![0u8; 4096];
 
         loop {
+            // Drain peeked / buffered frames before blocking on read.
+            loop {
+                match try_decode(&mut buf) {
+                    Ok(None) => break,
+                    Ok(Some(frame)) => {
+                        let reply = handle_frame(&mut session, frame);
+                        if write_reply(&mut stream, &reply).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RespError::Incomplete) => break,
+                    Err(e) => {
+                        debug!(error = %e, "resp decode error");
+                        let _ = write_reply(
+                            &mut stream,
+                            &RedisReply::Error(format!("ERR Protocol error: {e}")),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 n = stream.read(&mut read_buf) => {
                     match n {
                         Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            buf.extend_from_slice(&read_buf[..n]);
-                            loop {
-                                match try_decode(&mut buf) {
-                                    Ok(None) => break,
-                                    Ok(Some(frame)) => {
-                                        let reply = handle_frame(&mut session, frame);
-                                        if write_reply(&mut stream, &reply).await.is_err() {
-                                            return;
-                                        }
-                                    }
-                                    Err(RespError::Incomplete) => break,
-                                    Err(e) => {
-                                        debug!(error = %e, "resp decode error");
-                                        let _ = write_reply(
-                                            &mut stream,
-                                            &RedisReply::Error(format!("ERR Protocol error: {e}")),
-                                        )
-                                        .await;
-                                        return;
-                                    }
-                                }
-                            }
-                        }
+                        Ok(n) => buf.extend_from_slice(&read_buf[..n]),
                     }
                 }
             }

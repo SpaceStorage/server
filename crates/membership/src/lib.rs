@@ -437,11 +437,20 @@ impl MembershipService {
         Ok(ack)
     }
 
+    /// Apply a membership roster from the control-plane cluster store (006 Raft).
+    ///
+    /// Prefer this over [`Self::refresh_roster_from_seeds`] once RaftClusterStore
+    /// is the source of truth; seed pull remains a join-bootstrap fallback (FR-009).
+    pub fn apply_controlplane_roster(&self, members: Vec<crate::view::MemberRecord>) -> Result<()> {
+        self.apply_roster(members)
+    }
+
     /// Pull the current seed roster into the local view (FR-009 without Raft).
     ///
     /// Already-admitted members re-present as restart joins; the seed returns
     /// [`JoinAck::Admitted`] with the full member list so earlier joiners learn
-    /// about later admits.
+    /// about later admits. When control-plane Raft is live, prefer
+    /// [`Self::apply_controlplane_roster`].
     pub async fn refresh_roster_from_seeds(&self, seeds: &[SeedEndpoint]) -> Result<JoinAck> {
         if !self.is_admitted() {
             return Err(MembershipError::InvalidState("not_admitted".into()));

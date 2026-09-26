@@ -11,7 +11,21 @@ publish = false
 default = ["first-binary"]
 first-binary = []
 handlers-complete = []
-complete-product = ["handlers-complete"]
+control-plane-tenancy-authz = ["handlers-complete"]
+# Slice 8: shared planner beyond CRUD (BEGIN/COPY/join/agg/MapReduce/subscribe).
+query-distributed = ["control-plane-tenancy-authz"]
+observability-catalog = ["query-distributed"]
+# Slice 10: migration / transforms / backup+PITR orchestration.
+migration-backup = ["observability-catalog", "spacestorage-config/migration-backup"]
+# Slice 11: admin UIs + Kafka/syslog ingest — complete product gate.
+complete-product = [
+    "migration-backup",
+    "spacestorage-config/complete-product",
+]
+# Slice-7 crate features consumed by dependents when this profile is selected.
+controlplane-ops = ["spacestorage-config/controlplane-ops"]
+tenancy-quotas = []
+authz-custom = ["spacestorage-authz/authz-custom"]
 
 [dependencies]
 serde = { workspace = true }
@@ -19,6 +33,7 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 # First-binary compiles authz (no authz-custom / RolePut).
 spacestorage-authz = { path = "../authz" }
+spacestorage-config = { path = "../config" }
 
 [dev-dependencies]
 tempfile = "3"

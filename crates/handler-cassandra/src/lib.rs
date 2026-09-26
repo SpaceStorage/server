@@ -1,6 +1,8 @@
 //! Cassandra HandlersComplete dialect — CQL DML/DDL over catalog IR (classify-gated).
 
+mod cql;
 mod dispatch;
+mod frame;
 mod handler;
 
 pub use dispatch::{CassandraReply, SessionState, dispatch};

@@ -30,6 +30,7 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
                 handler: "admin".into(),
                 transport: Transport::Plaintext,
                 tls: None,
+                ingest: None,
             },
             EntrypointDecl {
                 name: "admin-http".into(),
@@ -38,6 +39,7 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
                 handler: "admin-http".into(),
                 transport: Transport::Plaintext,
                 tls: None,
+                ingest: None,
             },
         ],
         buffers: BTreeMap::new(),
@@ -49,6 +51,11 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
         storage: Default::default(),
         limits: spacestorage_config::model::EffectiveLimits::built_in(),
         query: Default::default(),
+        metrics: Default::default(),
+        log_kafka: None,
+        log_syslog: None,
+        jobs: spacestorage_config::model::JobsDecl::default(),
+        kafka_ingests: Vec::new(),
     }
 }
 

@@ -1,5 +1,6 @@
 //! WebDAV RFC 4918 subset (HandlersComplete).
 
+mod auth;
 mod dispatch;
 mod handler;
 

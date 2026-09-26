@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
+spacestorage-protocol-core = { path = "../protocol-core" }
+md-5 = "0.10"
 tokio = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }

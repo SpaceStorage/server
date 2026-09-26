@@ -10,12 +10,16 @@ publish = false
 [dependencies]
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
+spacestorage-protocol-core = { path = "../protocol-core" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 tokio-util = { workspace = true }
 hex = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }

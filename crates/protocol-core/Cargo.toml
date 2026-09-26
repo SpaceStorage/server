@@ -1,0 +1,18 @@
+[package]
+name = "spacestorage-protocol-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared protocol driver toolkit (sessions, signature, HTTP glue)"
+publish = false
+
+[dependencies]
+bytes = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -11,10 +11,15 @@ members = [
     "crates/membership",
     "crates/internode",
     "crates/clocks",
+    "crates/controlplane",
+    "crates/tenancy",
     "crates/replication",
     "crates/crypto",
     "crates/storage",
     "crates/backup",
+    "crates/migrate",
+    "crates/admin-ui",
+    "crates/ingest",
     "crates/types",
     "crates/placement",
     "crates/query",
@@ -25,6 +30,7 @@ members = [
     "crates/handler-clickhouse",
     "crates/handler-s3",
     "crates/handler-webdav",
+    "crates/protocol-core",
     "crates/authz",
     "crates/compat",
     "crates/observability",
@@ -101,7 +107,7 @@ handlers-complete = [
     "handler-s3",
     "handler-webdav",
 ]
-complete-product = ["handlers-complete"]
+complete-product = ["handlers-complete"] # workspace meta; real gate is release-profile/conformance
 handler-postgresql = ["dep:spacestorage-handler-postgresql"]
 handler-redis = ["dep:spacestorage-handler-redis"]
 handler-cassandra = ["dep:spacestorage-handler-cassandra"]

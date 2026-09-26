@@ -94,6 +94,26 @@ pub enum ErrorCode {
     LimitsZero,
     LimitsUnknownUnit,
     ProductVersionZero,
+    /// Raft `heartbeat` / `election_timeout` invalid (006).
+    RaftTimeoutInvalid,
+    /// `controller_exclusive_data on` without controlplane-ops / slice 7.
+    Slice7Required,
+    QueryMaxConcurrentZero,
+    QueryMaxMemoryZero,
+    QueryConcurrencyZero,
+    QuerySpillUnknown,
+    /// Slice-9 observability features used on first-binary profile.
+    ObservabilitySlice9Required,
+    /// Kafka/syslog/OTLP sink misconfigured.
+    SinkConfigInvalid,
+    /// `jobs.enabled on` on first-binary profile (010).
+    MigrateSlice10Required,
+    /// UI / Kafka / syslog ingest on first-binary profile (009).
+    UiIngestSlice11Required,
+    /// Kafka ingest missing brokers.
+    IngestKafkaNoBrokers,
+    /// Syslog ingest missing namespace/container.
+    IngestMissingTarget,
 }
 
 impl ErrorCode {
@@ -137,6 +157,18 @@ impl ErrorCode {
             Self::LimitsZero => "limits_zero",
             Self::LimitsUnknownUnit => "limits_unknown_unit",
             Self::ProductVersionZero => "product_version_zero",
+            Self::RaftTimeoutInvalid => "raft_timeout_invalid",
+            Self::Slice7Required => "Slice7Required",
+            Self::QueryMaxConcurrentZero => "query_max_concurrent_zero",
+            Self::QueryMaxMemoryZero => "query_max_memory_zero",
+            Self::QueryConcurrencyZero => "query_concurrency_zero",
+            Self::QuerySpillUnknown => "query_spill_unknown",
+            Self::ObservabilitySlice9Required => "ObservabilitySlice9Required",
+            Self::SinkConfigInvalid => "SinkConfigInvalid",
+            Self::MigrateSlice10Required => "MigrateSlice10Required",
+            Self::UiIngestSlice11Required => "UiIngestSlice11Required",
+            Self::IngestKafkaNoBrokers => "ingest_kafka_no_brokers",
+            Self::IngestMissingTarget => "ingest_missing_target",
         }
     }
 }

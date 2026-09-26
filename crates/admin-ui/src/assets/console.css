@@ -1,0 +1,4 @@
+body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+section { margin-bottom: 1.5rem; }
+label { display: block; margin: 0.25rem 0; }
+pre#out { background: #f4f4f4; padding: 0.75rem; min-height: 4rem; }

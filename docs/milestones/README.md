@@ -22,8 +22,16 @@
 //!
 //! ## CI
 //!
-//! Default CI is `--features first-binary` (or default features). A
-//! `complete-product` job MUST NOT be a merge gate for slices 1–5.
+//! Default CI remains `--features first-binary`. Full-product merge gate:
+//!
+//! ```bash
+//! cargo test -p spacestorage-conformance --features complete-product
+//! cargo test -p spacestorage-release-profile --test ledger
+//! ```
+//!
+//! Historical ledgers (`001`–`006`) keep their deferred `still_owed` rows for
+//! honesty; the tip ledger [`007-complete-product`](007-complete-product.yaml)
+//! claims `implemented: [1..11]` with empty `deferred`.
 //!
 //! Validate ledger records with:
 //!

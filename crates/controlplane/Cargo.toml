@@ -1,0 +1,34 @@
+[package]
+name = "spacestorage-controlplane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Control-plane hierarchy, Raft elections, and node restore (006)"
+publish = false
+
+[features]
+default = []
+# Slice 7: voter Replace/Grow/Shrink and controller_exclusive_data on.
+controlplane-ops = []
+# Ordered-type leadership lease conformance (SC-006).
+controlplane-leases = []
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+spacestorage-clocks = { path = "../clocks" }
+spacestorage-internode = { path = "../internode" }
+spacestorage-membership = { path = "../membership" }
+spacestorage-storage = { path = "../storage" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }

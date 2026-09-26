@@ -44,7 +44,11 @@ impl HandlerBuildSet {
                     "webdav",
                 ],
             },
-            ReleaseProfile::HandlersComplete => Self {
+            ReleaseProfile::HandlersComplete
+            | ReleaseProfile::ControlPlaneTenancyAuthz
+            | ReleaseProfile::QueryDistributed
+            | ReleaseProfile::ObservabilityCatalog
+            | ReleaseProfile::MigrationBackup => Self {
                 required: HC_REQUIRED,
                 forbidden: &[],
             },

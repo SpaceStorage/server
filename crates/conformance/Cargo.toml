@@ -14,8 +14,29 @@ handlers-complete = [
     "spacestorage-node/handlers-complete",
     "spacestorage-release-profile/handlers-complete",
 ]
-complete-product = ["handlers-complete"]
-
+query-distributed = [
+    "handlers-complete",
+    "spacestorage-release-profile/query-distributed",
+    "spacestorage-query/query-distributed",
+    "spacestorage-handler-postgresql/query-distributed",
+]
+observability-catalog = [
+    "query-distributed",
+    "spacestorage-release-profile/observability-catalog",
+]
+migration-backup = [
+    "observability-catalog",
+    "spacestorage-release-profile/migration-backup",
+    "spacestorage-node/migration-backup",
+    "spacestorage-migrate/migrate",
+]
+complete-product = [
+    "migration-backup",
+    "spacestorage-release-profile/complete-product",
+    "spacestorage-node/complete-product",
+    "spacestorage-admin-ui/ui",
+    "spacestorage-ingest/ingest",
+]
 [dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
 spacestorage-config = { path = "../config" }
@@ -24,6 +45,7 @@ spacestorage-crypto = { path = "../crypto" }
 spacestorage-internode = { path = "../internode" }
 spacestorage-placement = { path = "../placement" }
 spacestorage-membership = { path = "../membership" }
+spacestorage-query = { path = "../query" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
 uuid = { workspace = true }
 serde_json = { workspace = true }
@@ -34,6 +56,7 @@ tempfile = { workspace = true }
 spacestorage-release-profile = { path = "../release-profile" }
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
+spacestorage-query = { path = "../query" }
 spacestorage-handler-postgresql = { path = "../handler-postgresql" }
 spacestorage-handler-redis = { path = "../handler-redis" }
 spacestorage-handler-cassandra = { path = "../handler-cassandra" }
@@ -41,7 +64,17 @@ spacestorage-handler-elasticsearch = { path = "../handler-elasticsearch" }
 spacestorage-handler-clickhouse = { path = "../handler-clickhouse" }
 spacestorage-handler-s3 = { path = "../handler-s3" }
 spacestorage-handler-webdav = { path = "../handler-webdav" }
+spacestorage-protocol-core = { path = "../protocol-core" }
+spacestorage-observability = { path = "../observability" }
 spacestorage-conformance = { path = "." }
 spacestorage-node = { path = "../node" }
+spacestorage-migrate = { path = "../migrate" }
+spacestorage-backup = { path = "../backup" }
+spacestorage-storage = { path = "../storage" }
+spacestorage-authz = { path = "../authz" }
+spacestorage-admin-ui = { path = "../admin-ui" }
+spacestorage-ingest = { path = "../ingest" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
 tempfile = { workspace = true }
+uuid = { workspace = true }
+serde_json = { workspace = true }

@@ -178,7 +178,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
- "axum-core",
+ "axum-core 0.5.6",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -203,6 +203,26 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
@@ -377,6 +397,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "crc"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
+
+[[package]]
+name = "crc32c"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
+dependencies = [
+ "rustc_version",
 ]
 
 [[package]]
@@ -782,6 +826,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kafka-protocol"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce8ca397fccce043d8e1c12ab0122d2facf9249c57ef030ab90f62449413294"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "crc",
+ "crc32c",
+ "indexmap",
+ "paste",
+ "uuid",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -828,6 +887,40 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "maud"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df518b75016b4289cdddffa1b01f2122f4a49802c93191f3133f6dc2472ebcaa"
+dependencies = [
+ "axum-core 0.4.5",
+ "http",
+ "itoa",
+ "maud_macros",
+]
+
+[[package]]
+name = "maud_macros"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa453238ec218da0af6b11fc5978d3b5c3a45ed97b722391a2a11f3306274e18"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
 
 [[package]]
 name = "memchr"
@@ -918,6 +1011,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
 name = "pbkdf2"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,6 +1104,29 @@ checksum = "d0de1b847b39c8131db0467e9df1ff60e6d0562ab8e9a16e568ad0fdb372e2f2"
 dependencies = [
  "predicates-core",
  "termtree",
+]
+
+[[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2",
+ "quote",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "version_check",
 ]
 
 [[package]]
@@ -1114,6 +1236,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc_version"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rustix"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,6 +1320,12 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"
@@ -1339,7 +1476,10 @@ dependencies = [
  "serde",
  "serde_json",
  "spacestorage-admin-proto",
+ "spacestorage-admin-ui",
  "spacestorage-config",
+ "spacestorage-ingest",
+ "spacestorage-migrate",
  "tempfile",
  "tokio",
 ]
@@ -1352,6 +1492,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "spacestorage-admin-ui"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "maud",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1379,7 +1535,10 @@ dependencies = [
 name = "spacestorage-backup"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "serde",
+ "serde_json",
+ "spacestorage-storage",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1430,6 +1589,9 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "serde_json",
+ "spacestorage-admin-ui",
+ "spacestorage-authz",
+ "spacestorage-backup",
  "spacestorage-compat",
  "spacestorage-config",
  "spacestorage-conformance",
@@ -1441,14 +1603,40 @@ dependencies = [
  "spacestorage-handler-redis",
  "spacestorage-handler-s3",
  "spacestorage-handler-webdav",
+ "spacestorage-ingest",
  "spacestorage-internode",
  "spacestorage-membership",
+ "spacestorage-migrate",
  "spacestorage-node",
+ "spacestorage-observability",
  "spacestorage-placement",
+ "spacestorage-protocol-core",
+ "spacestorage-query",
  "spacestorage-release-profile",
+ "spacestorage-storage",
  "spacestorage-types",
  "tempfile",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "spacestorage-controlplane"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "spacestorage-clocks",
+ "spacestorage-internode",
+ "spacestorage-membership",
+ "spacestorage-storage",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1478,6 +1666,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -1491,6 +1680,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -1506,6 +1696,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -1524,6 +1715,8 @@ dependencies = [
  "serde_json",
  "sha2",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
+ "spacestorage-query",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -1538,6 +1731,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -1551,8 +1745,12 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "hex",
+ "hmac",
+ "sha2",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
  "spacestorage-types",
+ "subtle",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -1564,12 +1762,34 @@ name = "spacestorage-handler-webdav"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "md-5",
  "spacestorage-compat",
+ "spacestorage-protocol-core",
  "spacestorage-types",
  "thiserror",
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "spacestorage-ingest"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "kafka-protocol",
+ "parking_lot",
+ "rustls",
+ "serde",
+ "serde_json",
+ "spacestorage-observability",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1607,6 +1827,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "spacestorage-migrate"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "spacestorage-authz",
+ "spacestorage-backup",
+ "spacestorage-observability",
+ "spacestorage-placement",
+ "spacestorage-storage",
+ "spacestorage-types",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "spacestorage-node"
 version = "0.1.0"
 dependencies = [
@@ -1624,7 +1866,9 @@ dependencies = [
  "serde",
  "serde_json",
  "spacestorage-admin-proto",
+ "spacestorage-admin-ui",
  "spacestorage-authz",
+ "spacestorage-backup",
  "spacestorage-config",
  "spacestorage-crypto",
  "spacestorage-handler-cassandra",
@@ -1634,8 +1878,10 @@ dependencies = [
  "spacestorage-handler-redis",
  "spacestorage-handler-s3",
  "spacestorage-handler-webdav",
+ "spacestorage-ingest",
  "spacestorage-internode",
  "spacestorage-membership",
+ "spacestorage-migrate",
  "spacestorage-observability",
  "spacestorage-release-profile",
  "spacestorage-replication",
@@ -1656,10 +1902,15 @@ dependencies = [
 name = "spacestorage-observability"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "bytes",
+ "parking_lot",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1676,13 +1927,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "spacestorage-query"
+name = "spacestorage-protocol-core"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "bytes",
+ "hex",
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "spacestorage-query"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "spacestorage-compat",
+ "spacestorage-placement",
+ "spacestorage-types",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1692,6 +1963,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "spacestorage-authz",
+ "spacestorage-config",
  "tempfile",
  "thiserror",
 ]
@@ -1724,6 +1996,23 @@ dependencies = [
  "serde_json",
  "spacestorage-crypto",
  "spacestorage-types",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "spacestorage-tenancy"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "spacestorage-authz",
  "tempfile",
  "thiserror",
  "tokio",

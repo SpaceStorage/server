@@ -67,6 +67,46 @@ impl MilestoneRecord {
                 }
                 validate_deferred_handlers_complete(&self.deferred)?;
             }
+            ReleaseProfile::ControlPlaneTenancyAuthz => {
+                if k != 7 {
+                    return Err(ValidationCode::ProfileMismatch {
+                        profile: profile.as_str().to_string(),
+                        expected_k: 7,
+                        actual_k: k,
+                    });
+                }
+                validate_deferred_after_slice7(&self.deferred)?;
+            }
+            ReleaseProfile::QueryDistributed => {
+                if k != 8 {
+                    return Err(ValidationCode::ProfileMismatch {
+                        profile: profile.as_str().to_string(),
+                        expected_k: 8,
+                        actual_k: k,
+                    });
+                }
+                validate_deferred_after_slice8(&self.deferred)?;
+            }
+            ReleaseProfile::ObservabilityCatalog => {
+                if k != 9 {
+                    return Err(ValidationCode::ProfileMismatch {
+                        profile: profile.as_str().to_string(),
+                        expected_k: 9,
+                        actual_k: k,
+                    });
+                }
+                validate_deferred_after_slice9(&self.deferred)?;
+            }
+            ReleaseProfile::MigrationBackup => {
+                if k != 10 {
+                    return Err(ValidationCode::ProfileMismatch {
+                        profile: profile.as_str().to_string(),
+                        expected_k: 10,
+                        actual_k: k,
+                    });
+                }
+                validate_deferred_after_slice10(&self.deferred)?;
+            }
             ReleaseProfile::CompleteProduct => {
                 if k != 11 {
                     let missing: Vec<u8> =
@@ -120,6 +160,66 @@ fn validate_deferred_first_binary(deferred: &[DeferredSlice]) -> Result<(), Vali
 /// After slice 6: deferred `{7,8,9,10,11}`.
 fn validate_deferred_handlers_complete(deferred: &[DeferredSlice]) -> Result<(), ValidationCode> {
     let expected: Vec<u8> = vec![7, 8, 9, 10, 11];
+    let mut got: Vec<u8> = deferred.iter().map(|d| d.id).collect();
+    got.sort_unstable();
+    if got != expected {
+        let missing: Vec<u8> = expected
+            .into_iter()
+            .filter(|i| !deferred.iter().any(|d| d.id == *i))
+            .collect();
+        return Err(ValidationCode::DeferredMissing { missing });
+    }
+    Ok(())
+}
+
+/// After slice 7: deferred `{8,9,10,11}`.
+fn validate_deferred_after_slice7(deferred: &[DeferredSlice]) -> Result<(), ValidationCode> {
+    let expected: Vec<u8> = vec![8, 9, 10, 11];
+    let mut got: Vec<u8> = deferred.iter().map(|d| d.id).collect();
+    got.sort_unstable();
+    if got != expected {
+        let missing: Vec<u8> = expected
+            .into_iter()
+            .filter(|i| !deferred.iter().any(|d| d.id == *i))
+            .collect();
+        return Err(ValidationCode::DeferredMissing { missing });
+    }
+    Ok(())
+}
+
+/// After slice 8: deferred `{9,10,11}`.
+fn validate_deferred_after_slice8(deferred: &[DeferredSlice]) -> Result<(), ValidationCode> {
+    let expected: Vec<u8> = vec![9, 10, 11];
+    let mut got: Vec<u8> = deferred.iter().map(|d| d.id).collect();
+    got.sort_unstable();
+    if got != expected {
+        let missing: Vec<u8> = expected
+            .into_iter()
+            .filter(|i| !deferred.iter().any(|d| d.id == *i))
+            .collect();
+        return Err(ValidationCode::DeferredMissing { missing });
+    }
+    Ok(())
+}
+
+/// After slice 9: deferred `{10,11}`.
+fn validate_deferred_after_slice9(deferred: &[DeferredSlice]) -> Result<(), ValidationCode> {
+    let expected: Vec<u8> = vec![10, 11];
+    let mut got: Vec<u8> = deferred.iter().map(|d| d.id).collect();
+    got.sort_unstable();
+    if got != expected {
+        let missing: Vec<u8> = expected
+            .into_iter()
+            .filter(|i| !deferred.iter().any(|d| d.id == *i))
+            .collect();
+        return Err(ValidationCode::DeferredMissing { missing });
+    }
+    Ok(())
+}
+
+/// After slice 10: deferred `{11}`.
+fn validate_deferred_after_slice10(deferred: &[DeferredSlice]) -> Result<(), ValidationCode> {
+    let expected: Vec<u8> = vec![11];
     let mut got: Vec<u8> = deferred.iter().map(|d| d.id).collect();
     got.sort_unstable();
     if got != expected {

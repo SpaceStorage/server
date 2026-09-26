@@ -16,8 +16,19 @@ handlers-complete = [
     "dep:spacestorage-handler-s3",
     "dep:spacestorage-handler-webdav",
 ]
-complete-product = ["handlers-complete"]
-
+migration-backup = [
+    "spacestorage-config/migration-backup",
+    "spacestorage-release-profile/migration-backup",
+    "spacestorage-migrate/migrate",
+]
+complete-product = [
+    "handlers-complete",
+    "migration-backup",
+    "spacestorage-config/complete-product",
+    "spacestorage-release-profile/complete-product",
+    "spacestorage-admin-ui/ui",
+    "spacestorage-ingest/ingest",
+]
 [dependencies]
 spacestorage-config = { path = "../config" }
 spacestorage-admin-proto = { path = "../admin-proto" }
@@ -37,6 +48,10 @@ spacestorage-handler-clickhouse = { path = "../handler-clickhouse", optional = t
 spacestorage-handler-s3 = { path = "../handler-s3", optional = true }
 spacestorage-handler-webdav = { path = "../handler-webdav", optional = true }
 spacestorage-observability = { path = "../observability" }
+spacestorage-migrate = { path = "../migrate" }
+spacestorage-backup = { path = "../backup" }
+spacestorage-admin-ui = { path = "../admin-ui" }
+spacestorage-ingest = { path = "../ingest" }
 tokio = { workspace = true }
 uuid = { workspace = true }
 axum = { workspace = true }

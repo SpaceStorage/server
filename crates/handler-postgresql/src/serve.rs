@@ -48,201 +48,209 @@ pub async fn serve<S>(
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    let mut buf = BytesMut::with_capacity(8192);
+    let peeked = match spacestorage_protocol_core::peek_signature(
+        &mut stream,
+        spacestorage_protocol_core::ProtocolFamily::Postgresql,
+        spacestorage_protocol_core::default_timeout(),
+    )
+    .await
+    {
+        Ok(buf) => buf,
+        Err((_err, _refusal)) => {
+            let mut out = BytesMut::new();
+            write_error(&mut out, "08P01", "protocol mismatch");
+            let _ = stream.write_all(&out).await;
+            return;
+        }
+    };
+
+    let mut buf = BytesMut::from(peeked.as_slice());
     let mut read_buf = vec![0u8; 8192];
     let mut auth = StartupAuth::Negotiating;
     let mut session = PgSession::default();
 
     while !matches!(auth, StartupAuth::Done) {
+        // Drain peeked / previously read bytes before blocking on the socket.
+        loop {
+            let progressed = match &auth {
+                StartupAuth::Negotiating => {
+                    match try_read_startup(&mut buf) {
+                        Ok(None) => break,
+                        Err(e) => {
+                            let mut out = BytesMut::new();
+                            write_error(&mut out, "08P01", &e.to_string());
+                            let _ = stream.write_all(&out).await;
+                            return;
+                        }
+                        Ok(Some(msg)) => match msg {
+                            FrontendMessage::SslRequest | FrontendMessage::GssRequest => {
+                                let mut out = BytesMut::new();
+                                write_ssl_no(&mut out);
+                                if stream.write_all(&out).await.is_err() {
+                                    return;
+                                }
+                                true
+                            }
+                            FrontendMessage::CancelRequest { .. } => return,
+                            FrontendMessage::Startup { params } => {
+                                let mut ns = "default".to_string();
+                                for (k, v) in &params {
+                                    if k.eq_ignore_ascii_case("database") {
+                                        ns = v.clone();
+                                    }
+                                }
+                                let mut out = BytesMut::new();
+                                write_auth_sasl(&mut out);
+                                if stream.write_all(&out).await.is_err() {
+                                    return;
+                                }
+                                auth = StartupAuth::WaitSaslInitial { namespace: ns };
+                                true
+                            }
+                            _ => true,
+                        },
+                    }
+                }
+                StartupAuth::WaitSaslInitial { namespace } => {
+                    match try_read_message(&mut buf) {
+                        Ok(None) => break,
+                        Err(_) => return,
+                        Ok(Some(FrontendMessage::PasswordMsg(raw))) => {
+                            let Some((mech, data)) = parse_sasl_initial(&raw) else {
+                                return;
+                            };
+                            if mech != "SCRAM-SHA-256" {
+                                let mut out = BytesMut::new();
+                                write_error(&mut out, "28000", "only SCRAM-SHA-256");
+                                let _ = stream.write_all(&out).await;
+                                return;
+                            }
+                            let client_first = match std::str::from_utf8(&data) {
+                                Ok(s) => s,
+                                Err(_) => return,
+                            };
+                            match begin_scram(&users, client_first) {
+                                Ok((exch, server_first)) => {
+                                    let mut out = BytesMut::new();
+                                    write_auth_sasl_continue(&mut out, &server_first);
+                                    if stream.write_all(&out).await.is_err() {
+                                        return;
+                                    }
+                                    auth = StartupAuth::WaitSaslFinal {
+                                        namespace: namespace.clone(),
+                                        exch,
+                                    };
+                                }
+                                Err(e) => {
+                                    let mut out = BytesMut::new();
+                                    write_error(&mut out, "28P01", &e);
+                                    let _ = stream.write_all(&out).await;
+                                    return;
+                                }
+                            }
+                            true
+                        }
+                        Ok(Some(_)) => return,
+                    }
+                }
+                StartupAuth::WaitSaslFinal { .. } => {
+                    match try_read_message(&mut buf) {
+                        Ok(None) => break,
+                        Err(_) => return,
+                        Ok(Some(FrontendMessage::PasswordMsg(raw))) => {
+                            let StartupAuth::WaitSaslFinal { namespace, exch } =
+                                std::mem::replace(&mut auth, StartupAuth::Negotiating)
+                            else {
+                                return;
+                            };
+                            let client_final = match std::str::from_utf8(&raw) {
+                                Ok(s) => s,
+                                Err(_) => return,
+                            };
+                            match finish_scram(&exch, client_final) {
+                                Ok(server_final) => {
+                                    session.namespace = namespace;
+                                    let mut out = BytesMut::new();
+                                    write_auth_sasl_final(&mut out, &server_final);
+                                    write_auth_ok(&mut out);
+                                    write_parameter_status(
+                                        &mut out,
+                                        "server_version",
+                                        "16.4 (SpaceStorage)",
+                                    );
+                                    write_parameter_status(&mut out, "client_encoding", "UTF8");
+                                    write_backend_key_data(&mut out, 42, 42);
+                                    write_ready(&mut out, b'I');
+                                    if stream.write_all(&out).await.is_err() {
+                                        return;
+                                    }
+                                    auth = StartupAuth::Done;
+                                }
+                                Err(e) => {
+                                    let mut out = BytesMut::new();
+                                    write_error(&mut out, "28P01", &e);
+                                    let _ = stream.write_all(&out).await;
+                                    return;
+                                }
+                            }
+                            true
+                        }
+                        Ok(Some(_)) => return,
+                    }
+                }
+                StartupAuth::Done => break,
+            };
+            if !progressed {
+                break;
+            }
+            if matches!(auth, StartupAuth::Done) {
+                break;
+            }
+        }
+        if matches!(auth, StartupAuth::Done) {
+            break;
+        }
+
         tokio::select! {
             _ = cancel.cancelled() => return,
             r = stream.read(&mut read_buf) => {
                 match r {
                     Ok(0) | Err(_) => return,
-                    Ok(n) => {
-                        buf.extend_from_slice(&read_buf[..n]);
-                        loop {
-                            let progressed = match &auth {
-                                StartupAuth::Negotiating => {
-                                    match try_read_startup(&mut buf) {
-                                        Ok(None) => break,
-                                        Err(e) => {
-                                            let mut out = BytesMut::new();
-                                            write_error(&mut out, "08P01", &e.to_string());
-                                            let _ = stream.write_all(&out).await;
-                                            return;
-                                        }
-                                        Ok(Some(msg)) => match msg {
-                                            FrontendMessage::SslRequest | FrontendMessage::GssRequest => {
-                                                let mut out = BytesMut::new();
-                                                write_ssl_no(&mut out);
-                                                if stream.write_all(&out).await.is_err() {
-                                                    return;
-                                                }
-                                                true
-                                            }
-                                            FrontendMessage::CancelRequest { .. } => return,
-                                            FrontendMessage::Startup { params } => {
-                                                let mut ns = "default".to_string();
-                                                for (k, v) in &params {
-                                                    if k.eq_ignore_ascii_case("database") {
-                                                        ns = v.clone();
-                                                    }
-                                                }
-                                                let mut out = BytesMut::new();
-                                                write_auth_sasl(&mut out);
-                                                if stream.write_all(&out).await.is_err() {
-                                                    return;
-                                                }
-                                                auth = StartupAuth::WaitSaslInitial { namespace: ns };
-                                                true
-                                            }
-                                            _ => true,
-                                        },
-                                    }
-                                }
-                                StartupAuth::WaitSaslInitial { namespace } => {
-                                    match try_read_message(&mut buf) {
-                                        Ok(None) => break,
-                                        Err(_) => return,
-                                        Ok(Some(FrontendMessage::PasswordMsg(raw))) => {
-                                            let Some((mech, data)) = parse_sasl_initial(&raw) else {
-                                                return;
-                                            };
-                                            if mech != "SCRAM-SHA-256" {
-                                                let mut out = BytesMut::new();
-                                                write_error(&mut out, "28000", "only SCRAM-SHA-256");
-                                                let _ = stream.write_all(&out).await;
-                                                return;
-                                            }
-                                            let client_first = match std::str::from_utf8(&data) {
-                                                Ok(s) => s,
-                                                Err(_) => return,
-                                            };
-                                            match begin_scram(&users, client_first) {
-                                                Ok((exch, server_first)) => {
-                                                    let mut out = BytesMut::new();
-                                                    write_auth_sasl_continue(&mut out, &server_first);
-                                                    if stream.write_all(&out).await.is_err() {
-                                                        return;
-                                                    }
-                                                    auth = StartupAuth::WaitSaslFinal {
-                                                        namespace: namespace.clone(),
-                                                        exch,
-                                                    };
-                                                }
-                                                Err(e) => {
-                                                    let mut out = BytesMut::new();
-                                                    write_error(&mut out, "28P01", &e);
-                                                    let _ = stream.write_all(&out).await;
-                                                    return;
-                                                }
-                                            }
-                                            true
-                                        }
-                                        Ok(Some(_)) => return,
-                                    }
-                                }
-                                StartupAuth::WaitSaslFinal { .. } => {
-                                    match try_read_message(&mut buf) {
-                                        Ok(None) => break,
-                                        Err(_) => return,
-                                        Ok(Some(FrontendMessage::PasswordMsg(raw))) => {
-                                            let StartupAuth::WaitSaslFinal { namespace, exch } =
-                                                std::mem::replace(&mut auth, StartupAuth::Negotiating)
-                                            else {
-                                                return;
-                                            };
-                                            let client_final = match std::str::from_utf8(&raw) {
-                                                Ok(s) => s,
-                                                Err(_) => return,
-                                            };
-                                            match finish_scram(&exch, client_final) {
-                                                Ok(server_final) => {
-                                                    session.namespace = namespace;
-                                                    let mut out = BytesMut::new();
-                                                    write_auth_sasl_final(&mut out, &server_final);
-                                                    write_auth_ok(&mut out);
-                                                    write_parameter_status(
-                                                        &mut out,
-                                                        "server_version",
-                                                        "16.4 (SpaceStorage)",
-                                                    );
-                                                    write_parameter_status(
-                                                        &mut out,
-                                                        "client_encoding",
-                                                        "UTF8",
-                                                    );
-                                                    write_backend_key_data(&mut out, 42, 42);
-                                                    write_ready(&mut out, b'I');
-                                                    if stream.write_all(&out).await.is_err() {
-                                                        return;
-                                                    }
-                                                    auth = StartupAuth::Done;
-                                                }
-                                                Err(e) => {
-                                                    let mut out = BytesMut::new();
-                                                    write_error(&mut out, "28P01", &e);
-                                                    let _ = stream.write_all(&out).await;
-                                                    return;
-                                                }
-                                            }
-                                            true
-                                        }
-                                        Ok(Some(_)) => return,
-                                    }
-                                }
-                                StartupAuth::Done => break,
-                            };
-                            if !progressed {
-                                break;
-                            }
-                            if matches!(auth, StartupAuth::Done) {
-                                break;
-                            }
-                        }
-                    }
+                    Ok(n) => buf.extend_from_slice(&read_buf[..n]),
                 }
             }
         }
     }
 
-    // Message loop
+    // Message loop — drain buffer before each blocking read.
     loop {
+        loop {
+            match try_read_message(&mut buf) {
+                Ok(None) => break,
+                Err(e) => {
+                    let mut out = BytesMut::new();
+                    write_error(&mut out, "08P01", &e.to_string());
+                    write_ready(&mut out, b'I');
+                    let _ = stream.write_all(&out).await;
+                    return;
+                }
+                Ok(Some(msg)) => {
+                    if handle_msg(&mut stream, &catalog, profile, &mut session, msg)
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
         tokio::select! {
             _ = cancel.cancelled() => break,
             r = stream.read(&mut read_buf) => {
                 match r {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        buf.extend_from_slice(&read_buf[..n]);
-                        loop {
-                            match try_read_message(&mut buf) {
-                                Ok(None) => break,
-                                Err(e) => {
-                                    let mut out = BytesMut::new();
-                                    write_error(&mut out, "08P01", &e.to_string());
-                                    write_ready(&mut out, b'I');
-                                    let _ = stream.write_all(&out).await;
-                                    return;
-                                }
-                                Ok(Some(msg)) => {
-                                    if handle_msg(
-                                        &mut stream,
-                                        &catalog,
-                                        profile,
-                                        &mut session,
-                                        msg,
-                                    )
-                                    .await
-                                    .is_err()
-                                    {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Ok(n) => buf.extend_from_slice(&read_buf[..n]),
                 }
             }
         }

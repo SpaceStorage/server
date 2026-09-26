@@ -1,35 +1,39 @@
-# Milestone: handlers-complete (slice 6 in progress)
+# Milestone: handlers-complete (slice 6 closed)
 
 **Profile**: `handlers-complete` (Cargo / dialect) — **not** `complete-product`  
-**Tag**: prefer `slices-1-6-wip` — do **not** brand as seven-protocol complete product
+**Tag**: `slices-1-6`
 
 ## Implemented
 
-Slices `1..=5` shipped (see [001-first-binary](001-first-binary.md)).
+Slices `1..=6` shipped. Ledger: [002-handlers-complete.yaml](002-handlers-complete.yaml).
 
-Slice **6** (remaining `015` HandlersComplete handlers) is **in progress**:
+Slice **6** wire DoD (002 T043–T048):
 
-- Workspace crates: `handler-cassandra`, `handler-elasticsearch`, `handler-clickhouse` (native + HTTP), `handler-s3`, `handler-webdav`
-- Feature `handlers-complete` on `node` / `spacestoraged` / `conformance` / `release-profile`
-- Classify-before-IR MUST smokes + MUST-NOT refuses; `compat_handlers_complete` suite
-- FirstBinary continues to refuse these handler names (`entrypoint_unknown_handler`)
+- Elasticsearch HTTP/1.1 + Basic (`GET /`, index, doc, search) — `handler-elasticsearch`
+- S3 SigV4 + path-style XML ops (bucket/object/multipart) — `handler-s3`
+- WebDAV Basic/Digest + PROPFIND/MKCOL/PUT/GET/MOVE/DELETE — `handler-webdav`
+- Cassandra CQL v4/v5 frames + SASL PLAIN — `handler-cassandra`
+- ClickHouse native Hello/Query + CityHash 1.0.2 checksum helper; HTTP SQL — `handler-clickhouse`
+- Signature/mismatch via `protocol-core` across HC + first-binary handlers (FR-004/FR-005)
+- Gate: `cargo test -p spacestorage-conformance --features handlers-complete`
+- First-binary remains green: `--features first-binary`
 
 ## Deferred
 
-Still owed (intent files stay; `still_owed: true`):
+Still owed (`still_owed: true`):
 
-- Slice 6 residuals — full native/SigV4/Digest/CityHash wire dialects + stock-client matrix (see `002` Phase 11 Convergence)
 - Slice 7 — Raft, quotas, full authz
 - Slice 8 — query beyond CRUD (PG BEGIN/COPY/cursors; ES aggregations)
 - Slice 9 — full `008` catalog
 - Slice 10 — migration and PITR
 - Slice 11 — UIs and ingest
 
-No YAML ledger record claims `implemented: [1..6]` yet — wire DoD for HC MUST dialects is not complete enough to close the slice-6 gate. When closed, add `002-handlers-complete.yaml` with `profile: handlers-complete`, `implemented: [1,2,3,4,5,6]`, deferred `{7..11}`.
+Do **not** brand this milestone as `complete-product`.
 
 ## Changelog
 
-- Added HC handler crates with catalog-backed dispatch (classify-gated)
-- Node registers HC handlers only under `--features handlers-complete`
-- Conformance: `cargo test -p spacestorage-conformance --features handlers-complete`
-- `compat::metrics::record_must_not` for T025 counters
+- Added `crates/protocol-core` (signature peek, mismatch refusal, HTTP helpers)
+- Upgraded HC handler `serve()` paths from line stubs to wire dialects (T043–T047)
+- Applied signature detection on redis/postgresql as well as HC handlers (T048)
+- Conformance mismatch matrix uses `protocol-core::detect_signature`
+- Milestone YAML claims `implemented: [1,2,3,4,5,6]` with deferred 7–11

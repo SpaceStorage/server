@@ -38,9 +38,9 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 - [X] T004 Implement closed `Verb` bitmask in `crates/authz/src/permission.rs` with exactly `CLUSTER_ADMIN`, `NAMESPACE_ADMIN`, `READ`, `WRITE`, `CREATE`, `DROP`, `CONFIGURE`, `REPLICATE`, `MIGRATE`, `AUDIT_READ`, `METRICS_READ`; `CLUSTER_ADMIN` **implies every other verb** and every namespace
 - [X] T005 [P] Implement `PrincipalId` (UUID, immutable) and `LoginName` in `crates/authz/src/principal.rs` with login constraint verbatim: unique cluster-wide, case-sensitive, `^[A-Za-z][A-Za-z0-9_]*$`, 1–63 chars; **renameable**
-- [ ] T006 [P] Implement `PrincipalRecord` in `crates/authz/src/principal.rs` with fields `id`, `login`, `scram` (salt, iteration count, StoredKey, ServerKey — never plaintext), `credential_generation` (u64, starts at 1; +1 on password change), `enabled` (bool, default true), `created_hlc`, `bootstrap` (bool, true only for the first CLUSTER_ADMIN mint); unique login index; duplicate → `LoginExists`
-- [ ] T007 [P] Implement in-memory `Session` in `crates/authz/src/session.rs` with `principal_id`, optional `namespace_id`, `credential_generation` copied at AUTH, `protocol`; export `recheck` that loads PrincipalRecord and refuses on `!enabled` (`PrincipalDisabled`) or generation mismatch (`AuthGenerationMismatch`) then `authorize` on current bindings
-- [ ] T008 [P] Implement optional `SessionToken` row type in `crates/authz/src/session.rs` (cluster log): `token_hash` SHA-256 of presented secret, `principal_id`, `generation` at issue, `expires_hlc` (TTL default 12 h)
+- [X] T006 [P] Implement `PrincipalRecord` in `crates/authz/src/principal.rs` with fields `id`, `login`, `scram` (salt, iteration count, StoredKey, ServerKey — never plaintext), `credential_generation` (u64, starts at 1; +1 on password change), `enabled` (bool, default true), `created_hlc`, `bootstrap` (bool, true only for the first CLUSTER_ADMIN mint); unique login index; duplicate → `LoginExists`
+- [X] T007 [P] Implement in-memory `Session` in `crates/authz/src/session.rs` with `principal_id`, optional `namespace_id`, `credential_generation` copied at AUTH, `protocol`; export `recheck` that loads PrincipalRecord and refuses on `!enabled` (`PrincipalDisabled`) or generation mismatch (`AuthGenerationMismatch`) then `authorize` on current bindings
+- [X] T008 [P] Implement optional `SessionToken` row type in `crates/authz/src/session.rs` (cluster log): `token_hash` SHA-256 of presented secret, `principal_id`, `generation` at issue, `expires_hlc` (TTL default 12 h)
 - [X] T009 Export normative validation codes in `crates/authz/src/lib.rs` (or `error.rs`): `BootstrapAdminRequired`, `JoinSecretNotAdmin`, `UnboundCredential`, `ReplicationNotTenant`, `LoginExists`, `LoginNotFound`, `BuiltinRoleImmutable`, `RoleNameReserved`, `Slice7Required`, `AuthGenerationMismatch`, `PrincipalDisabled`, `MasterKeyRequired`, `MasterKeyPermissions`, `KeyUnresolvable`, `KeyMaterialForbidden`, `TransportOmitted`, `AdminTokenRemoved`, `UsersFileRemoved`, `KeyringRemoved`, `DataKeyRewriteNotFirstBinary`
 - [ ] T010 Register cluster-log body types for `Principal*` / `Kek*` / `Audit*` / `SessionToken*` in `crates/controlplane` (or authz→controlplane bridge) so bodies apply from the **cluster** Raft group `{data_dir}/raft/cluster/`
 - [X] T011 [P] Implement `MasterKey` file IO in `crates/crypto/src/master_file.rs`: 32 bytes at `keys.master_key_file`, mode `0600`, never logged; missing/wrong mode → `MasterKeyRequired` / `MasterKeyPermissions`
@@ -98,18 +98,18 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T035 [P] [US2] Add unit tests in `crates/authz/src/permission.rs` for implication: principal with only `CLUSTER_ADMIN` allows READ/WRITE/CREATE/AUDIT_READ/… without extra grants
+- [X] T035 [P] [US2] Add unit tests in `crates/authz/src/permission.rs` for implication: principal with only `CLUSTER_ADMIN` allows READ/WRITE/CREATE/AUDIT_READ/… without extra grants
 - [ ] T036 [P] [US2] Add conformance tests in `crates/conformance` for SC-002: CLUSTER_ADMIN smoke create/write without extra grants; RolePut/edit on `admin`/`replication` → `BuiltinRoleImmutable`; custom RolePut on first-binary → `Slice7Required`; bound tenant SET/GET via implicit grant
 
 ### Implementation for User Story 2
 
-- [ ] T037 [US2] Implement `Authorizer::authorize(principal_id, verb, resource{namespace_id?, container_id?}) -> Allow | Deny` in `crates/authz/src/permission.rs` (or `lib.rs`); Deny maps to protocol authorization error (`002`)
+- [X] T037 [US2] Implement `Authorizer::authorize(principal_id, verb, resource{namespace_id?, container_id?}) -> Allow | Deny` in `crates/authz/src/permission.rs` (or `lib.rs`); Deny maps to protocol authorization error (`002`)
 - [ ] T038 [US2] Encode builtins in `crates/authz` + call sites in `crates/tenancy`: `admin` exactly `{CLUSTER_ADMIN}` cluster scope; `replication` exactly `{REPLICATE}` node identity; `RolePut`/`RoleDelete`/rename of builtins → `BuiltinRoleImmutable`; custom name `admin`/`replication` → `RoleNameReserved`
-- [ ] T039 [US2] Implement first-binary implicit tenant grant (**FR-017**) in `crates/authz/src/permission.rs`: namespace-bound principal that is not `admin` or `replication` gets `{READ, WRITE, CREATE, DROP, CONFIGURE}` **on that namespace only** (not a stored custom role); slice 7 replaces with explicit sets
-- [ ] T040 [US2] Refuse custom RolePut / remaining-verb grants / tenant `AUDIT_READ` attach on first-binary profile with `Slice7Required` in `crates/tenancy` + `crates/authz` when feature `authz-custom` is off
+- [X] T039 [US2] Implement first-binary implicit tenant grant (**FR-017**) in `crates/authz/src/permission.rs`: namespace-bound principal that is not `admin` or `replication` gets `{READ, WRITE, CREATE, DROP, CONFIGURE}` **on that namespace only** (not a stored custom role); slice 7 replaces with explicit sets
+- [X] T040 [US2] Refuse custom RolePut / remaining-verb grants / tenant `AUDIT_READ` attach on first-binary profile with `Slice7Required` in `crates/tenancy` + `crates/authz` when feature `authz-custom` is off
 - [ ] T041 [US2] Wire `REPLICATE` peer auth on `internode`/`replication` in `crates/internodes` / `crates/membership`: join secret + builtin `replication`; presenting replication identity on tenant handler → `ReplicationNotTenant`; MUST NOT be a tenant login
 - [ ] T042 [US2] Ensure `CLUSTER_ADMIN` admits join, changes global config, and creates/writes containers in any namespace without separate READ/WRITE grants (integration with `011`/`007` call sites) via `authorize` implication
-- [ ] T043 [P] [US2] Under `authz-custom` (slice 7 only): enable custom roles with optional `container_ids` narrowing for READ/WRITE/CONFIGURE (empty = all containers); CREATE/DROP namespace-wide; custom including `CLUSTER_ADMIN` gets implication — stub/feature-gate in `crates/authz` + `crates/tenancy` without requiring first-binary delivery
+- [X] T043 [P] [US2] Under `authz-custom` (slice 7 only): enable custom roles with optional `container_ids` narrowing for READ/WRITE/CONFIGURE (empty = all containers); CREATE/DROP namespace-wide; custom including `CLUSTER_ADMIN` gets implication — stub/feature-gate in `crates/authz` + `crates/tenancy` without requiring first-binary delivery
 - [ ] T044 [P] [US2] Document that UIs (`09`) MUST call the same `Authorizer` (no private privilege model) in `crates/authz` module docs or feature note; no UI work in this feature
 
 **Checkpoint**: Builtin immutability and implication hold; Redis smoke uses bound tenant + implicit grant; custom roles absent on first-binary profile.
@@ -175,12 +175,12 @@ description: "Task list for authentication, authorization, envelope keys, and au
 
 **Purpose**: Cross-story hardening, release-profile flags, quickstart validation
 
-- [ ] T068 [P] Ensure `release-profile` first binary compiles principal store + envelope + audit append and keeps `authz-custom` off by default in `crates/release-profile`
+- [X] T068 [P] Ensure `release-profile` first binary compiles principal store + envelope + audit append and keeps `authz-custom` off by default in `crates/release-profile`
 - [ ] T069 [P] Run full [quickstart.md](quickstart.md) validation path (config invalid fixtures §0 through audit §6) against in-process node and fix any drift in fixtures under `specs/014-authz-keys/contracts/fixtures/`
 - [X] T070 Confirm PBKDF2/SCRAM on `spawn_blocking` when iterations are high and file reads via `tokio::fs` in `crates/authz` / `crates/crypto` (constitution II)
 - [ ] T071 [P] Sweep logs/describe/admin status paths so key material, plaintext passwords, and bearer tokens never appear (`KeyMaterialForbidden` / zeroize drop)
 - [ ] T072 Code cleanup: remove leftover dual-path reads of `users_file` / `keyring_file` / `admin.token_file` once seams are wired in handlers, crypto, and config
-- [ ] T073 [P] Add slice-7 note tasks only as feature-gated stubs already present — do not implement LDAP/SSO, external KMS, data-key rewrite (`010`), or UI chrome (`09`) in this feature
+- [X] T073 [P] Add slice-7 note tasks only as feature-gated stubs already present — do not implement LDAP/SSO, external KMS, data-key rewrite (`010`), or UI chrome (`09`) in this feature
 
 ---
 

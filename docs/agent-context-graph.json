@@ -42,7 +42,7 @@
     {"id": "conformance", "kind": "crate"},
     {"id": "query", "kind": "crate", "defer": true},
     {"id": "compat", "kind": "crate", "defer": true},
-    {"id": "observability", "kind": "crate", "defer": true}
+    {"id": "observability", "kind": "crate", "defer": false, "note": "slice 9 milestoned"}
   ],
   "edges": [
     {"from": "slice-1", "to": "slice-2", "kind": "implement-after"},

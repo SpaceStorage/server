@@ -1,0 +1,9 @@
+slug: control-plane-tenancy-authz
+profile: control-plane-tenancy-authz
+implemented: [1, 2, 3, 4, 5, 6, 7]
+deferred:
+  - { id: 8, still_owed: true, reason: "query beyond CRUD" }
+  - { id: 9, still_owed: true, reason: "full 08 catalog" }
+  - { id: 10, still_owed: true, reason: "migration and PITR" }
+  - { id: 11, still_owed: true, reason: "UIs and ingest" }
+changelog_ref: docs/milestones/003-control-plane-tenancy-authz.md

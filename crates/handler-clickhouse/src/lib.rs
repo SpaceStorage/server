@@ -1,10 +1,13 @@
 //! ClickHouse native + HTTP HandlersComplete (CRUD/WHERE; GROUP BY → not-supported until CP).
 
+mod cityhash102;
 mod dispatch;
 mod http;
 mod native;
+mod sql;
 
-pub use dispatch::{ClickHouseReply, SessionState, dispatch};
+pub use cityhash102::{city_hash128, clickhouse_block_checksum};
+pub use dispatch::{dispatch, ClickHouseReply, SessionState};
 pub use http::ClickHouseHttpHandler;
 pub use native::ClickHouseNativeHandler;
 

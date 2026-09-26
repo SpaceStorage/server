@@ -16,6 +16,12 @@ pub struct ValidateOptions {
     pub require_cluster_ports: bool,
     /// Require cluster.master_key_file when cluster block present.
     pub require_master_key: bool,
+    /// When true, reject otel/kafka/syslog/slow_query-on/audit-on (first-binary).
+    pub reject_slice9_observability: bool,
+    /// When true, reject `jobs.enabled on` (first-binary; 010).
+    pub reject_slice10_jobs: bool,
+    /// When true, reject UI/Kafka/syslog ingest (first-binary; 009).
+    pub reject_slice11_ui_ingest: bool,
 }
 
 impl Default for ValidateOptions {
@@ -25,6 +31,9 @@ impl Default for ValidateOptions {
             require_transport: false,
             require_cluster_ports: false,
             require_master_key: false,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: false,
+            reject_slice11_ui_ingest: false,
         }
     }
 }
@@ -36,6 +45,9 @@ impl ValidateOptions {
             require_transport: true,
             require_cluster_ports: true,
             require_master_key: true,
+            reject_slice9_observability: true,
+            reject_slice10_jobs: true,
+            reject_slice11_ui_ingest: true,
         }
     }
 
@@ -45,6 +57,48 @@ impl ValidateOptions {
             require_transport: false,
             require_cluster_ports: false,
             require_master_key: false,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: false,
+            reject_slice11_ui_ingest: false,
+        }
+    }
+
+    /// Slice 9 / complete-product: allow tenant OTel/Kafka/syslog/slow_query/audit.
+    pub fn observability_catalog() -> Self {
+        Self {
+            check_secrets_readable: true,
+            require_transport: true,
+            require_cluster_ports: true,
+            require_master_key: true,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: true,
+            reject_slice11_ui_ingest: true,
+        }
+    }
+
+    /// Slice 10: migration / backup jobs allowed.
+    pub fn migration_backup() -> Self {
+        Self {
+            check_secrets_readable: true,
+            require_transport: true,
+            require_cluster_ports: true,
+            require_master_key: true,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: false,
+            reject_slice11_ui_ingest: true,
+        }
+    }
+
+    /// Slice 11 / complete-product: UI + Kafka/syslog ingest allowed.
+    pub fn complete_product() -> Self {
+        Self {
+            check_secrets_readable: true,
+            require_transport: true,
+            require_cluster_ports: true,
+            require_master_key: true,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: false,
+            reject_slice11_ui_ingest: false,
         }
     }
 }
@@ -545,6 +599,162 @@ pub fn validate(
         ));
     }
 
+    // 005: query admission validation
+    if cfg.query.max_concurrent_per_node == Some(0)
+        || cfg.query.max_concurrent_per_namespace == Some(0)
+    {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "query.max_concurrent",
+            ErrorCode::QueryMaxConcurrentZero,
+            "query_max_concurrent_zero",
+        ));
+    }
+    if cfg.query.max_memory == Some(0) {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "query.max_memory",
+            ErrorCode::QueryMaxMemoryZero,
+            "query_max_memory_zero",
+        ));
+    }
+    if cfg.query.default_concurrency == Some(0) {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "query.default_concurrency",
+            ErrorCode::QueryConcurrencyZero,
+            "query_concurrency_zero",
+        ));
+    }
+
+    // 008: observability config
+    if let Some(ref ep) = cfg.metrics.otel_endpoint {
+        let e = ep.trim();
+        if !(e.starts_with("http://") || e.starts_with("https://")) {
+            errors.push(ConfigError::new(
+                file,
+                0,
+                0,
+                "metrics.otel.endpoint",
+                ErrorCode::SinkConfigInvalid,
+                "OTLP endpoint must be http(s)",
+            ));
+        }
+    }
+    if let Some(ref k) = cfg.log_kafka {
+        if k.brokers.is_empty() || k.brokers.iter().all(|b| b.trim().is_empty()) {
+            errors.push(ConfigError::new(
+                file,
+                0,
+                0,
+                "log.kafka.brokers",
+                ErrorCode::SinkConfigInvalid,
+                "kafka brokers empty",
+            ));
+        }
+    }
+    if let Some(ref s) = cfg.log_syslog {
+        if s.address.is_empty() || !s.address.contains(':') {
+            errors.push(ConfigError::new(
+                file,
+                0,
+                0,
+                "log.syslog.address",
+                ErrorCode::SinkConfigInvalid,
+                "syslog address unparseable",
+            ));
+        }
+    }
+    if opts.reject_slice9_observability {
+        let slice9 = cfg.metrics.otel_endpoint.is_some()
+            || cfg.metrics.slow_query_enabled
+            || cfg.metrics.audit_log
+            || cfg.log_kafka.is_some()
+            || cfg.log_syslog.is_some()
+            || cfg
+                .entrypoints
+                .iter()
+                .any(|e| e.handler == "metrics");
+        if slice9 {
+            errors.push(ConfigError::new(
+                file,
+                0,
+                0,
+                "metrics",
+                ErrorCode::ObservabilitySlice9Required,
+                "otel/kafka/syslog/slow_query/audit/handler metrics require slice 9",
+            ));
+        }
+    }
+    if opts.reject_slice10_jobs && cfg.jobs.enabled {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "jobs.enabled",
+            ErrorCode::MigrateSlice10Required,
+            "jobs.enabled on requires slice 10 (migration / backup)",
+        ));
+    }
+    if opts.reject_slice11_ui_ingest {
+        let has_syslog = cfg.entrypoints.iter().any(|e| e.handler == "syslog");
+        let has_kafka = !cfg.kafka_ingests.is_empty();
+        if has_syslog || has_kafka {
+            errors.push(ConfigError::new(
+                file,
+                0,
+                0,
+                if has_kafka { "ingest.kafka" } else { "handler.syslog" },
+                ErrorCode::UiIngestSlice11Required,
+                "UI / Kafka / syslog ingest require slice 11 (complete-product)",
+            ));
+        }
+    }
+    // Syslog bind must name target (009).
+    for ep in &cfg.entrypoints {
+        if ep.handler == "syslog" {
+            match &ep.ingest {
+                None => errors.push(ConfigError::new(
+                    file,
+                    0,
+                    0,
+                    "entrypoint.ingest",
+                    ErrorCode::IngestMissingTarget,
+                    format!("syslog entrypoint '{}' missing ingest {{ namespace; container; }}", ep.name),
+                )),
+                Some(ing) if ing.namespace.is_empty() || ing.container.is_empty() => {
+                    errors.push(ConfigError::new(
+                        file,
+                        0,
+                        0,
+                        "entrypoint.ingest",
+                        ErrorCode::IngestMissingTarget,
+                        format!("syslog entrypoint '{}' missing namespace/container", ep.name),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    for k in &cfg.kafka_ingests {
+        if k.brokers.is_empty() {
+            errors.push(ConfigError::new(
+                file,
+                0,
+                0,
+                "ingest.kafka.brokers",
+                ErrorCode::IngestKafkaNoBrokers,
+                format!("ingest kafka '{}' has no brokers", k.name),
+            ));
+        }
+    }
+
     errors
 }
 
@@ -584,6 +794,11 @@ mod tests {
             storage: StorageDecl::default(),
             limits: crate::model::EffectiveLimits::built_in(),
             query: crate::model::QueryDecl::default(),
+            metrics: crate::model::MetricsDecl::defaults(),
+            log_kafka: None,
+            log_syslog: None,
+            jobs: crate::model::JobsDecl::default(),
+            kafka_ingests: Vec::new(),
         }
     }
 
@@ -597,6 +812,9 @@ mod tests {
             require_transport: false,
             require_cluster_ports: false,
             require_master_key: true,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: false,
+            reject_slice11_ui_ingest: false,
         };
         assert!(!path.exists());
         let errors = validate(&cfg, "test.conf", &[], &opts);
@@ -628,6 +846,9 @@ mod tests {
             require_transport: false,
             require_cluster_ports: false,
             require_master_key: true,
+            reject_slice9_observability: false,
+            reject_slice10_jobs: false,
+            reject_slice11_ui_ingest: false,
         };
         let errors = validate(&cfg, "test.conf", &[], &opts);
         assert!(

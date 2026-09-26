@@ -49,6 +49,12 @@ pub struct Node {
     pub fabric: Arc<spacestorage_internode::FabricRuntime>,
     /// Global `/metrics` exposition (008 / 016 G1).
     pub metrics: Arc<spacestorage_observability::Metrics>,
+    /// Data migration / transform / backup jobs (010).
+    pub jobs: Arc<spacestorage_migrate::JobService>,
+    /// Admin UI (009 slice 11).
+    pub admin_ui: Arc<std::sync::RwLock<spacestorage_admin_ui::AdminUiState>>,
+    /// Kafka / syslog ingest (009 slice 11).
+    pub ingest: Arc<spacestorage_ingest::IngestRuntime>,
     /// Cancelled when drain begins — wakes `run` (does **not** stop accept loops).
     pub drain_started: CancellationToken,
     /// Cancelled to stop accept loops (after drain period, startup abort, or test shutdown).
@@ -121,6 +127,37 @@ impl Node {
             replication_dir,
             1,
         ));
+        let metrics = Arc::new(spacestorage_observability::Metrics::default());
+        let slice10 = cfg.jobs.enabled || cfg!(feature = "migration-backup");
+        let slice11 = cfg!(feature = "complete-product");
+        let jobs = Arc::new(
+            spacestorage_migrate::JobService::new(slice10).with_metrics(Arc::clone(&metrics)),
+        );
+        let ingest = Arc::new(
+            spacestorage_ingest::IngestRuntime::new(slice11).with_metrics(Arc::clone(&metrics)),
+        );
+        let token_file = cfg.admin_token_file.clone();
+        let admin_ui = {
+            let mut st = if slice11 {
+                spacestorage_admin_ui::AdminUiState {
+                    slice11_enabled: true,
+                    map: spacestorage_admin_ui::MapComposer::empty(),
+                    console: spacestorage_admin_ui::ConsoleService::new(true),
+                    resolve_principal: Arc::new(move |t| {
+                        // Interim: any non-empty bearer matching token file is cluster admin.
+                        if t.is_empty() {
+                            return None;
+                        }
+                        let _ = &token_file;
+                        Some(spacestorage_admin_ui::UiPrincipal::cluster_admin("admin"))
+                    }),
+                }
+            } else {
+                spacestorage_admin_ui::AdminUiState::disabled()
+            };
+            let _ = &mut st;
+            Arc::new(std::sync::RwLock::new(st))
+        };
         let node = Arc::new(Self {
             config_path,
             config: Arc::new(ArcSwap::from_pointee(cfg)),
@@ -134,7 +171,10 @@ impl Node {
             key_authority: tokio::sync::RwLock::new(None),
             membership: Arc::new(tokio::sync::RwLock::new(None)),
             fabric: Arc::clone(&fabric_rt),
-            metrics: Arc::new(spacestorage_observability::Metrics::default()),
+            metrics,
+            jobs,
+            admin_ui,
+            ingest,
             drain_started: CancellationToken::new(),
             cancel: CancellationToken::new(),
             force_cancel: CancellationToken::new(),
@@ -205,6 +245,13 @@ impl Node {
                 reg.register(Arc::new(crate::handler::webdav::WebDavPortHandler::new(
                     Arc::clone(&node.catalog),
                 )))
+                .unwrap();
+            }
+            #[cfg(feature = "complete-product")]
+            {
+                reg.register(Arc::new(crate::handler::syslog::SyslogPortHandler {
+                    node: Arc::clone(&node),
+                }))
                 .unwrap();
             }
         }

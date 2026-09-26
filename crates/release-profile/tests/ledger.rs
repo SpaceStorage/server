@@ -31,6 +31,63 @@ fn first_binary_milestone_requires_deferred_6_through_11() {
 }
 
 #[test]
+fn slice7_milestone_requires_deferred_8_through_11() {
+    let path = repo_root().join("docs/milestones/003-control-plane-tenancy-authz.yaml");
+    let record = MilestoneRecord::load_file(&path).expect("load yaml");
+    record.validate().expect("003-control-plane-tenancy-authz must validate");
+    assert_eq!(record.implemented, vec![1, 2, 3, 4, 5, 6, 7]);
+    let ids: Vec<u8> = record.deferred.iter().map(|d| d.id).collect();
+    assert_eq!(ids, vec![8, 9, 10, 11]);
+    assert!(record.deferred.iter().all(|d| d.still_owed));
+}
+
+#[test]
+fn slice8_milestone_requires_deferred_9_through_11() {
+    let path = repo_root().join("docs/milestones/004-query-beyond-crud.yaml");
+    let record = MilestoneRecord::load_file(&path).expect("load yaml");
+    record.validate().expect("004-query-beyond-crud must validate");
+    assert_eq!(record.implemented, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    let ids: Vec<u8> = record.deferred.iter().map(|d| d.id).collect();
+    assert_eq!(ids, vec![9, 10, 11]);
+    assert!(record.deferred.iter().all(|d| d.still_owed));
+}
+
+#[test]
+fn slice9_milestone_requires_deferred_10_through_11() {
+    let path = repo_root().join("docs/milestones/005-observability-catalog.yaml");
+    let record = MilestoneRecord::load_file(&path).expect("load yaml");
+    record.validate().expect("005-observability-catalog must validate");
+    assert_eq!(record.implemented, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    let ids: Vec<u8> = record.deferred.iter().map(|d| d.id).collect();
+    assert_eq!(ids, vec![10, 11]);
+    assert!(record.deferred.iter().all(|d| d.still_owed));
+}
+
+#[test]
+fn slice10_milestone_requires_deferred_11() {
+    let path = repo_root().join("docs/milestones/006-migration-backup.yaml");
+    let record = MilestoneRecord::load_file(&path).expect("load yaml");
+    record.validate().expect("006-migration-backup must validate");
+    assert_eq!(record.implemented, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let ids: Vec<u8> = record.deferred.iter().map(|d| d.id).collect();
+    assert_eq!(ids, vec![11]);
+    assert!(record.deferred.iter().all(|d| d.still_owed));
+}
+
+#[test]
+fn complete_product_milestone_implements_1_through_11() {
+    let path = repo_root().join("docs/milestones/007-complete-product.yaml");
+    let record = MilestoneRecord::load_file(&path).expect("load yaml");
+    record.validate().expect("007-complete-product must validate");
+    assert_eq!(
+        record.implemented,
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    );
+    assert!(record.deferred.is_empty());
+    assert_eq!(record.profile, "complete-product");
+}
+
+#[test]
 fn missing_deferred_fixture_fails() {
     let path = repo_root().join("docs/milestones/fixtures/missing-deferred.yaml");
     let record = MilestoneRecord::load_file(&path).expect("load fixture");

@@ -77,3 +77,5 @@ pub mod elasticsearch;
 pub mod s3;
 #[cfg(feature = "handlers-complete")]
 pub mod webdav;
+#[cfg(feature = "complete-product")]
+pub mod syslog;

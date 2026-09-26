@@ -26,6 +26,14 @@ pub struct NodeConfig {
     pub limits: EffectiveLimits,
     /// Optional `query { spill; max_concurrent_*; max_memory; }` (005 owned; parsed here).
     pub query: QueryDecl,
+    /// Observability (`metrics { }` / additive `log { kafka|syslog }`) — 008.
+    pub metrics: MetricsDecl,
+    pub log_kafka: Option<LogKafkaDecl>,
+    pub log_syslog: Option<LogSyslogDecl>,
+    /// Data job supervisor (`jobs { }`) — 010.
+    pub jobs: JobsDecl,
+    /// Bootstrap Kafka ingest declarations (`ingest kafka NAME { }`) — 009.
+    pub kafka_ingests: Vec<KafkaIngestDecl>,
 }
 
 impl NodeConfig {
@@ -69,6 +77,22 @@ pub struct SeedDecl {
     pub port: u16,
 }
 
+/// `cluster.raft { heartbeat; election_timeout; }` (006).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RaftDecl {
+    pub heartbeat: Duration,
+    pub election_timeout: Duration,
+}
+
+impl Default for RaftDecl {
+    fn default() -> Self {
+        Self {
+            heartbeat: Duration::from_millis(500),
+            election_timeout: Duration::from_secs(2),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClusterDecl {
     pub name: Option<String>,
@@ -88,6 +112,10 @@ pub struct ClusterDecl {
     pub admin_password_file: Option<String>,
     /// Optional override; default compiled-in product version = 1 (015).
     pub product_version: Option<u16>,
+    /// Raft timings (006); omitted → production defaults.
+    pub raft: RaftDecl,
+    /// Slice-7: exclude controller voters as tenant replica targets (default off).
+    pub controller_exclusive_data: bool,
 }
 
 /// Query admission knobs (`query { }`) — policy defaults from compat; owned by 005.
@@ -98,6 +126,8 @@ pub struct QueryDecl {
     pub max_memory: Option<u64>,
     /// `Some(true)` = spill on; `Some(false)` = off; `None` = profile default.
     pub spill: Option<bool>,
+    /// Default planner concurrency degree (1 = sequential).
+    pub default_concurrency: Option<u16>,
 }
 
 impl Default for QueryDecl {
@@ -107,6 +137,7 @@ impl Default for QueryDecl {
             max_concurrent_per_namespace: None,
             max_memory: None,
             spill: None,
+            default_concurrency: None,
         }
     }
 }
@@ -126,6 +157,101 @@ impl Default for QueryDefaults {
     }
 }
 
+/// `metrics { otel; slow_query; audit_log; }` (008).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MetricsDecl {
+    pub otel_endpoint: Option<String>,
+    pub otel_interval: Option<Duration>,
+    pub slow_query_enabled: bool,
+    pub slow_query_threshold: Duration,
+    pub audit_log: bool,
+}
+
+impl Default for MetricsDecl {
+    fn default() -> Self {
+        Self::defaults()
+    }
+}
+
+impl MetricsDecl {
+    pub fn defaults() -> Self {
+        Self {
+            otel_endpoint: None,
+            otel_interval: None,
+            slow_query_enabled: false,
+            slow_query_threshold: Duration::from_secs(1),
+            audit_log: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LogKafkaDecl {
+    pub brokers: Vec<String>,
+    pub topic: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LogSyslogDecl {
+    pub address: String,
+    pub transport: String, // udp|tcp
+}
+
+/// `jobs { enabled; catchup_concurrency; }` (010).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JobsDecl {
+    /// Default off on first-binary; on when slice 10 compiled.
+    pub enabled: bool,
+    pub catchup_concurrency: u32,
+}
+
+impl Default for JobsDecl {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            catchup_concurrency: 4,
+        }
+    }
+}
+
+/// Bootstrap `ingest kafka NAME { … }` (009); cluster store wins after apply.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KafkaIngestDecl {
+    pub name: String,
+    pub namespace: String,
+    pub container: String,
+    pub type_name: String,
+    pub format: String,
+    pub brokers: Vec<String>,
+    pub topic: String,
+    pub group: String,
+    pub plaintext: bool,
+}
+
+impl Default for KafkaIngestDecl {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            namespace: String::new(),
+            container: String::new(),
+            type_name: "log_stream".into(),
+            format: "raw".into(),
+            brokers: Vec::new(),
+            topic: String::new(),
+            group: String::new(),
+            plaintext: true,
+        }
+    }
+}
+
+/// Syslog entrypoint ingest child (009).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SyslogIngestDecl {
+    pub namespace: String,
+    pub container: String,
+    pub type_name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntrypointDecl {
     pub name: String,
@@ -134,6 +260,8 @@ pub struct EntrypointDecl {
     pub handler: String,
     pub transport: Transport,
     pub tls: Option<TlsDecl>,
+    /// Required when `handler syslog` (009).
+    pub ingest: Option<SyslogIngestDecl>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -158,6 +286,18 @@ pub const BUILTIN_BUFFERS: &[(&str, u64, u64, u64)] = &[
         16 * 1024 * 1024,
         1024 * 1024,
         16 * 1024 * 1024 * 1024,
+    ),
+    (
+        "ingest.syslog.recv",
+        16 * 1024 * 1024,
+        1024 * 1024,
+        1024 * 1024 * 1024,
+    ),
+    (
+        "ingest.kafka.decode",
+        32 * 1024 * 1024,
+        1024 * 1024,
+        1024 * 1024 * 1024,
     ),
 ];
 

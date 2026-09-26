@@ -112,6 +112,11 @@ fn base_cfg(
         storage: Default::default(),
         limits: spacestorage_config::model::EffectiveLimits::built_in(),
         query: Default::default(),
+        metrics: Default::default(),
+        log_kafka: None,
+        log_syslog: None,
+        jobs: spacestorage_config::model::JobsDecl::default(),
+        kafka_ingests: Vec::new(),
     }
 }
 

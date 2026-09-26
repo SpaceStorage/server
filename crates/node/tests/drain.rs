@@ -36,6 +36,7 @@ fn config_with_echo(
                 handler: "admin-http".into(),
                 transport: Transport::Plaintext,
                 tls: None,
+                ingest: None,
             },
             EntrypointDecl {
                 name: "echo".into(),
@@ -44,6 +45,7 @@ fn config_with_echo(
                 handler: "echo".into(),
                 transport: Transport::Plaintext,
                 tls: None,
+                ingest: None,
             },
         ],
         buffers: BTreeMap::new(),
@@ -55,6 +57,11 @@ fn config_with_echo(
         storage: Default::default(),
         limits: spacestorage_config::model::EffectiveLimits::built_in(),
         query: Default::default(),
+        metrics: Default::default(),
+        log_kafka: None,
+        log_syslog: None,
+        jobs: spacestorage_config::model::JobsDecl::default(),
+        kafka_ingests: Vec::new(),
     }
 }
 

@@ -10,6 +10,28 @@ pub const MSG_JOIN_ACK: u16 = 11;
 pub const MSG_PENDING_ANNOUNCE: u16 = 12;
 pub const MSG_FENCE_INCARNATION: u16 = 13;
 pub const MSG_SECRET_ROTATE: u16 = 14;
+/// Raft RequestVote (006).
+pub const MSG_RAFT_VOTE: u16 = 20;
+/// Raft AppendEntries (006).
+pub const MSG_RAFT_APPEND: u16 = 21;
+/// Raft InstallSnapshot (006).
+pub const MSG_RAFT_SNAPSHOT: u16 = 22;
+/// Metadata write forward to leader (006).
+pub const MSG_RAFT_FORWARD: u16 = 23;
+/// Shared-datatype metrics push to namespace primary (006).
+pub const MSG_METRICS_PUSH: u16 = 24;
+/// Best-effort quota usage delta (007).
+pub const MSG_QUOTA_DELTA: u16 = 25;
+/// Shuffle offer (005).
+pub const MSG_SHUFFLE_OFFER: u16 = 30;
+/// Shuffle push (005).
+pub const MSG_SHUFFLE_PUSH: u16 = 31;
+/// Shuffle pull (005).
+pub const MSG_SHUFFLE_PULL: u16 = 32;
+/// Stage abort (005).
+pub const MSG_STAGE_ABORT: u16 = 33;
+/// Job status notify (005).
+pub const MSG_JOB_STATUS: u16 = 34;
 
 pub fn is_known(msg_type: u16) -> bool {
     matches!(
@@ -24,6 +46,17 @@ pub fn is_known(msg_type: u16) -> bool {
             | MSG_PENDING_ANNOUNCE
             | MSG_FENCE_INCARNATION
             | MSG_SECRET_ROTATE
+            | MSG_RAFT_VOTE
+            | MSG_RAFT_APPEND
+            | MSG_RAFT_SNAPSHOT
+            | MSG_RAFT_FORWARD
+            | MSG_METRICS_PUSH
+            | MSG_QUOTA_DELTA
+            | MSG_SHUFFLE_OFFER
+            | MSG_SHUFFLE_PUSH
+            | MSG_SHUFFLE_PULL
+            | MSG_STAGE_ABORT
+            | MSG_JOB_STATUS
     )
 }
 

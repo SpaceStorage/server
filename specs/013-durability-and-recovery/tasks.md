@@ -137,19 +137,19 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T042 [P] [US4] Add unit tests for HLC→LSN map (`lsn* = max { lsn | stamp ≤ T }`), refuse `pitr_unmappable` naming drive, and never past last durable ack in `crates/backup/src/pitr.rs` / `crates/backup/tests/pitr.rs`
-- [ ] T043 [P] [US4] Add unit tests for `confirm_drop=false` → `RestoreDestinationHasContent` (dest intact) and confirm-drop/empty → fill in `crates/backup/tests/restore.rs`
+- [X] T042 [P] [US4] Add unit tests for HLC→LSN map (`lsn* = max { lsn | stamp ≤ T }`), refuse `pitr_unmappable` naming drive, and never past last durable ack in `crates/backup/src/pitr.rs` / `crates/backup/tests/pitr.rs`
+- [X] T043 [P] [US4] Add unit tests for `confirm_drop=false` → `RestoreDestinationHasContent` (dest intact) and confirm-drop/empty → fill in `crates/backup/tests/restore.rs`
 - [ ] T044 [P] [US4] Add conformance SC-006 multi-drive independent positions (no cluster freeze), PITR HLC map, and unmappable-drive refuse in `crates/conformance/tests/snapshot_pitr.rs`
-- [ ] T045 [P] [US4] Add conformance SC-007 missing key fails naming the reference, SC-008 overwrite refuse, SC-009 memory-mode content omitted from snapshot/restore empty in `crates/conformance/tests/snapshot_pitr.rs`
+- [X] T045 [P] [US4] Add conformance SC-007 missing key fails naming the reference, SC-008 overwrite refuse, SC-009 memory-mode content omitted from snapshot/restore empty in `crates/conformance/tests/snapshot_pitr.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T046 [P] [US4] Implement `SnapshotManifest` (`snapshot_id`, `scope` container\|namespace, `positions { drive_id: lsn }`, `containers`, `key_refs`, `format_major`) in `crates/backup/src/manifest.rs` per [data-model.md](data-model.md); magic `SNP1` major 1
-- [ ] T047 [US4] Implement `SnapshotService` in `crates/backup/src/snapshot.rs`: record per-drive LSN **without** pausing other drives; hardlink/copy persistent/hybrid SSTables; include definitions/options of every in-scope container; **omit memory-mode content**; pin WAL/SSTables for PITR; artifact under `{data_dir}/snapshots/<snapshot_id>/`
-- [ ] T048 [US4] Implement `PitrTarget` (`positions` \| `hlc`) and mapping in `crates/backup/src/pitr.rs` per [contracts/pitr.md](contracts/pitr.md); fail whole job if any involved drive cannot map; never apply past last durable ack; TTL event-time / wall clock are not PITR clocks
-- [ ] T049 [US4] Implement `RestoreService` in `crates/backup/src/restore.rs`: same-cluster and new-cluster fill; refuse while dest has content unless `confirm_drop=true`; after drop/empty fill names; accept specified key ref; missing key fails naming reference; cross-namespace requires admin (`014`)
-- [ ] T050 [US4] Encrypt snapshot files with same key references as source containers (`014`) in `crates/backup/src/snapshot.rs`; document unrestorable encrypted data when keys lost
-- [ ] T051 [US4] Expose library APIs for `010` to store the **position map** (not a single LSN) from `crates/backup/src/lib.rs`; in first-binary profile, admin `snapshot`/`restore`/`snapshots` return `BackupSlice10Required` in `crates/admin-proto` / `crates/spacestorage` per [contracts/admin-cli.md](contracts/admin-cli.md); slice-10 wiring calls these APIs from `crates/migrate` without a second snapshot format
+- [X] T046 [P] [US4] Implement `SnapshotManifest` (`snapshot_id`, `scope` container\|namespace, `positions { drive_id: lsn }`, `containers`, `key_refs`, `format_major`) in `crates/backup/src/manifest.rs` per [data-model.md](data-model.md); magic `SNP1` major 1
+- [X] T047 [US4] Implement `SnapshotService` in `crates/backup/src/snapshot.rs`: record per-drive LSN **without** pausing other drives; hardlink/copy persistent/hybrid SSTables; include definitions/options of every in-scope container; **omit memory-mode content**; pin WAL/SSTables for PITR; artifact under `{data_dir}/snapshots/<snapshot_id>/`
+- [X] T048 [US4] Implement `PitrTarget` (`positions` \| `hlc`) and mapping in `crates/backup/src/pitr.rs` per [contracts/pitr.md](contracts/pitr.md); fail whole job if any involved drive cannot map; never apply past last durable ack; TTL event-time / wall clock are not PITR clocks
+- [X] T049 [US4] Implement `RestoreService` in `crates/backup/src/restore.rs`: same-cluster and new-cluster fill; refuse while dest has content unless `confirm_drop=true`; after drop/empty fill names; accept specified key ref; missing key fails naming reference; cross-namespace requires admin (`014`)
+- [X] T050 [US4] Encrypt snapshot files with same key references as source containers (`014`) in `crates/backup/src/snapshot.rs`; document unrestorable encrypted data when keys lost
+- [X] T051 [US4] Expose library APIs for `010` to store the **position map** (not a single LSN) from `crates/backup/src/lib.rs`; in first-binary profile, admin `snapshot`/`restore`/`snapshots` return `BackupSlice10Required` in `crates/admin-proto` / `crates/spacestorage` per [contracts/admin-cli.md](contracts/admin-cli.md); slice-10 wiring calls these APIs from `crates/migrate` without a second snapshot format
 - [ ] T052 [P] [US4] Add HTTP `/v1/storage`, `/v1/wal` (slice 2) and stub `/v1/snapshots` (slice 10) in `crates/admin-proto` / `crates/node` matching CLI verbs
 
 **Checkpoint**: Snapshot manifests carry independent per-drive positions; memory content absent; PITR HLC map fail-closed; restore overwrite refused without confirm-drop; missing key named. Operator backup jobs may wait for slice 10.
@@ -161,7 +161,7 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 **Purpose**: Docs, profile flags, quickstart validation, release-profile slice markers
 
 - [ ] T053 [P] Document durability/restore operator procedures and quickstart walkthrough in `docs/` linking [quickstart.md](quickstart.md) (SC-001–SC-009 commands)
-- [ ] T054 Mark slice 2 (WAL+restore) required and slice 10 (operator snapshot jobs) deferred in `crates/release-profile` per research R14 / `016`
+- [X] T054 Mark slice 2 (WAL+restore) required and slice 10 (operator snapshot jobs) deferred in `crates/release-profile` per research R14 / `016`
 - [ ] T055 [P] Ensure `storage.sync none` is rejected at startup for persistent/hybrid outside tests across `crates/config` + `crates/node` using [contracts/fixtures/invalid/sync-none.conf](contracts/fixtures/invalid/)
 - [ ] T056 Run [quickstart.md](quickstart.md) validation end-to-end via `crates/conformance/tests/{durability_ack,recovery_boot,disk_full,format_version,tombstones,snapshot_pitr}.rs` (`cargo test -p spacestorage-conformance`) and fix gaps
 - [ ] T057 [P] Confirm no `08` series renamed and job labels match [contracts/jobs.md](contracts/jobs.md) / [contracts/metrics.md](contracts/metrics.md) in metrics registration code

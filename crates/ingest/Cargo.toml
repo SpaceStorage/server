@@ -1,0 +1,33 @@
+[package]
+name = "spacestorage-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Kafka and syslog ingest into Log Stream (009)"
+publish = false
+
+[features]
+default = []
+# Slice 11: Kafka consumer + syslog handler.
+ingest = []
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+parking_lot = { workspace = true }
+async-trait = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+# Pure-Rust Kafka framing (no librdkafka / OpenSSL).
+kafka-protocol = { version = "0.14", default-features = false }
+spacestorage-observability = { path = "../observability" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

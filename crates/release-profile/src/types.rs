@@ -12,6 +12,10 @@ impl TypeRequirement {
         match profile {
             ReleaseProfile::FirstBinary
             | ReleaseProfile::HandlersComplete
+            | ReleaseProfile::ControlPlaneTenancyAuthz
+            | ReleaseProfile::QueryDistributed
+            | ReleaseProfile::ObservabilityCatalog
+            | ReleaseProfile::MigrationBackup
             | ReleaseProfile::CompleteProduct => Self {
                 required_creatable_l3: &["K/V Store", "Relational Table", "Document Store"],
             },

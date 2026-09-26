@@ -17,7 +17,6 @@ use spacestorage_handler_webdav::{SessionState as DavSession, WebDavReply, dispa
 use spacestorage_release_profile::{HandlerBuildSet, ReleaseProfile};
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
 
 #[test]
 fn hc_profile_requires_remaining_handlers() {
@@ -199,9 +198,26 @@ fn classify_must_not_before_ir_named_codes() {
 
 #[test]
 fn handshake_mismatch_refuse_under_one_second() {
-    // Signature mismatch is owned by 002 protocol-core; here we assert the
-    // classify refuse path for a wrong-protocol verb completes quickly.
+    use spacestorage_protocol_core::{detect_signature, ProtocolFamily, SignatureMatch};
+    use std::time::{Duration, Instant};
+
     let start = Instant::now();
+    let cases = [
+        (ProtocolFamily::Cassandra, &b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"[..]),
+        (ProtocolFamily::S3, &b"*1\r\n$4\r\nPING\r\n"[..]),
+        (ProtocolFamily::WebDav, &b"\x04\x00\x00\x01\x05\x00\x00\x00\x00"[..]),
+        (ProtocolFamily::ClickHouseNative, &b"GET / HTTP/1.1\r\n\r\n"[..]),
+        (ProtocolFamily::Elasticsearch, &b"*1\r\n$4\r\nPING\r\n"[..]),
+        (ProtocolFamily::Redis, &b"GET / HTTP/1.1\r\n\r\n"[..]),
+        (ProtocolFamily::Postgresql, &b"GET / HTTP/1.1\r\n\r\n"[..]),
+    ];
+    for (fam, bytes) in cases {
+        assert!(
+            matches!(detect_signature(fam, bytes), SignatureMatch::Mismatch { .. }),
+            "{fam:?} should mismatch"
+        );
+    }
+    // classify refuse path still completes quickly
     let _ = classify_outcome(
         DialectProfile::HandlersComplete,
         ProtocolId::Cassandra,

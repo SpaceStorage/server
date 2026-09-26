@@ -33,6 +33,7 @@ flowchart TB
 | Milestones | `docs/milestones/` | What shipped vs deferred (`still_owed`) |
 | Code | `crates/` | Implementation |
 | Gate | `cargo test -p spacestorage-conformance --features first-binary` | First-binary DoD signal |
+| Full product | `cargo test -p spacestorage-conformance --features complete-product` | Slices 1–11 merge gate |
 
 ## Slice ladder → specs
 
@@ -59,12 +60,12 @@ flowchart LR
 | 3 | `002` (postgresql dialect) | yes |
 | 4 | `002` (redis) + `015` K/V MUST | yes |
 | 5 | `011` → `012` → `004` | yes |
-| 6 | remaining `002` handlers at `015` MUST | deferred |
-| 7 | `006`, `007`, `014` full | deferred |
-| 8 | `005` | deferred |
-| 9 | `008` | deferred |
-| 10 | `010`, `013` snapshot/PITR | deferred |
-| 11 | `009` | deferred |
+| 6 | remaining `002` handlers at `015` MUST | milestoned (`002-handlers-complete`) |
+| 7 | `006`, `007`, `014` full | milestoned (`003-control-plane-tenancy-authz`) |
+| 8 | `005` | milestoned (`004-query-beyond-crud`) |
+| 9 | `008` | milestoned (`005-observability-catalog`) |
+| 10 | `010`, `013` snapshot/PITR | milestoned (`006-migration-backup`) |
+| 11 | `009` | milestoned (`007-complete-product`) |
 
 `016` selects and proves the 1–5 subset (release profile, ledger, starters, conformance). It does not own protocol/type/WAL/membership behavior.
 

@@ -121,6 +121,11 @@ mod tests {
             storage: StorageDecl::default(),
             limits: EffectiveLimits::built_in(),
             query: QueryDecl::default(),
+            metrics: crate::model::MetricsDecl::defaults(),
+            log_kafka: None,
+            log_syslog: None,
+            jobs: crate::model::JobsDecl::default(),
+        kafka_ingests: Vec::new(),
         }
     }
 

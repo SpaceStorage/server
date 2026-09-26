@@ -2,6 +2,7 @@
 
 mod dispatch;
 mod handler;
+mod sigv4;
 
 pub use dispatch::{S3Reply, SessionState, dispatch};
 pub use handler::S3Handler;

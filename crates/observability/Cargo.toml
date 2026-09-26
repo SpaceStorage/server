@@ -4,11 +4,26 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Metrics (008)"
+description = "Metrics registry, Prometheus/OTLP exposition, outbound logs (008)"
 publish = false
+
+[features]
+default = []
+# Slice 9: tenant scrape, OTLP, Kafka, syslog.
+slice9 = []
+otel = ["slice9"]
+kafka = ["slice9"]
 
 [dependencies]
 tokio = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+bytes = { workspace = true }
+parking_lot = { workspace = true }
+axum = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

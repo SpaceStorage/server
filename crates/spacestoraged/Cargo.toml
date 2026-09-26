@@ -14,7 +14,10 @@ path = "src/main.rs"
 default = ["first-binary"]
 first-binary = []
 handlers-complete = ["spacestorage-node/handlers-complete"]
-complete-product = ["handlers-complete"]
+complete-product = [
+    "handlers-complete",
+    "spacestorage-node/complete-product",
+]
 
 [dependencies]
 spacestorage-config = { path = "../config" }

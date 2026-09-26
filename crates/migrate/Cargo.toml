@@ -1,0 +1,34 @@
+[package]
+name = "spacestorage-migrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Data migration, transforms, backup/restore jobs (010)"
+publish = false
+
+[features]
+default = []
+# Slice 10: live migrate / transform / backup orchestration.
+migrate = []
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+parking_lot = { workspace = true }
+async-trait = { workspace = true }
+spacestorage-types = { path = "../types" }
+spacestorage-authz = { path = "../authz" }
+spacestorage-backup = { path = "../backup" }
+spacestorage-storage = { path = "../storage" }
+spacestorage-placement = { path = "../placement" }
+spacestorage-observability = { path = "../observability" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

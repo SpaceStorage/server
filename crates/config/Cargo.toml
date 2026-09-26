@@ -6,6 +6,15 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = []
+# Slice 7: allow `controller_exclusive_data on` at validate.
+controlplane-ops = []
+# Slice 10: default `jobs.enabled on` when block present.
+migration-backup = []
+# Slice 11: allow UI/ingest config (otherwise first-binary rejects).
+complete-product = []
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

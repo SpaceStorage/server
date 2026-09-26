@@ -8,6 +8,14 @@ pub enum ReleaseProfile {
     FirstBinary,
     /// Slice-6 gate: all eight protocol handlers at `015` HandlersComplete MUST.
     HandlersComplete,
+    /// Slice-7 gate: Raft control plane, tenancy quotas, full authz vocabulary.
+    ControlPlaneTenancyAuthz,
+    /// Slice-8 gate: query beyond CRUD (`query-distributed`).
+    QueryDistributed,
+    /// Slice-9 gate: full `008` metrics catalog on `/metrics`.
+    ObservabilityCatalog,
+    /// Slice-10 gate: migration/transforms + backup/PITR.
+    MigrationBackup,
     CompleteProduct,
 }
 
@@ -16,6 +24,10 @@ impl ReleaseProfile {
         match self {
             Self::FirstBinary => "first-binary",
             Self::HandlersComplete => "handlers-complete",
+            Self::ControlPlaneTenancyAuthz => "control-plane-tenancy-authz",
+            Self::QueryDistributed => "query-distributed",
+            Self::ObservabilityCatalog => "observability-catalog",
+            Self::MigrationBackup => "migration-backup",
             Self::CompleteProduct => "complete-product",
         }
     }
@@ -24,6 +36,10 @@ impl ReleaseProfile {
         match s {
             "first-binary" => Some(Self::FirstBinary),
             "handlers-complete" => Some(Self::HandlersComplete),
+            "control-plane-tenancy-authz" => Some(Self::ControlPlaneTenancyAuthz),
+            "query-distributed" | "query-beyond-crud" => Some(Self::QueryDistributed),
+            "observability-catalog" | "observability" => Some(Self::ObservabilityCatalog),
+            "migration-backup" | "migrate" => Some(Self::MigrationBackup),
             "complete-product" => Some(Self::CompleteProduct),
             _ => None,
         }
@@ -42,6 +58,10 @@ impl ReleaseProfile {
         match self {
             Self::FirstBinary => 5,
             Self::HandlersComplete => 6,
+            Self::ControlPlaneTenancyAuthz => 7,
+            Self::QueryDistributed => 8,
+            Self::ObservabilityCatalog => 9,
+            Self::MigrationBackup => 10,
             Self::CompleteProduct => 11,
         }
     }
@@ -51,7 +71,12 @@ impl ReleaseProfile {
         match self {
             Self::FirstBinary => "first-binary",
             Self::HandlersComplete => "handlers-complete",
-            Self::CompleteProduct => "complete-product",
+            // Slice 7 does not expand dialect; keep HC dialect name for compat mapping.
+            Self::ControlPlaneTenancyAuthz => "handlers-complete",
+            Self::QueryDistributed
+            | Self::ObservabilityCatalog
+            | Self::MigrationBackup
+            | Self::CompleteProduct => "complete-product",
         }
     }
 }

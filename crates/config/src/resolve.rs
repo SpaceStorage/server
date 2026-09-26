@@ -1,8 +1,9 @@
 use crate::ast::{Arg, Document, Item};
 use crate::error::{ConfigError, ErrorCode};
 use crate::model::{
-    ClusterDecl, DriveDecl, EntrypointDecl, KeysDecl, NodeConfig, QueryDecl, QueryDefaults,
-    StorageDecl, TlsDecl, Transport,
+    ClusterDecl, DriveDecl, EntrypointDecl, JobsDecl, KafkaIngestDecl, KeysDecl, LogKafkaDecl,
+    LogSyslogDecl, MetricsDecl, NodeConfig, QueryDecl, QueryDefaults, StorageDecl, SyslogIngestDecl,
+    TlsDecl, Transport,
 };
 use spacestorage_compat::{EffectiveLimits, Limits};
 use std::collections::BTreeMap;
@@ -33,6 +34,11 @@ pub fn resolve(
         storage: StorageDecl::default(),
         limits: EffectiveLimits::built_in(),
         query: QueryDecl::default(),
+        metrics: MetricsDecl::defaults(),
+        log_kafka: None,
+        log_syslog: None,
+        jobs: JobsDecl::default(),
+        kafka_ingests: Vec::new(),
     };
 
     for item in &doc.items {
@@ -116,8 +122,8 @@ pub fn resolve(
                 }
                 "log" => {
                     for it in &b.items {
-                        if let Item::Directive(d) = it {
-                            match d.name.as_str() {
+                        match it {
+                            Item::Directive(d) => match d.name.as_str() {
                                 "level" => {
                                     if let Some(a) = d.args.first() {
                                         cfg.log_level = a.as_str();
@@ -129,7 +135,126 @@ pub fn resolve(
                                     }
                                 }
                                 _ => {}
+                            },
+                            Item::Block(sb) if sb.name == "kafka" => {
+                                let mut brokers = Vec::new();
+                                let mut topic = String::new();
+                                for sit in &sb.items {
+                                    if let Item::Directive(d) = sit {
+                                        match d.name.as_str() {
+                                            "brokers" => {
+                                                brokers = d
+                                                    .args
+                                                    .iter()
+                                                    .map(|a| a.as_str())
+                                                    .filter(|s| !s.is_empty())
+                                                    .collect();
+                                            }
+                                            "topic" => {
+                                                if let Some(a) = d.args.first() {
+                                                    topic = a.as_str();
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                cfg.log_kafka = Some(LogKafkaDecl { brokers, topic });
                             }
+                            Item::Block(sb) if sb.name == "syslog" => {
+                                let mut address = String::new();
+                                let mut transport = "udp".into();
+                                for sit in &sb.items {
+                                    if let Item::Directive(d) = sit {
+                                        match d.name.as_str() {
+                                            "address" => {
+                                                if let Some(a) = d.args.first() {
+                                                    address = a.as_str();
+                                                }
+                                            }
+                                            "transport" => {
+                                                if let Some(a) = d.args.first() {
+                                                    transport = a.as_str();
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                cfg.log_syslog = Some(LogSyslogDecl { address, transport });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "metrics" => {
+                    cfg.metrics = MetricsDecl::defaults();
+                    for it in &b.items {
+                        match it {
+                            Item::Directive(d) if d.name == "audit_log" => {
+                                if let Some(a) = d.args.first() {
+                                    let v = a.as_str();
+                                    cfg.metrics.audit_log = v == "on" || v == "true" || v == "1";
+                                }
+                            }
+                            Item::Block(sb) if sb.name == "otel" => {
+                                for sit in &sb.items {
+                                    if let Item::Directive(d) = sit {
+                                        match d.name.as_str() {
+                                            "endpoint" => {
+                                                if let Some(a) = d.args.first() {
+                                                    cfg.metrics.otel_endpoint = Some(a.as_str());
+                                                }
+                                            }
+                                            "interval" => {
+                                                if let Some(a) = d.args.first() {
+                                                    let s = a.as_str();
+                                                    if let Ok(secs) =
+                                                        s.trim_end_matches('s').parse::<u64>()
+                                                    {
+                                                        cfg.metrics.otel_interval =
+                                                            Some(Duration::from_secs(secs));
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            Item::Block(sb) if sb.name == "slow_query" => {
+                                for sit in &sb.items {
+                                    if let Item::Directive(d) = sit {
+                                        match d.name.as_str() {
+                                            "enabled" => {
+                                                if let Some(a) = d.args.first() {
+                                                    let v = a.as_str();
+                                                    cfg.metrics.slow_query_enabled =
+                                                        v == "on" || v == "true" || v == "1";
+                                                }
+                                            }
+                                            "threshold" => {
+                                                if let Some(a) = d.args.first() {
+                                                    let s = a.as_str();
+                                                    if let Ok(secs) =
+                                                        s.trim_end_matches('s').parse::<u64>()
+                                                    {
+                                                        cfg.metrics.slow_query_threshold =
+                                                            Duration::from_secs(secs.max(1));
+                                                    } else if let Some(Arg::Number(n)) =
+                                                        d.args.first()
+                                                    {
+                                                        cfg.metrics.slow_query_threshold =
+                                                            Duration::from_secs(*n);
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -156,6 +281,7 @@ pub fn resolve(
                         handler: String::new(),
                         transport: Transport::Undeclared,
                         tls: None,
+                        ingest: None,
                     };
                     let mut handler_count = 0u32;
                     for it in &b.items {
@@ -203,6 +329,38 @@ pub fn resolve(
                                         key: k,
                                     });
                                 }
+                            }
+                            Item::Block(ib) if ib.name == "ingest" => {
+                                let mut ns = String::new();
+                                let mut container = String::new();
+                                let mut type_name = "log_stream".into();
+                                for iit in &ib.items {
+                                    if let Item::Directive(d) = iit {
+                                        match d.name.as_str() {
+                                            "namespace" => {
+                                                if let Some(a) = d.args.first() {
+                                                    ns = a.as_str();
+                                                }
+                                            }
+                                            "container" => {
+                                                if let Some(a) = d.args.first() {
+                                                    container = a.as_str();
+                                                }
+                                            }
+                                            "type" => {
+                                                if let Some(a) = d.args.first() {
+                                                    type_name = a.as_str();
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                ep.ingest = Some(SyslogIngestDecl {
+                                    namespace: ns,
+                                    container,
+                                    type_name,
+                                });
                             }
                             _ => {}
                         }
@@ -296,6 +454,16 @@ pub fn resolve(
                                         }
                                         _ => {}
                                     },
+                                    "controller_exclusive_data" => {
+                                        let on = d
+                                            .args
+                                            .first()
+                                            .map(|a| {
+                                                matches!(a.as_str().as_str(), "on" | "true" | "1")
+                                            })
+                                            .unwrap_or(true);
+                                        cfg.cluster.controller_exclusive_data = on;
+                                    }
                                     _ => {}
                                 }
                             }
@@ -331,7 +499,64 @@ pub fn resolve(
                                     cfg.cluster.seeds.push(seed);
                                 }
                             }
+                            Item::Block(sb) if sb.name == "raft" => {
+                                for sit in &sb.items {
+                                    if let Item::Directive(sd) = sit {
+                                        match sd.name.as_str() {
+                                            "heartbeat" => {
+                                                if let Some(Arg::DurationMs(ms)) = sd.args.first() {
+                                                    cfg.cluster.raft.heartbeat =
+                                                        Duration::from_millis(*ms);
+                                                } else if let Some(Arg::Number(n)) = sd.args.first()
+                                                {
+                                                    cfg.cluster.raft.heartbeat =
+                                                        Duration::from_millis(*n);
+                                                }
+                                            }
+                                            "election_timeout" => {
+                                                if let Some(Arg::DurationMs(ms)) = sd.args.first() {
+                                                    cfg.cluster.raft.election_timeout =
+                                                        Duration::from_millis(*ms);
+                                                } else if let Some(Arg::Number(n)) = sd.args.first()
+                                                {
+                                                    cfg.cluster.raft.election_timeout =
+                                                        Duration::from_secs(*n);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
                             Item::Block(_) => {}
+                        }
+                    }
+                    // Validate raft timeouts after cluster block.
+                    if cfg.cluster.raft.heartbeat.is_zero()
+                        || cfg.cluster.raft.election_timeout.is_zero()
+                        || cfg.cluster.raft.election_timeout <= cfg.cluster.raft.heartbeat
+                    {
+                        errors.push(ConfigError::new(
+                            file,
+                            b.line,
+                            b.col,
+                            "cluster.raft",
+                            ErrorCode::RaftTimeoutInvalid,
+                            "election_timeout must be > heartbeat and both must be > 0",
+                        ));
+                    }
+                    if cfg.cluster.controller_exclusive_data {
+                        // First-binary / without controlplane-ops: refuse at validate.
+                        #[cfg(not(feature = "controlplane-ops"))]
+                        {
+                            errors.push(ConfigError::new(
+                                file,
+                                b.line,
+                                b.col,
+                                "cluster.controller_exclusive_data",
+                                ErrorCode::Slice7Required,
+                                "controller_exclusive_data on requires controlplane-ops (slice 7)",
+                            ));
                         }
                     }
                 }
@@ -454,11 +679,25 @@ pub fn resolve(
                                         Some(s) if s == "off" || s == "false" => {
                                             cfg.query.spill = Some(false);
                                         }
-                                        // bare `spill;` → on
                                         None if d.args.is_empty() => {
                                             cfg.query.spill = Some(true);
                                         }
-                                        _ => {}
+                                        Some(_) => {
+                                            errors.push(ConfigError::new(
+                                                file,
+                                                d.line,
+                                                d.col,
+                                                "query.spill",
+                                                ErrorCode::QuerySpillUnknown,
+                                                "query_spill_unknown",
+                                            ));
+                                        }
+                                        None => {}
+                                    }
+                                }
+                                "default_concurrency" => {
+                                    if let Some(Arg::Number(n)) = d.args.first() {
+                                        cfg.query.default_concurrency = Some(*n as u16);
                                     }
                                 }
                                 _ => {}
@@ -600,7 +839,97 @@ pub fn resolve(
                     }
                 }
                 // reserved foreign blocks accepted for first-binary fixtures / later features
-                "labels" | "memory" | "namespace" | "metrics" | "ingest" | "replication" | "types" => {}
+                "labels" | "memory" | "namespace" | "replication" | "types" => {}
+                "ingest" => {
+                    // `ingest kafka NAME { … }` — block name is ingest, first arg may be "kafka"
+                    let kind = b.args.first().map(|a| a.as_str()).unwrap_or_default();
+                    if kind == "kafka" {
+                        let mut decl = KafkaIngestDecl {
+                            name: b.args.get(1).map(|a| a.as_str()).unwrap_or_default(),
+                            ..KafkaIngestDecl::default()
+                        };
+                        for it in &b.items {
+                            match it {
+                                Item::Directive(d) => match d.name.as_str() {
+                                    "namespace" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.namespace = a.as_str();
+                                        }
+                                    }
+                                    "container" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.container = a.as_str();
+                                        }
+                                    }
+                                    "type" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.type_name = a.as_str();
+                                        }
+                                    }
+                                    "format" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.format = a.as_str();
+                                        }
+                                    }
+                                    "brokers" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.brokers.push(a.as_str());
+                                        }
+                                    }
+                                    "topic" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.topic = a.as_str();
+                                        }
+                                    }
+                                    "group" => {
+                                        if let Some(a) = d.args.first() {
+                                            decl.group = a.as_str();
+                                        }
+                                    }
+                                    "plaintext" => decl.plaintext = true,
+                                    _ => {}
+                                },
+                                Item::Block(tb) if tb.name == "tls" => {
+                                    decl.plaintext = false;
+                                }
+                                _ => {}
+                            }
+                        }
+                        cfg.kafka_ingests.push(decl);
+                    }
+                }
+                "jobs" => {
+                    cfg.jobs = JobsDecl::default();
+                    // Slice-10 compile default: enabled on when migration-backup feature is selected
+                    // at process start; config can still flip explicitly.
+                    #[cfg(feature = "migration-backup")]
+                    {
+                        cfg.jobs.enabled = true;
+                    }
+                    for it in &b.items {
+                        if let Item::Directive(d) = it {
+                            match d.name.as_str() {
+                                "enabled" => {
+                                    if let Some(a) = d.args.first() {
+                                        let v = a.as_str();
+                                        cfg.jobs.enabled =
+                                            v == "on" || v == "true" || v == "1";
+                                    }
+                                }
+                                "catchup_concurrency" => {
+                                    if let Some(Arg::Number(n)) = d.args.first() {
+                                        cfg.jobs.catchup_concurrency = (*n).max(1) as u32;
+                                    } else if let Some(a) = d.args.first() {
+                                        if let Ok(n) = a.as_str().parse::<u32>() {
+                                            cfg.jobs.catchup_concurrency = n.max(1);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 other => {
                     errors.push(ConfigError::new(
                         file,

@@ -75,6 +75,39 @@ fn refuse(verb: &str, err: CompatError) -> S3Reply {
     }
 }
 
+pub fn put_object_bytes(
+    session: &mut SessionState,
+    bucket: &str,
+    key: &str,
+    body: Vec<u8>,
+) -> S3Reply {
+    let id = match session.ensure_bucket(bucket) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+    let mut cat = session.catalog.write().expect("catalog");
+    match cat.put(id, key, body) {
+        Ok(()) => S3Reply::Ok,
+        Err(e) => S3Reply::Error {
+            code: "InternalError".into(),
+            message: format!("{e:?}"),
+        },
+    }
+}
+
+pub fn upload_part_bytes(session: &mut SessionState, upload_id: &str, body: Vec<u8>) -> S3Reply {
+    match session.multipart.get_mut(upload_id) {
+        Some((_, _, parts)) => {
+            parts.push(body);
+            S3Reply::Ok
+        }
+        None => S3Reply::Error {
+            code: "NoSuchUpload".into(),
+            message: upload_id.into(),
+        },
+    }
+}
+
 pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Reply {
     let upper = verb.to_ascii_uppercase().replace('-', "_");
     match classify_outcome(session.profile, ProtocolId::S3, &upper) {
@@ -105,18 +138,7 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Repl
             let bucket = args.first().copied().unwrap_or("bucket");
             let key = args.get(1).copied().unwrap_or("key");
             let body = args.get(2).copied().unwrap_or("").as_bytes().to_vec();
-            let id = match session.ensure_bucket(bucket) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.put(id, key, body) {
-                Ok(()) => S3Reply::Ok,
-                Err(e) => S3Reply::Error {
-                    code: "InternalError".into(),
-                    message: format!("{e:?}"),
-                },
-            }
+            put_object_bytes(session, bucket, key, body)
         }
         "GETOBJECT" | "HEADOBJECT" => {
             let bucket = args.first().copied().unwrap_or("bucket");
@@ -196,16 +218,7 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Repl
         "UPLOADPART" => {
             let upload_id = args.first().copied().unwrap_or("");
             let body = args.get(1).copied().unwrap_or("").as_bytes().to_vec();
-            match session.multipart.get_mut(upload_id) {
-                Some((_, _, parts)) => {
-                    parts.push(body);
-                    S3Reply::Ok
-                }
-                None => S3Reply::Error {
-                    code: "NoSuchUpload".into(),
-                    message: upload_id.into(),
-                },
-            }
+            upload_part_bytes(session, upload_id, body)
         }
         "COMPLETEMULTIPARTUPLOAD" => {
             let upload_id = args.first().copied().unwrap_or("");

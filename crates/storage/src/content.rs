@@ -143,4 +143,59 @@ impl ContentStore {
             self.hybrid_hot.remove(&id);
         }
     }
+
+    /// True when the container has any durable (non-memory) rows.
+    pub fn has_content(&self, container_id: Uuid) -> bool {
+        if matches!(self.mode(container_id), StorageMode::Memory) {
+            return false;
+        }
+        self.len(container_id) > 0
+    }
+
+    /// Export persistent/hybrid durable rows (memory-mode → empty).
+    pub fn export_durable(&self, container_id: Uuid) -> HashMap<Vec<u8>, Vec<u8>> {
+        if matches!(self.mode(container_id), StorageMode::Memory) {
+            return HashMap::new();
+        }
+        self.rows
+            .get(&container_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Replace durable rows for a container (used by restore-fill).
+    pub fn replace_durable(
+        &mut self,
+        container_id: Uuid,
+        mode: StorageMode,
+        rows: HashMap<Vec<u8>, Vec<u8>>,
+    ) {
+        self.register_mode(container_id, mode);
+        if matches!(mode, StorageMode::Memory) {
+            self.rows.insert(container_id, HashMap::new());
+            self.hybrid_hot.remove(&container_id);
+            return;
+        }
+        self.rows.insert(container_id, rows.clone());
+        if matches!(mode, StorageMode::Hybrid) {
+            self.hybrid_hot.insert(container_id, rows);
+        } else {
+            self.hybrid_hot.remove(&container_id);
+        }
+        self.unavailable.remove(&container_id);
+    }
+
+    /// Drop all durable content for a container (confirm_drop path).
+    pub fn clear_content(&mut self, container_id: Uuid) {
+        if let Some(m) = self.rows.get_mut(&container_id) {
+            m.clear();
+        }
+        if let Some(m) = self.hybrid_hot.get_mut(&container_id) {
+            m.clear();
+        }
+    }
+
+    pub fn registered_ids(&self) -> Vec<Uuid> {
+        self.modes.keys().copied().collect()
+    }
 }

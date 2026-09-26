@@ -2,6 +2,7 @@
 
 mod dispatch;
 mod handler;
+mod router;
 
 pub use dispatch::{EsReply, SessionState, dispatch};
 pub use handler::ElasticsearchHandler;

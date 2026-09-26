@@ -7,9 +7,15 @@ rust-version.workspace = true
 description = "PostgreSQL protocol handler (002 first-binary)"
 publish = false
 
+[features]
+default = []
+query-distributed = ["spacestorage-query/query-distributed"]
+
 [dependencies]
 spacestorage-compat = { path = "../compat" }
 spacestorage-types = { path = "../types" }
+spacestorage-protocol-core = { path = "../protocol-core" }
+spacestorage-query = { path = "../query" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
