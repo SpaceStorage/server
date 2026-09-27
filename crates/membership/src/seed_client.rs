@@ -169,6 +169,7 @@ mod tests {
             presented_secret: secret.clone(),
             join_token: None,
             replace_of: None,
+            product_version: 1,
         };
         let ack = contact_seeds(&seeds, &secret, &req).await.unwrap();
         assert_eq!(ack, JoinAck::Pending);

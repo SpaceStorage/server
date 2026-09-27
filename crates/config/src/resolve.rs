@@ -707,8 +707,8 @@ pub fn resolve(
                 }
                 "keys" => {
                     for it in &b.items {
-                        if let Item::Directive(d) = it {
-                            match d.name.as_str() {
+                        match it {
+                            Item::Directive(d) => match d.name.as_str() {
                                 "master_key_file" => {
                                     cfg.keys.master_key_file = d.args.first().map(|a| a.as_str());
                                 }
@@ -726,7 +726,40 @@ pub fn resolve(
                                     ));
                                 }
                                 _ => {}
+                            },
+                            Item::Block(inner) if inner.name == "external_kms" => {
+                                let mut endpoint = String::new();
+                                let mut key_name = String::new();
+                                let mut token = String::new();
+                                for sit in &inner.items {
+                                    if let Item::Directive(sd) = sit {
+                                        match sd.name.as_str() {
+                                            "endpoint" => {
+                                                if let Some(a) = sd.args.first() {
+                                                    endpoint = a.as_str();
+                                                }
+                                            }
+                                            "key_name" => {
+                                                if let Some(a) = sd.args.first() {
+                                                    key_name = a.as_str();
+                                                }
+                                            }
+                                            "token" => {
+                                                if let Some(a) = sd.args.first() {
+                                                    token = a.as_str();
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                cfg.keys.external_kms = Some(crate::model::ExternalKmsDecl {
+                                    endpoint,
+                                    key_name,
+                                    token,
+                                });
                             }
+                            _ => {}
                         }
                     }
                 }

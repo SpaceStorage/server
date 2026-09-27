@@ -1,0 +1,15 @@
+slug: full-product
+profile: complete-product
+tag: full-product-v1-2026-09-27
+parents: [007-complete-product, 008-later-not-first]
+implemented_tracks: [1, 2, 3]
+pending_tracks: []
+deferred_nongoals:
+  - invoicing
+  - multi-process-operator-orchestration-beyond-harness
+  - ui-session-polish-residuals
+  - wal-kill-reboot-edge-beyond-redis-gate
+  - new-slice-dod-debt
+  - auto-bootstrap-controlplane-on-every-membership-start
+changelog_ref: docs/milestones/009-full-product.md
+merge_gate: "cargo test -p spacestorage-conformance --features complete-product"

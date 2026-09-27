@@ -46,13 +46,15 @@ Tip milestone [`docs/milestones/007-complete-product`](docs/milestones/007-compl
 
 - WAL kill→reboot→re-read of client content; PostgreSQL Document Store blob gate (alongside Redis G11)
 - UI `/ui/*` real `014` session auth (vs interim bearer→cluster-admin)
-- Multi-node openraft peer RPC over internodes (single-voter `Raft::new` path landed; remote network still stubbed)
+
+Multi-node openraft peer RPC over internodes: **done** — see [`docs/milestones/008-later-not-first`](docs/milestones/008-later-not-first.md). Intent “later, not first” product surfaces (L0 workflow, planetary compositions, external KMS, N/N+1 join window, billing formula, legal-hold/erase, named CDC) also recorded there.
 
 Out of scope for residual passes unless explicitly requested: inventing new slice DoD debt.
 
 ## Status discipline
 
-- Tip ledger: slices 1–11 **closed**; `cargo test -p spacestorage-conformance --features complete-product` is the full-matrix merge gate.
+- Tip ledger: slices 1–11 **closed**; full-v1 tip [`docs/milestones/009-full-product`](docs/milestones/009-full-product.md).
+- `cargo test -p spacestorage-conformance --features complete-product` is the full-matrix merge gate.
 - First-binary / handlers-complete profiles remain regression gates (`--features first-binary` / `handlers-complete`).
 - Prefer marking incomplete residuals accurately over marking tasks `[X]` early or claiming unpaid slices.
 
@@ -63,5 +65,5 @@ Out of scope for residual passes unless explicitly requested: inventing new slic
 | Principles | `.specify/memory/constitution.md` |
 | Intent | `.specify/intent/01`–`16` (`start` is the original dump) |
 | Specs / tasks | `specs/001`–`016/` |
-| Milestone ledger | `docs/milestones/` |
+| Milestone ledger | `docs/milestones/` (tip: `009-full-product`) |
 | Context graph | `docs/agent-context-graph.md` (+ `.json`) |

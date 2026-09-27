@@ -1,14 +1,17 @@
 //! L3 type catalog — first-binary creatable models (003 MVP slice).
 //!
-//! Full L0–L4 inventory is deferred; this crate ships K/V Store, Relational
-//! Table, and Document Store with CRUD + `multi_active` refusal (T099 / US1).
+//! Complete-product surfaces also include L0 creatable workflows, L4 compositions,
+//! and named CDC (intent 16 later-not-first).
 
 pub mod ack;
 pub mod catalog;
+pub mod cdc;
+pub mod composition;
 pub mod definition;
 pub mod descriptor;
 pub mod error;
 pub mod ident;
+pub mod l0;
 pub mod schema;
 pub mod validate;
 
@@ -16,10 +19,16 @@ pub use ack::{AckKind, WriteAck};
 pub use catalog::{
     Catalog, ContainerCatalog, DurableCreateHook, DurablePutHook, TypeCatalog,
 };
+pub use cdc::{CdcCatalog, CdcEvent, CdcOp, CdcStream, CdcStreamSummary};
+pub use composition::{
+    Composition, CompositionCatalog, CompositionKind, CompositionMember, PlanetaryPlacement,
+    L4_COMPOSITIONS,
+};
 pub use definition::{ContainerDefinition, StorageModeChoice};
 pub use descriptor::{Kind, Level, TypeDescriptor};
 pub use error::TypeError;
 pub use ident::{new_container_id, ContainerId, ContainerName, NamespaceName};
+pub use l0::{L0Catalog, L0Container, L0ContainerSummary, L0CreateRequest, L0_CREATABLE, L0_NOT_CREATABLE};
 pub use schema::{ContainerSchema, Field, ValueDomain};
 pub use validate::{validate_definition, validate_schema_alter};
 

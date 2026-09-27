@@ -21,6 +21,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 hex = { workspace = true }
 spacestorage-internode = { path = "../internode" }
+spacestorage-compat = { path = "../compat" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

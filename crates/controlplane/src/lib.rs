@@ -21,9 +21,7 @@ use crate::cluster::{ClusterOp, ClusterState, MemberRecord, MemberStatus};
 use crate::error::{ControlPlaneError, Result};
 use crate::group::GroupId;
 use crate::membership::{first_binary_voter_set, MembershipOp, VoterSet};
-use crate::openraft_adapter::{
-    app_request_to_record, bootstrap_single_voter, start_raft, ControlRaft, RaftAppRequest,
-};
+use crate::openraft_adapter::{app_request_to_record, RaftAppRequest};
 use crate::raft_net::{InProcessRaftNet, RaftAppend, RaftRpc, RaftVote};
 use crate::raft_store::{RaftBody, RaftLogRecord, RaftStore};
 use crate::read::ReadIndex;
@@ -38,6 +36,11 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub use crate::error::{ControlPlaneError as Error, Result as CpResult};
+pub use crate::openraft_adapter::{
+    bootstrap_multi_voter, bootstrap_single_voter, dispatch_peer_rpc, mount_raft_handler_on_fabric,
+    start_raft, start_raft_peered, start_raft_peered_with_secret, wait_for_leader, ControlRaft,
+    PeerNetworkFactory, PeerRaftRegistry, RegistryRaftHandler, OPENRAFT_ACTIVE_PIN,
+};
 pub use crate::raft_store::RAFT_FORMAT_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

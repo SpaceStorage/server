@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod effective;
 pub mod entrypoint;
 pub mod handler;
+pub mod later_surfaces;
 pub mod lifecycle;
 pub mod logging;
 pub mod reload;
@@ -12,6 +13,7 @@ pub mod stats;
 use crate::buffer::BufferRegistry;
 use crate::effective::EffectiveStore;
 use crate::handler::{admin_http, admin_tcp, echo, fabric, postgresql, redis, HandlerRegistry};
+use crate::later_surfaces::LaterSurfaces;
 use crate::lifecycle::{NodeState, NodeStateMachine};
 use crate::stats::Stats;
 use arc_swap::ArcSwap;
@@ -57,6 +59,8 @@ pub struct Node {
     pub sessions: Arc<std::sync::RwLock<spacestorage_authz::SessionTokenStore>>,
     /// Kafka / syslog ingest (009 slice 11).
     pub ingest: Arc<spacestorage_ingest::IngestRuntime>,
+    /// Later-not-first product surfaces (L0, legal-hold, CDC, compositions, billing).
+    pub later: LaterSurfaces,
     /// Cancelled when drain begins — wakes `run` (does **not** stop accept loops).
     pub drain_started: CancellationToken,
     /// Cancelled to stop accept loops (after drain period, startup abort, or test shutdown).
@@ -200,6 +204,7 @@ impl Node {
             admin_ui,
             sessions,
             ingest,
+            later: LaterSurfaces::new(),
             drain_started: CancellationToken::new(),
             cancel: CancellationToken::new(),
             force_cancel: CancellationToken::new(),

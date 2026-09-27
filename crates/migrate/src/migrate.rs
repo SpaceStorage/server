@@ -7,7 +7,9 @@ use crate::job::{JobKind, JobRecord, JobStatus, Strategy};
 use crate::quota::QuotaView;
 use crate::store::JobStore;
 use serde::{Deserialize, Serialize};
-use spacestorage_storage::{ContentStore, StorageMode};
+use spacestorage_storage::{ContentStore, EraseRecord, EraseRequest, LegalError, LegalHoldStore, StorageMode};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -207,4 +209,12 @@ pub fn parse_migration_body(v: &serde_json::Value) -> Result<MigrationSpec, Migr
 
 pub fn kind_for_migration() -> JobKind {
     JobKind::DataMigration
+}
+
+/// GDPR erase through the migrate orchestration seam — legal-hold gate first.
+pub fn erase_with_legal(
+    store: &Arc<Mutex<LegalHoldStore>>,
+    req: EraseRequest,
+) -> Result<EraseRecord, LegalError> {
+    store.lock().erase(req)
 }

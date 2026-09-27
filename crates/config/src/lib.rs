@@ -10,7 +10,9 @@ pub mod resolve;
 pub mod validate;
 
 pub use error::{ConfigError, ErrorCode};
-pub use model::{buffer_spec, NodeConfig, BUILTIN_BUFFERS};
+pub use model::{
+    buffer_spec, ExternalKmsDecl, NodeConfig, BUILTIN_BUFFERS,
+};
 pub use reload_class::{ConfigDiff, ReloadClass};
 pub use validate::{parse_validate, ValidateOptions};
 

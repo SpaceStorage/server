@@ -175,6 +175,34 @@ async fn handle_control(
             .await;
         return;
     }
+    // 006: Raft peer RPCs (Vote/Append/Snapshot) — dispatch into openraft when mounted.
+    if let Some(kind) = spacestorage_internode::RaftRpcKind::from_msg_type(msg_type) {
+        if let Some(handler) = fabric.raft_handler() {
+            match handler.handle_raft(kind, payload).await {
+                Ok(resp_body) => {
+                    let _ = stream
+                        .write_all(&encode_frame(registry::MSG_ACK, &resp_body))
+                        .await;
+                }
+                Err(e) => {
+                    debug!(error = %e, "raft peer rpc failed");
+                    let err = format!(r#"{{"ok":false,"error":{}}}"#, serde_json::to_string(&e).unwrap_or_else(|_| "\"error\"".into()));
+                    let _ = stream
+                        .write_all(&encode_frame(registry::MSG_ACK, err.as_bytes()))
+                        .await;
+                }
+            }
+        } else {
+            // No control-plane mount yet: acknowledge wire framing only.
+            let _ = stream
+                .write_all(&encode_frame(
+                    registry::MSG_ACK,
+                    br#"{"ok":true,"raft":"accepted"}"#,
+                ))
+                .await;
+        }
+        return;
+    }
     if !registry::is_known(msg_type) {
         let _ = stream
             .write_all(&encode_frame(

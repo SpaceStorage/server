@@ -22,7 +22,9 @@ pub use mapping::{
     catalog_default, lower_to_logical_request, resolve_mapping, CatalogMapping, MappingQuery,
     MappingSource, MappingSpec,
 };
-pub use migrate::{ContainerRef, MigratePolicy, MigrateRunner, MigrationSpec};
+pub use migrate::{
+    erase_with_legal, ContainerRef, MigratePolicy, MigrateRunner, MigrationSpec,
+};
 pub use quota::QuotaView;
 pub use store::JobStore;
 pub use transform::{RewriteKind, TransformRunner, TransformSpec};

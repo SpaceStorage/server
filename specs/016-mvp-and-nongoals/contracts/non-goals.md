@@ -28,19 +28,19 @@ Remain in `01`–`15`. A 1–5 milestone lists them via deferred slices, not as 
 
 | Item | Slice / spec | Notes |
 |------|----------------|-------|
-| Remaining protocol handlers at `015` MUST | 6 | |
-| Raft control plane, quotas, full authz vocabulary | 7 | |
+| Remaining protocol handlers at `015` MUST | 6 | shipped in tip ladder |
+| Raft control plane, quotas, full authz vocabulary | 7 | shipped in tip ladder |
 | Query beyond CRUD | 8 | includes complete-product `BEGIN` |
 | Full `008` catalog live | 9 | series MAY appear earlier |
 | Migration/transforms, snapshot/PITR | 10 | |
 | Admin UIs and Kafka/syslog ingest | 11 / `009` | UIs MAY be deferred even later; spec `009` still applies to complete product |
-| Full L0 creatable-as-user-workflow | `003` | catalog + unit conformance MAY still test flags |
-| Federated / union / materialized view at planetary scale | `003` L4 / `004` | |
-| External KMS | `014` | master-key file is first binary |
-| Mixed-version N/N+1 upgrade | `015` | MAY land once format versions exist (`013`) |
-| Billing money formula | — | out of this repo; billing **metrics** remain `008` |
-| GDPR / legal-hold workflows | — | residency is labels + placement; erase is delete/tombstone/`010` |
-| CDC as a named product beyond Log Stream + WAL | — | |
+| Full L0 creatable-as-user-workflow | `003` | **library surface** in `types::l0` (008-later-not-first); admin/CLI verbs follow-on |
+| Federated / union / materialized view at planetary scale | `003` L4 / `004` | **library surface** in `types::composition` (008) |
+| External KMS | `014` | **provider path** `crypto::kms` (008); file remains first-binary default |
+| Mixed-version N/N+1 upgrade | `015` | **join window** refuse + `compat::upgrade` (008); full CP fixture follow-on |
+| Billing money formula | — | **in-repo** `observability::billing` (008); **invoicing** stays out of repo |
+| GDPR / legal-hold workflows | — | **product** `storage::legal_hold` (008); residency still labels+placement |
+| CDC as a named product beyond Log Stream + WAL | — | **named** `types::cdc` (008) |
 
 ## Explicitly out of this feature
 

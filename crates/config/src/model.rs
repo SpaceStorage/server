@@ -51,6 +51,16 @@ impl NodeConfig {
 pub struct KeysDecl {
     pub master_key_file: Option<String>,
     pub create_master_if_absent: bool,
+    /// External KMS (Vault-style) alternate master provider (014 FR-008).
+    pub external_kms: Option<ExternalKmsDecl>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternalKmsDecl {
+    pub endpoint: String,
+    pub key_name: String,
+    #[serde(default)]
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

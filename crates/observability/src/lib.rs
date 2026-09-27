@@ -4,6 +4,7 @@
 //! (013 T060 — provisional `spacestorage_wal_acks_total` retired).
 
 pub mod aggregation;
+pub mod billing;
 pub mod catalog;
 pub mod encode;
 pub mod filter;
@@ -16,6 +17,7 @@ pub mod sample;
 pub mod syslog;
 
 pub use aggregation::{merge_push, AggregationFreshness, AggregationStore};
+pub use billing::{estimate_charge, estimate_total, BillingRates, ChargeEstimate, UsageSnapshot};
 pub use catalog::{
     all_families, help_for, FamilyMeta, API_FAMILIES, BILLING_FAMILIES, COMM_FAMILIES,
     DATATYPE_FAMILIES, DURATION_BUCKETS, DURABILITY_FAMILIES, JOB_FAMILIES, JOB_NAMES,

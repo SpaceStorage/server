@@ -4,10 +4,15 @@ pub mod aead;
 pub mod envelope;
 pub mod key_authority;
 pub mod keyring_file;
+pub mod kms;
 pub mod master_file;
 
 pub use envelope::{AeadAlgorithm, DataKey, KekRecord};
 pub use key_authority::{EnvelopeAuthority, KeyAuthority, KeyError, SharedKeyAuthority};
+pub use kms::{
+    open_master_provider, ExternalKmsProvider, FileMasterProvider, KmsError, MasterProvider,
+    MasterProviderConfig,
+};
 pub use master_file::{MasterKey, MasterKeyError};
 
 #[cfg(test)]

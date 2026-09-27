@@ -22,7 +22,8 @@ pub use bootstrap::{bootstrap, BootstrapOutcome, BootstrapParams};
 pub use error::{MembershipError, Result};
 pub use events::{MemberStatus, MembershipEvent};
 pub use join::{
-    ack_with_epochs, admit_pending, handle_join, mint_token, JoinAck, JoinRequest, SeedEndpoint,
+    ack_with_epochs, admit_pending, handle_join, handle_join_with_version, mint_token, JoinAck,
+    JoinRequest, SeedEndpoint,
 };
 pub use metrics::MembershipMetrics;
 pub use view::{MemberRecord, MembershipView, PendingJoin};
@@ -395,6 +396,7 @@ impl MembershipService {
             presented_secret: secret.clone(),
             join_token,
             replace_of: None,
+            product_version: 1,
         };
         let ack = seed_client::contact_seeds(seeds, &secret, &req).await?;
         match &ack {
@@ -470,6 +472,7 @@ impl MembershipService {
             presented_secret: secret.clone(),
             join_token: None,
             replace_of: None,
+            product_version: 1,
         };
         let ack = seed_client::contact_seeds(seeds, &secret, &req).await?;
         match &ack {

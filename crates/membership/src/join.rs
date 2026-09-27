@@ -20,6 +20,13 @@ pub struct JoinRequest {
     pub join_token: Option<Uuid>,
     /// Replace path: present existing member id.
     pub replace_of: Option<Uuid>,
+    /// Product major version for N/N+1 rolling upgrade window (015). Default 1.
+    #[serde(default = "default_product_version")]
+    pub product_version: u16,
+}
+
+fn default_product_version() -> u16 {
+    1
 }
 
 /// Wire + local ack for first-join (`pending` \| `admitted` \| `replaced` \| `refused`).
@@ -90,7 +97,36 @@ pub fn handle_join(
     ladder: &[String],
     domain_exists: impl Fn(&str) -> bool,
 ) -> Result<(JoinAck, Vec<MembershipEvent>)> {
+    handle_join_with_version(
+        view,
+        epochs,
+        req,
+        ladder,
+        domain_exists,
+        spacestorage_compat::ProductVersion::FIRST_BINARY,
+    )
+}
+
+/// Join with an explicit local product version (N/N+1 window, 015).
+pub fn handle_join_with_version(
+    view: &mut MembershipView,
+    epochs: &[crate::secret::SecretEpoch],
+    req: JoinRequest,
+    ladder: &[String],
+    domain_exists: impl Fn(&str) -> bool,
+    local_version: spacestorage_compat::ProductVersion,
+) -> Result<(JoinAck, Vec<MembershipEvent>)> {
     let mut events = Vec::new();
+
+    let peer = spacestorage_compat::ProductVersion(req.product_version);
+    if spacestorage_compat::ProductVersion::check_peer(local_version, peer).is_err() {
+        return Ok((
+            JoinAck::Refused {
+                code: "product_version_window".into(),
+            },
+            events,
+        ));
+    }
 
     if !secret::verify_secret(epochs, &req.presented_secret) {
         return Ok((
@@ -293,6 +329,7 @@ pub fn admit_pending(
         presented_secret: vec![],
         join_token: None,
         replace_of: None,
+            product_version: 1,
     };
     let mut events = Vec::new();
     // Skip secret (already verified at pending).
@@ -366,6 +403,7 @@ mod tests {
                 presented_secret: secret,
                 join_token: None,
                 replace_of: None,
+            product_version: 1,
             },
             &["az".into()],
             |d| d == "lab",
@@ -396,6 +434,7 @@ mod tests {
                 presented_secret: secret,
                 join_token: None,
                 replace_of: None,
+            product_version: 1,
             },
             &["az".into()],
             |d| domains.contains(d),
@@ -423,6 +462,7 @@ mod tests {
                 presented_secret: secret,
                 join_token: Some(token.token_id),
                 replace_of: None,
+            product_version: 1,
             },
             &["az".into()],
             |_| true,
@@ -450,6 +490,7 @@ mod tests {
                 presented_secret: secret,
                 join_token: None,
                 replace_of: None,
+            product_version: 1,
             },
             &["az".into()],
             |_| true,
@@ -457,5 +498,33 @@ mod tests {
         .unwrap();
         assert!(matches!(ack, JoinAck::Refused { code } if code == "ladder"));
         assert!(!view.is_pending(&id));
+    }
+
+    #[test]
+    fn product_version_window_refuses_n_plus_2() {
+        let (mut view, epochs) = base_view();
+        let secret = epochs[0].secret_bytes().unwrap();
+        let id = Uuid::new_v4();
+        let (ack, _) = handle_join(
+            &mut view,
+            &epochs,
+            JoinRequest {
+                node_id: id,
+                node_name: "n2".into(),
+                labels: BTreeMap::from([("az".into(), "b".into())]),
+                internodes_address: "127.0.0.1:7000".into(),
+                quorum_domain: "lab".into(),
+                presented_secret: secret,
+                join_token: None,
+                replace_of: None,
+                product_version: 3,
+            },
+            &["az".into()],
+            |_| true,
+        )
+        .unwrap();
+        assert!(
+            matches!(ack, JoinAck::Refused { code } if code == "product_version_window")
+        );
     }
 }

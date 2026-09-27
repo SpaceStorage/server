@@ -30,8 +30,11 @@
 //! ```
 //!
 //! Historical ledgers (`001`–`006`) keep their deferred `still_owed` rows for
-//! honesty; the tip ledger [`007-complete-product`](007-complete-product.yaml)
-//! claims `implemented: [1..11]` with empty `deferred`.
+//! honesty; tip slice ledger [`007-complete-product`](007-complete-product.yaml)
+//! claims `implemented: [1..11]` with empty `deferred`. Follow-ons:
+//!
+//! - [`008-later-not-first`](008-later-not-first.md) — library surfaces + Raft peer wire
+//! - [`009-full-product`](009-full-product.md) — full v1 tip (live Raft TCP + production mounts)
 //!
 //! Validate ledger records with:
 //!

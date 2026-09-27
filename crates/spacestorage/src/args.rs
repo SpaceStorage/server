@@ -119,6 +119,40 @@ pub enum Command {
         #[command(subcommand)]
         action: IngestAction,
     },
+    /// L0 creatable workflow (full v1).
+    L0 {
+        #[command(subcommand)]
+        action: L0Action,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    /// Legal-hold / GDPR erase (full v1).
+    Legal {
+        #[command(subcommand)]
+        action: LegalAction,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    /// Named CDC streams (full v1).
+    Cdc {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    /// Planetary compositions (full v1).
+    Composition {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    /// Billing estimate (no invoicing).
+    Billing {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    /// External KMS / master provider status.
+    Kms {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -167,4 +201,45 @@ pub enum JobAction {
     Status { id: String },
     Cancel { id: String },
     Resume { id: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum L0Action {
+    Create {
+        #[arg(long)]
+        namespace: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long = "type")]
+        type_name: String,
+    },
+    Get {
+        #[arg(long)]
+        namespace: String,
+        #[arg(long)]
+        name: String,
+    },
+    List,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LegalAction {
+    Hold {
+        #[arg(long)]
+        namespace: String,
+        #[arg(long)]
+        container: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        key: Option<String>,
+    },
+    Erase {
+        #[arg(long)]
+        namespace: String,
+        #[arg(long)]
+        container: String,
+        #[arg(long)]
+        key: String,
+    },
 }

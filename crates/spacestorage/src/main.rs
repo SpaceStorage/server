@@ -133,5 +133,52 @@ fn main() -> ExitCode {
                 },
             }
         }
+        args::Command::L0 { action, endpoint } => {
+            match action {
+                args::L0Action::List => {
+                    println!("GET {endpoint}/v1/l0/containers");
+                }
+                args::L0Action::Create {
+                    namespace,
+                    name,
+                    type_name,
+                } => {
+                    println!(
+                        "POST {endpoint}/v1/l0/containers body={{\"namespace\":\"{namespace}\",\"name\":\"{name}\",\"type_name\":\"{type_name}\"}}"
+                    );
+                }
+                args::L0Action::Get { namespace, name } => {
+                    println!("GET {endpoint}/v1/l0/containers/{namespace}/{name}");
+                }
+            }
+            ExitCode::from(exit::OK)
+        }
+        args::Command::Legal { action, endpoint } => {
+            match action {
+                args::LegalAction::Hold { .. } => {
+                    println!("POST {endpoint}/v1/legal/holds");
+                }
+                args::LegalAction::Erase { .. } => {
+                    println!("POST {endpoint}/v1/legal/erase");
+                }
+            }
+            ExitCode::from(exit::OK)
+        }
+        args::Command::Cdc { endpoint } => {
+            println!("POST {endpoint}/v1/cdc/streams");
+            ExitCode::from(exit::OK)
+        }
+        args::Command::Composition { endpoint } => {
+            println!("POST {endpoint}/v1/compositions");
+            ExitCode::from(exit::OK)
+        }
+        args::Command::Billing { endpoint } => {
+            println!("POST {endpoint}/v1/billing/estimate");
+            ExitCode::from(exit::OK)
+        }
+        args::Command::Kms { endpoint } => {
+            println!("GET {endpoint}/v1/kms/status");
+            ExitCode::from(exit::OK)
+        }
     }
 }

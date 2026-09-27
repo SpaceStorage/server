@@ -12,6 +12,7 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
 aes-gcm = { workspace = true }
@@ -21,6 +22,7 @@ sha2 = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }
 subtle = { workspace = true }
+url = "2"
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -39,6 +39,27 @@ impl TypeCatalog {
         t
     }
 
+    /// Complete-product catalog: first-binary L3 + creatable L0 + L4 compositions.
+    pub fn complete_product() -> Self {
+        let mut t = Self::first_binary();
+        for name in crate::l0::L0_CREATABLE {
+            if let Some(d) = crate::l0::l0_descriptor(name) {
+                t.types.insert((*name).into(), d);
+            }
+        }
+        for name in crate::l0::L0_NOT_CREATABLE {
+            if let Some(d) = crate::l0::l0_descriptor(name) {
+                t.types.insert((*name).into(), d);
+            }
+        }
+        for name in crate::composition::L4_COMPOSITIONS {
+            if let Some(d) = crate::composition::l4_descriptor(name) {
+                t.types.insert((*name).into(), d);
+            }
+        }
+        t
+    }
+
     pub fn get(&self, name: &str) -> Option<&TypeDescriptor> {
         self.types.get(name)
     }

@@ -88,6 +88,15 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/console/containers", post(console_containers))
         .route("/v1/ingest/kafka", get(ingest_kafka_list).post(ingest_kafka_add))
         .route("/v1/ingest/kafka/{id}", axum::routing::delete(ingest_kafka_delete))
+        .route("/v1/l0/containers", get(l0_list).post(l0_create))
+        .route("/v1/l0/containers/{namespace}/{name}", get(l0_get))
+        .route("/v1/legal/holds", post(legal_hold_place))
+        .route("/v1/legal/holds/{id}", axum::routing::delete(legal_hold_release))
+        .route("/v1/legal/erase", post(legal_erase))
+        .route("/v1/cdc/streams", post(cdc_create))
+        .route("/v1/compositions", post(composition_create))
+        .route("/v1/billing/estimate", post(billing_estimate))
+        .route("/v1/kms/status", get(kms_status))
         .fallback(fallback)
         .layer(DefaultBodyLimit::max(ADMIN_HTTP_BODY_LIMIT))
         .with_state(node)
@@ -905,6 +914,360 @@ async fn ingest_kafka_delete(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => ingest_err(e),
     }
+}
+
+async fn l0_list(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let items = node.later.l0.lock().list();
+    with_headers(
+        &node,
+        Json(serde_json::json!({ "containers": items })).into_response(),
+    )
+}
+
+async fn l0_create(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let req: crate::later_surfaces::L0CreateBody = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "bad_json".into(),
+                    message: e.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match node
+        .later
+        .create_l0(&req.namespace, &req.name, &req.type_name, req.mode())
+    {
+        Ok(id) => (
+            StatusCode::CREATED,
+            with_headers(
+                &node,
+                Json(serde_json::json!({ "id": id, "namespace": req.namespace, "name": req.name, "type_name": req.type_name })).into_response(),
+            ),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorBody {
+                code: "l0_create_failed".into(),
+                message: e,
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn l0_get(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    Path((namespace, name)): Path<(String, String)>,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    match node.later.describe_l0(&namespace, &name) {
+        Ok(v) => with_headers(&node, Json(v).into_response()),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                code: "not_found".into(),
+                message: e,
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn legal_hold_place(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let req: crate::later_surfaces::HoldBody = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "bad_json".into(),
+                    message: e.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let id = uuid::Uuid::now_v7();
+    let hold = spacestorage_storage::LegalHold {
+        id,
+        namespace: req.namespace,
+        container: req.container,
+        key: req.key,
+        reason: req.reason,
+        created_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    };
+    let _ = node.later.place_hold(hold.clone());
+    (
+        StatusCode::CREATED,
+        with_headers(&node, Json(hold).into_response()),
+    )
+        .into_response()
+}
+
+async fn legal_hold_release(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let Ok(uid) = uuid::Uuid::parse_str(&id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorBody {
+                code: "bad_id".into(),
+                message: "invalid uuid".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
+    };
+    match node.later.release_hold(uid) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                code: "not_found".into(),
+                message: e,
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn legal_erase(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let req: crate::later_surfaces::EraseBody = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "bad_json".into(),
+                    message: e.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let erase = spacestorage_storage::EraseRequest {
+        namespace: req.namespace,
+        container: req.container,
+        key: req.key,
+        requested_at_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    };
+    // Migrate job path uses the same LegalHoldStore gate (010 erase orchestration).
+    match spacestorage_migrate::erase_with_legal(&node.later.legal, erase) {
+        Ok(rec) => (
+            StatusCode::OK,
+            with_headers(&node, Json(rec).into_response()),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::CONFLICT,
+            Json(ErrorBody {
+                code: "legal_erase_refused".into(),
+                message: e.to_string(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn cdc_create(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let req: crate::later_surfaces::CdcCreateBody = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "bad_json".into(),
+                    message: e.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match node
+        .later
+        .create_cdc(&req.namespace, &req.name, &req.source_container)
+    {
+        Ok(id) => (
+            StatusCode::CREATED,
+            with_headers(
+                &node,
+                Json(serde_json::json!({
+                    "id": id,
+                    "namespace": req.namespace,
+                    "name": req.name,
+                    "source_container": req.source_container,
+                }))
+                .into_response(),
+            ),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorBody {
+                code: "cdc_create_failed".into(),
+                message: e,
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn composition_create(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let req: crate::later_surfaces::CompositionCreateBody = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "bad_json".into(),
+                    message: e.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let ns = req.namespace.clone();
+    let name = req.name.clone();
+    let kind = req.kind.clone();
+    let (members, placement) = req.into_parts();
+    match node
+        .later
+        .create_composition(&ns, &name, &kind, members, placement)
+    {
+        Ok(id) => (
+            StatusCode::CREATED,
+            with_headers(
+                &node,
+                Json(serde_json::json!({ "id": id, "namespace": ns, "name": name, "kind": kind })).into_response(),
+            ),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorBody {
+                code: "composition_create_failed".into(),
+                message: e,
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn billing_estimate(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let req: crate::later_surfaces::BillingEstimateBody = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "bad_json".into(),
+                    message: e.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let est = node.later.estimate_billing(&req.usage());
+    with_headers(&node, Json(est).into_response())
+}
+
+async fn kms_status(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
+    if let Err(e) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    }
+    let cfg = node.config.load();
+    let kind = if cfg.keys.external_kms.is_some() {
+        "external_kms"
+    } else if cfg.effective_master_key_file().is_some() {
+        "master_key_file"
+    } else {
+        "unset"
+    };
+    with_headers(
+        &node,
+        Json(serde_json::json!({
+            "provider": kind,
+            "external_kms": cfg.keys.external_kms,
+        }))
+        .into_response(),
+    )
 }
 
 async fn fallback() -> impl IntoResponse {

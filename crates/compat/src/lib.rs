@@ -37,6 +37,7 @@ pub mod limits;
 pub mod matrix;
 pub mod metrics;
 pub mod profile;
+pub mod upgrade;
 pub mod version;
 pub mod wire;
 
@@ -58,6 +59,7 @@ pub use matrix::{
 };
 pub use metrics::{must_not_count, must_not_snapshot, record_must_not};
 pub use profile::{active_profile, profile_from_release, DialectProfile};
+pub use upgrade::{evaluate_peer_join, refuse_format_too_new, refuse_type_too_new, UpgradeJoin};
 pub use version::{peers_ok, ProductVersion};
 pub use wire::{
     ProtocolId, WireVersion, CASSANDRA_V4, CASSANDRA_V5, CLICKHOUSE_HTTP, CLICKHOUSE_NATIVE,

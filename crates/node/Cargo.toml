@@ -67,6 +67,7 @@ futures = { workspace = true }
 subtle = { workspace = true }
 anyhow = { workspace = true }
 async-trait = "0.1"
+parking_lot = { workspace = true }
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { workspace = true }
 http-body-util = { workspace = true }
