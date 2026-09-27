@@ -11,6 +11,7 @@ pub mod http;
 pub mod kafka;
 pub mod logs;
 pub mod otel;
+pub mod otlp_encode;
 pub mod sample;
 pub mod syslog;
 
@@ -25,7 +26,8 @@ pub use filter::filter_namespace;
 pub use http::{
     encode_global, encode_tenant, metrics_disabled, prometheus_response, unknown_namespace,
 };
-pub use kafka::{KafkaProducer, KafkaSinkConfig};
+pub use kafka::{KafkaProducer, KafkaSinkConfig, ProducedRecord};
+pub use otlp_encode::encode_otlp_metrics;
 pub use logs::{ChannelGates, LogChannel, LogEvent, LogExporter};
 pub use otel::{OtelConfig, OtelExporter};
 pub use sample::{LabelSet, MetricName, Recorder, Registry, SampleKind, SeriesSnapshot};

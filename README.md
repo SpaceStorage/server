@@ -6,9 +6,20 @@ Parent layout: `spacestorage/` holds `server/` (this tree), `test/`, and `start`
 
 ## Status (honest)
 
-A **first-binary skeleton** exists: workspace crates, release-profile / milestone ledger, starter configs, and some handler/runtime wiring. Converge audits still find stubs and unfinished DoD paths. **Do not treat slices 1–5 as done** until `spacestorage-conformance` with `--features first-binary` is green and the milestone ledger matches reality.
+**Tip milestone** [`docs/milestones/007-complete-product`](docs/milestones/007-complete-product.md): slices **1–11** are closed on the ledger (`still_owed` cleared). Merge gate:
 
-First binary ≠ complete product. The complete product still owes the seven-protocol matrix and slices 6–11; those stay deferred, not deleted.
+```bash
+cargo test -p spacestorage-conformance --features complete-product
+```
+
+Earlier profiles remain useful regressions:
+
+```bash
+cargo test -p spacestorage-conformance --features first-binary
+cargo test -p spacestorage-conformance --features handlers-complete
+```
+
+Remaining work is **residuals** (WAL kill→re-read client content, PostgreSQL Document Store blob gate, UI `014` session auth, openraft `Raft::new` / 0.10 on rustc ≥ 1.88, …) — not unpaid slices. See the tip milestone Deferred section.
 
 ## Spec Kit
 
@@ -25,10 +36,11 @@ Agent instructions: [`AGENTS.md`](AGENTS.md) (Cursor-native). Stub: [`AGENT.md`]
 
 ## First binary vs complete product
 
-- **First binary** (slices 1–5): runtime; types + WAL + master-key; PostgreSQL subset; Redis K/V MUST; membership + internode + three-node quorum. Profile: `first-binary` / tag `slices-1-5`. Not a “v1” of the seven-protocol matrix.
-- **Complete product**: constitution + specs `001`–`015` (Cassandra/ES/CH/S3/WebDAV, Raft control plane, full authz, query beyond CRUD, full observability, migration/PITR, admin UIs/ingest).
+- **First binary** (slices 1–5): runtime; types + WAL + master-key; PostgreSQL subset; Redis K/V MUST; membership + internode + three-node quorum. Profile: `first-binary` / tag `slices-1-5`.
+- **Handlers-complete** (slice 6): Cassandra / ES / ClickHouse / S3 / WebDAV at `015` MUST. Profile: `handlers-complete`.
+- **Complete product** (slices 1–11): full constitution + specs `001`–`015` ladder through admin UIs / ingest. Profile: `complete-product` / tip ledger `007-complete-product`.
 
-See `docs/milestones/001-first-binary.md` and `specs/016-mvp-and-nongoals/`.
+See `docs/milestones/` and `specs/016-mvp-and-nongoals/`.
 
 ## Build and test
 
@@ -37,6 +49,8 @@ From this directory:
 ```bash
 cargo build -p spacestoraged
 cargo test -p spacestorage-conformance --features first-binary
+cargo test -p spacestorage-conformance --features handlers-complete
+cargo test -p spacestorage-conformance --features complete-product
 ```
 
 Milestone ledger validation:
@@ -45,8 +59,6 @@ Milestone ledger validation:
 ./scripts/check-milestone.sh
 # or: cargo test -p spacestorage-release-profile --test ledger
 ```
-
-Default workspace features are `first-binary` (PostgreSQL + Redis handlers). A `complete-product` job is not a merge gate for slices 1–5.
 
 Starter configs live under `docs/examples/`. Quickstart: `specs/016-mvp-and-nongoals/quickstart.md`.
 

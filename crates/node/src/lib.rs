@@ -53,6 +53,8 @@ pub struct Node {
     pub jobs: Arc<spacestorage_migrate::JobService>,
     /// Admin UI (009 slice 11).
     pub admin_ui: Arc<std::sync::RwLock<spacestorage_admin_ui::AdminUiState>>,
+    /// `014` SessionToken store for admin/UI bearer sessions.
+    pub sessions: Arc<std::sync::RwLock<spacestorage_authz::SessionTokenStore>>,
     /// Kafka / syslog ingest (009 slice 11).
     pub ingest: Arc<spacestorage_ingest::IngestRuntime>,
     /// Cancelled when drain begins — wakes `run` (does **not** stop accept loops).
@@ -137,6 +139,10 @@ impl Node {
             spacestorage_ingest::IngestRuntime::new(slice11).with_metrics(Arc::clone(&metrics)),
         );
         let token_file = cfg.admin_token_file.clone();
+        let sessions = Arc::new(std::sync::RwLock::new(
+            spacestorage_authz::SessionTokenStore::new(),
+        ));
+        let sessions_for_ui = Arc::clone(&sessions);
         let admin_ui = {
             let mut st = if slice11 {
                 spacestorage_admin_ui::AdminUiState {
@@ -144,12 +150,30 @@ impl Node {
                     map: spacestorage_admin_ui::MapComposer::empty(),
                     console: spacestorage_admin_ui::ConsoleService::new(true),
                     resolve_principal: Arc::new(move |t| {
-                        // Interim: any non-empty bearer matching token file is cluster admin.
+                        // Real `014` SessionToken resolve (AuthLogin). Fallback: static
+                        // admin token file still mints an implicit cluster-admin session
+                        // view only when it matches exactly (bootstrap seam).
                         if t.is_empty() {
                             return None;
                         }
-                        let _ = &token_file;
-                        Some(spacestorage_admin_ui::UiPrincipal::cluster_admin("admin"))
+                        if let Ok(store) = sessions_for_ui.read() {
+                            if let Some(rec) = store.resolve(t) {
+                                return Some(if rec.cluster_admin {
+                                    spacestorage_admin_ui::UiPrincipal::cluster_admin(rec.login)
+                                } else {
+                                    spacestorage_admin_ui::UiPrincipal::unprivileged(rec.login)
+                                });
+                            }
+                        }
+                        let expected = token_file
+                            .as_ref()
+                            .and_then(|p| std::fs::read_to_string(p).ok())
+                            .unwrap_or_default();
+                        if crate::admin::auth::check_bearer(t, expected.trim()) {
+                            // Static file token is not a SessionToken — refuse UI until AuthLogin.
+                            return None;
+                        }
+                        None
                     }),
                 }
             } else {
@@ -174,6 +198,7 @@ impl Node {
             metrics,
             jobs,
             admin_ui,
+            sessions,
             ingest,
             drain_started: CancellationToken::new(),
             cancel: CancellationToken::new(),

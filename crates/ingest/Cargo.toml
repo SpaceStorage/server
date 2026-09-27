@@ -24,8 +24,9 @@ parking_lot = { workspace = true }
 async-trait = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
+anyhow = "1"
 # Pure-Rust Kafka framing (no librdkafka / OpenSSL).
-kafka-protocol = { version = "0.14", default-features = false }
+kafka-protocol = { version = "0.14", default-features = false, features = ["client", "broker"] }
 spacestorage-observability = { path = "../observability" }
 
 [dev-dependencies]

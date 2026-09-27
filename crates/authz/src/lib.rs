@@ -12,6 +12,7 @@ pub mod session;
 pub use error::AuthzError;
 pub use permission::{role_put_custom, Authorizer, CustomRole, Resource, Verb};
 pub use principal::{LoginName, PrincipalId, PrincipalRecord};
+pub use session::{Session, SessionToken, SessionTokenStore};
 
 pub const SCRAM_ITERATIONS_DEFAULT: u32 = 16384;
 

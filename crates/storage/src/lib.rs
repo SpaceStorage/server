@@ -6,6 +6,7 @@
 pub mod checkpoint;
 pub mod compaction;
 pub mod content;
+pub mod definitions;
 pub mod disk;
 pub mod error;
 pub mod kv_put;
@@ -18,6 +19,7 @@ pub mod ttl;
 pub mod wal;
 
 pub use content::{ContentStore, UnavailableReason};
+pub use definitions::{append_definition, load_definitions, PersistedDefinition};
 pub use disk::{DiskState, DriveDiskState};
 pub use error::StorageError;
 pub use metrics::WalMetrics;
@@ -147,6 +149,37 @@ impl StorageEngine {
             d.quarantined.push(note.to_string());
         }
         *self.node_degraded.write().await = true;
+    }
+
+    /// Append a KV put to the first available drive WAL and update content (client durability).
+    pub async fn put_kv_durable(
+        &self,
+        container_id: uuid::Uuid,
+        key: &str,
+        value: &[u8],
+    ) -> Result<(), StorageError> {
+        let drives = self.all_drives().await;
+        let wal = drives
+            .first()
+            .ok_or_else(|| StorageError::WalCorrupt("no drive open".into()))?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        crate::kv_put::put_durable(
+            wal,
+            container_id,
+            stamp,
+            key.as_bytes(),
+            value,
+            spacestorage_types::StorageModeChoice::Persistent,
+            None,
+        )
+        .await?;
+        let mut content = self.content.write().await;
+        content.register_mode(container_id, StorageMode::Persistent);
+        content.put(container_id, key.as_bytes().to_vec(), value.to_vec());
+        Ok(())
     }
 }
 

@@ -27,6 +27,15 @@ These slices remain owed (`still_owed: true`); intent files `01`–`15` are not 
 
 ## Changelog
 
+### 2026-09-26 — Post-ladder: WAL re-read + PG Document Store blob
+
+**Proven green**:
+
+- WAL kill→reboot→re-read of Redis client content (`wal_kill_reboot`) via durable catalog hooks + `definitions.jsonl` hydrate
+- Document Store blob via Redis (G11) **and** PostgreSQL INSERT/SELECT (`g11_document_store_blob_via_postgresql`)
+
+Earlier G6/G7 quorum-math residual and “PG blob not gated” notes below are closed by this entry.
+
 ### 2026-09-26 — Phase 0 DoD: real G gates + Document Store blob
 
 **Proven green** (`CARGO_TARGET_DIR=target`):
@@ -41,11 +50,11 @@ These slices remain owed (`still_owed: true`); intent files `01`–`15` are not 
 - `cargo test -p spacestorage-release-profile --test ledger` green; deferred 6–11 still `still_owed: true`
 - `rustfmt`/`clippy -D warnings` clean on `release-profile`, conformance (`--no-deps`), handler-redis
 
-**Still thin / honest residuals**:
+**Still thin / honest residuals** (superseded by post-ladder entry above when green):
 
-- G6/G7 proves durable-ack quorum math (TWO ≠ `min(2, live)`); does not yet reboot a killed node and re-read client content from WAL
-- Document Store blob proven on Redis; PostgreSQL blob mapping for Document Store not separately gated
-- Slice 6+ handlers remain deferred (not this milestone)
+- G6/G7 proves durable-ack quorum math (TWO ≠ `min(2, live)`); kill→reboot WAL re-read tracked as post-ladder
+- Document Store blob proven on Redis; PostgreSQL blob mapping tracked as post-ladder
+- Slice 6+ handlers remain deferred on this milestone ledger (closed on tip `007`)
 
 ### 2026-09-26 — conformance + Redis SET + membership roster
 

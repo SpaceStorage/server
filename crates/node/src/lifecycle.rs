@@ -120,6 +120,22 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
         spacestorage_storage::restore::restore_catalog(data_dir.as_deref())
             .await
             .map_err(|e| e.to_string())?;
+    if let Some(dir) = data_dir.as_ref() {
+        if let Ok(defs) = spacestorage_storage::load_definitions(dir).await {
+            for d in defs {
+                if !catalog_entries
+                    .iter()
+                    .any(|e| e.container_id == d.id)
+                {
+                    catalog_entries.push(spacestorage_storage::restore::CatalogEntry {
+                        container_id: d.id,
+                        mode: d.mode,
+                        key_ref: None,
+                    });
+                }
+            }
+        }
+    }
     {
         let cat = node.catalog.read().map_err(|e| e.to_string())?;
         for c in cat.list() {
@@ -134,11 +150,13 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
                     spacestorage_storage::StorageMode::Hybrid
                 }
             };
-            catalog_entries.push(spacestorage_storage::restore::CatalogEntry {
-                container_id: c.id,
-                mode,
-                key_ref: None,
-            });
+            if !catalog_entries.iter().any(|e| e.container_id == c.id) {
+                catalog_entries.push(spacestorage_storage::restore::CatalogEntry {
+                    container_id: c.id,
+                    mode,
+                    key_ref: None,
+                });
+            }
         }
     }
     let checkpoints = std::collections::HashMap::new();
@@ -168,7 +186,95 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
             "storage restore complete"
         );
     }
-    *node.storage.write().await = Some(engine);
+    *node.storage.write().await = Some(Arc::clone(&engine));
+
+    // Wire sync durable hooks so client puts wait for WAL fsync (constitution II / G6 residual).
+    if let Some(dir) = data_dir.clone() {
+        let eng_put = Arc::clone(&engine);
+        let eng_create = Arc::clone(&engine);
+        let dir_create = dir.clone();
+        let put_hook: spacestorage_types::DurablePutHook = Arc::new(move |id, _mode, key, val| {
+            let eng = Arc::clone(&eng_put);
+            let key = key.to_string();
+            let val = val.to_vec();
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async move {
+                    eng.put_kv_durable(id, &key, &val)
+                        .await
+                        .map_err(|e| e.to_string())
+                })
+            })
+        });
+        let create_hook: spacestorage_types::DurableCreateHook =
+            Arc::new(move |id, ns, name, model, mode| {
+                let dir = dir_create.clone();
+                let ns = ns.to_string();
+                let name = name.to_string();
+                let smode = match mode {
+                    spacestorage_types::StorageModeChoice::Memory => {
+                        spacestorage_storage::StorageMode::Memory
+                    }
+                    spacestorage_types::StorageModeChoice::Persistent => {
+                        spacestorage_storage::StorageMode::Persistent
+                    }
+                    spacestorage_types::StorageModeChoice::Hybrid => {
+                        spacestorage_storage::StorageMode::Hybrid
+                    }
+                };
+                let def = spacestorage_storage::PersistedDefinition {
+                    id,
+                    namespace: ns,
+                    name,
+                    model,
+                    mode: smode,
+                };
+                let _ = &eng_create;
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async move {
+                        spacestorage_storage::append_definition(&dir, &def)
+                            .await
+                            .map_err(|e| e.to_string())
+                    })
+                })
+            });
+        {
+            let mut cat = node.catalog.write().map_err(|e| e.to_string())?;
+            cat.set_durable_hooks(Some(put_hook), Some(create_hook));
+        }
+    }
+
+    // Hydrate live catalog from persisted definitions + WAL content.
+    if let Some(dir) = data_dir.as_ref() {
+        let defs = spacestorage_storage::load_definitions(dir)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !defs.is_empty() {
+            let content = engine.content.read().await;
+            let mut cat = node.catalog.write().map_err(|e| e.to_string())?;
+            for d in &defs {
+                let mode = match d.mode {
+                    spacestorage_storage::StorageMode::Memory => {
+                        spacestorage_types::StorageModeChoice::Memory
+                    }
+                    spacestorage_storage::StorageMode::Persistent => {
+                        spacestorage_types::StorageModeChoice::Persistent
+                    }
+                    spacestorage_storage::StorageMode::Hybrid => {
+                        spacestorage_types::StorageModeChoice::Hybrid
+                    }
+                };
+                let _ = cat.restore_container(d.id, &d.namespace, &d.name, d.model, mode, None);
+                let exported = content.export_durable(d.id);
+                let mut rows = std::collections::HashMap::new();
+                for (k, v) in exported {
+                    let key = String::from_utf8_lossy(&k).into_owned();
+                    rows.insert(key, v);
+                }
+                let _ = cat.replace_rows(d.id, rows);
+            }
+        }
+    }
+
     Ok(())
 }
 

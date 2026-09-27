@@ -1,11 +1,12 @@
-//! Classify-gated WebDAV methods.
+//! Classify-gated WebDAV methods via shared `PlannerEngine` (005 T086).
 
 use std::sync::{Arc, RwLock};
 
 use spacestorage_compat::{
     classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
 };
-use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_types::ContainerCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WebDavReply {
@@ -32,36 +33,32 @@ impl SessionState {
         }
     }
 
-    fn ensure_collection(&self) -> Result<ContainerId, WebDavReply> {
-        let mut cat = self.catalog.write().expect("catalog");
-        match cat.describe(&self.namespace, &self.collection) {
-            Ok(c) => {
-                if c.model != L3Model::KvStore {
-                    return Err(WebDavReply::Error {
-                        code: "compat_must_not".into(),
-                        message: "wrong type".into(),
-                    });
-                }
-                Ok(c.id)
-            }
-            Err(TypeError::NotFound) => cat
-                .create(
-                    &self.namespace,
-                    &self.collection,
-                    L3Model::KvStore,
-                    false,
-                    None,
-                    StorageModeChoice::Persistent,
-                )
-                .map_err(|e| WebDavReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                }),
-            Err(e) => Err(WebDavReply::Error {
+    fn engine(&self) -> PlannerEngine {
+        PlannerEngine::new(Arc::clone(&self.catalog))
+    }
+
+    fn exec(&self, req: LogicalRequest) -> Result<QueryResult, WebDavReply> {
+        self.engine()
+            .execute_blocking(
+                &self.namespace,
+                "dav",
+                "webdav",
+                req,
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .map_err(|e| WebDavReply::Error {
                 code: "server_error".into(),
-                message: format!("{e:?}"),
-            }),
-        }
+                message: e.to_string(),
+            })
+    }
+
+    fn ensure_collection(&self) -> Result<(), WebDavReply> {
+        self.exec(LogicalRequest::TypeOp {
+            container: self.collection.clone(),
+            op: "ensure_kv".into(),
+        })?;
+        Ok(())
     }
 }
 
@@ -88,121 +85,129 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> WebDav
         "OPTIONS" | "HEAD" => WebDavReply::Ok,
         "MKCOL" => {
             let path = args.first().copied().unwrap_or("/");
-            // Nested collection marker as empty key with trailing slash convention.
             let key = format!("{}/", path_key(path));
-            let id = match session.ensure_collection() {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.put(id, &key, Vec::new()) {
-                Ok(()) => WebDavReply::Ok,
-                Err(e) => WebDavReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                },
+            if let Err(e) = session.ensure_collection() {
+                return e;
+            }
+            match session.exec(LogicalRequest::Object {
+                container: session.collection.clone(),
+                key,
+                bytes: Vec::new(),
+            }) {
+                Ok(_) => WebDavReply::Ok,
+                Err(e) => e,
             }
         }
         "PUT" => {
             let path = args.first().copied().unwrap_or("/f");
             let body = args.get(1).copied().unwrap_or("").as_bytes().to_vec();
-            let id = match session.ensure_collection() {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.put(id, &path_key(path), body) {
-                Ok(()) => WebDavReply::Ok,
-                Err(e) => WebDavReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                },
+            if let Err(e) = session.ensure_collection() {
+                return e;
+            }
+            match session.exec(LogicalRequest::Object {
+                container: session.collection.clone(),
+                key: path_key(path),
+                bytes: body,
+            }) {
+                Ok(_) => WebDavReply::Ok,
+                Err(e) => e,
             }
         }
         "GET" => {
             let path = args.first().copied().unwrap_or("/f");
-            let id = match session.ensure_collection() {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            match cat.get(id, &path_key(path)) {
-                Ok(Some(v)) => WebDavReply::Body(v.to_vec()),
-                Ok(None) => WebDavReply::Error {
+            if let Err(e) = session.ensure_collection() {
+                return e;
+            }
+            match session.exec(LogicalRequest::Point {
+                container: session.collection.clone(),
+                key: path_key(path),
+            }) {
+                Ok(r) if r.rows.is_empty() => WebDavReply::Error {
                     code: "not_found".into(),
                     message: path.into(),
                 },
-                Err(e) => WebDavReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                },
+                Ok(r) => {
+                    let v = r.rows[0]
+                        .get(1)
+                        .and_then(|x| x.as_ref())
+                        .map(|s| s.as_bytes().to_vec())
+                        .unwrap_or_default();
+                    WebDavReply::Body(v)
+                }
+                Err(e) => e,
             }
         }
         "DELETE" => {
             let path = args.first().copied().unwrap_or("/f");
-            let id = match session.ensure_collection() {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            let _ = cat.delete_row(id, &path_key(path));
+            if let Err(e) = session.ensure_collection() {
+                return e;
+            }
+            let _ = session.exec(LogicalRequest::Mutate {
+                container: session.collection.clone(),
+                op: "delete".into(),
+                sql: path_key(path),
+            });
             WebDavReply::Ok
         }
         "PROPFIND" => {
-            let id = match session.ensure_collection() {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            let keys = match cat.keys(id) {
-                Ok(k) => k,
-                Err(e) => {
-                    return WebDavReply::Error {
-                        code: "server_error".into(),
-                        message: format!("{e:?}"),
-                    }
-                }
-            };
-            let mut xml = String::from("<?xml version=\"1.0\"?><D:multistatus xmlns:D=\"DAV:\">");
-            for k in keys {
-                xml.push_str(&format!(
-                    "<D:response><D:href>/{k}</D:href><D:propstat><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>"
-                ));
+            if let Err(e) = session.ensure_collection() {
+                return e;
             }
-            xml.push_str("</D:multistatus>");
-            WebDavReply::MultiStatus(xml)
+            match session.exec(LogicalRequest::Scan {
+                container: session.collection.clone(),
+                filter: None,
+            }) {
+                Ok(r) => {
+                    let mut xml =
+                        String::from("<?xml version=\"1.0\"?><D:multistatus xmlns:D=\"DAV:\">");
+                    for row in r.rows {
+                        let k = row.first().and_then(|x| x.clone()).unwrap_or_default();
+                        xml.push_str(&format!(
+                            "<D:response><D:href>/{k}</D:href><D:propstat><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>"
+                        ));
+                    }
+                    xml.push_str("</D:multistatus>");
+                    WebDavReply::MultiStatus(xml)
+                }
+                Err(e) => e,
+            }
         }
         "MOVE" | "COPY" => {
             let src = args.first().copied().unwrap_or("/a");
             let dst = args.get(1).copied().unwrap_or("/b");
-            let id = match session.ensure_collection() {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            let data = match cat.get(id, &path_key(src)) {
-                Ok(Some(v)) => v.to_vec(),
-                Ok(None) => {
+            if let Err(e) = session.ensure_collection() {
+                return e;
+            }
+            let data = match session.exec(LogicalRequest::Point {
+                container: session.collection.clone(),
+                key: path_key(src),
+            }) {
+                Ok(r) if r.rows.is_empty() => {
                     return WebDavReply::Error {
                         code: "not_found".into(),
                         message: src.into(),
                     }
                 }
-                Err(e) => {
-                    return WebDavReply::Error {
-                        code: "server_error".into(),
-                        message: format!("{e:?}"),
-                    }
-                }
+                Ok(r) => r.rows[0]
+                    .get(1)
+                    .and_then(|x| x.as_ref())
+                    .map(|s| s.as_bytes().to_vec())
+                    .unwrap_or_default(),
+                Err(e) => return e,
             };
-            if let Err(e) = cat.put(id, &path_key(dst), data) {
-                return WebDavReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                };
+            if let Err(e) = session.exec(LogicalRequest::Object {
+                container: session.collection.clone(),
+                key: path_key(dst),
+                bytes: data,
+            }) {
+                return e;
             }
             if upper == "MOVE" {
-                let _ = cat.delete_row(id, &path_key(src));
+                let _ = session.exec(LogicalRequest::Mutate {
+                    container: session.collection.clone(),
+                    op: "delete".into(),
+                    sql: path_key(src),
+                });
             }
             WebDavReply::Ok
         }

@@ -3,7 +3,8 @@
 use crate::admission::{AdmissionController, AdmissionLimits};
 use crate::cancel::{check_deadline, CancelToken};
 use crate::catalog_exec::{
-    copy_in, copy_out, execute_adhoc_sql, QueryResult, SharedCatalog,
+    copy_in, copy_out, ensure_container, execute_adhoc_sql, object_delete, object_get, object_put,
+    object_scan, QueryResult, SharedCatalog,
 };
 use crate::error::ExecError;
 use crate::options::{IsolationLevel, QueryOptions};
@@ -416,19 +417,70 @@ impl PlannerEngine {
                     ..Default::default()
                 })
             }
-            LogicalRequest::Ddl { sql, .. } | LogicalRequest::Mutate { sql, .. } => {
-                execute_adhoc_sql(&self.catalog, namespace, &sql)
+            LogicalRequest::Ddl { sql, .. } => execute_adhoc_sql(&self.catalog, namespace, &sql),
+            LogicalRequest::Mutate { container, op, sql } => {
+                if op.eq_ignore_ascii_case("delete") && !sql.to_ascii_uppercase().contains("FROM") {
+                    // Protocol IR: key in `sql` field (Cassandra/ES/S3/WebDAV/Redis).
+                    object_delete(&self.catalog, namespace, &container, &sql)
+                } else {
+                    execute_adhoc_sql(&self.catalog, namespace, &sql)
+                }
             }
+            LogicalRequest::TypeOp { container, op } => {
+                let o = op.to_ascii_lowercase();
+                if o.starts_with("ensure") {
+                    let model = o.strip_prefix("ensure_").unwrap_or("table");
+                    ensure_container(&self.catalog, namespace, &container, model)
+                } else if o == "drop" {
+                    execute_adhoc_sql(
+                        &self.catalog,
+                        namespace,
+                        &format!("DROP TABLE IF EXISTS {container}"),
+                    )
+                } else {
+                    Err(ExecError::NotSupported(format!("type_op:{op}")))
+                }
+            }
+            LogicalRequest::Object {
+                container,
+                key,
+                bytes,
+            } => object_put(&self.catalog, namespace, &container, &key, bytes),
             LogicalRequest::Scan { container, filter } => {
-                let sql = match filter {
-                    Some(f) => format!("SELECT * FROM {container} WHERE {f}"),
-                    None => format!("SELECT * FROM {container}"),
-                };
-                execute_adhoc_sql(&self.catalog, namespace, &sql)
+                // Relational SQL scan when filter looks like a column predicate; else KV scan.
+                if filter
+                    .as_ref()
+                    .map(|f| f.contains('=') || f.to_ascii_uppercase().starts_with("WHERE"))
+                    .unwrap_or(false)
+                    || protocol == "postgresql"
+                {
+                    let sql = match &filter {
+                        Some(f) if f.to_ascii_uppercase().starts_with("WHERE") => {
+                            format!("SELECT * FROM {container} {f}")
+                        }
+                        Some(f) if f.contains('=') => {
+                            format!("SELECT * FROM {container} WHERE {f}")
+                        }
+                        Some(f) => format!("SELECT * FROM {container} WHERE id = '{f}'"),
+                        None => format!("SELECT * FROM {container}"),
+                    };
+                    execute_adhoc_sql(&self.catalog, namespace, &sql)
+                } else {
+                    object_scan(
+                        &self.catalog,
+                        namespace,
+                        &container,
+                        filter.as_deref(),
+                    )
+                }
             }
             LogicalRequest::Point { container, key } => {
-                let sql = format!("SELECT * FROM {container} WHERE id = '{key}'");
-                execute_adhoc_sql(&self.catalog, namespace, &sql)
+                if protocol == "postgresql" {
+                    let sql = format!("SELECT * FROM {container} WHERE id = '{key}'");
+                    execute_adhoc_sql(&self.catalog, namespace, &sql)
+                } else {
+                    object_get(&self.catalog, namespace, &container, &key)
+                }
             }
             LogicalRequest::Batch { requests } => {
                 let mut last = QueryResult::default();

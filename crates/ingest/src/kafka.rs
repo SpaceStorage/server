@@ -2,6 +2,7 @@
 
 use crate::declaration::KafkaIngest;
 use crate::format::{map_kafka_payload, KafkaSidecar, PayloadFormat};
+use crate::kafka_wire::LiveKafkaClient;
 use crate::record::LogRecord;
 use crate::IngestRuntime;
 use parking_lot::Mutex;
@@ -19,7 +20,7 @@ pub struct KafkaMessage {
     pub broker_ts: Option<String>,
 }
 
-/// In-process pure-Rust fake broker for conformance (SC-004).
+/// In-process pure-Rust fake broker for ALO unit / conformance tests (SC-004).
 #[derive(Debug, Default)]
 pub struct FakeKafkaBroker {
     pub messages: Mutex<VecDeque<KafkaMessage>>,
@@ -49,6 +50,12 @@ impl FakeKafkaBroker {
     pub fn committed_offset(&self, partition: i32) -> Option<i64> {
         self.committed.lock().get(&partition).copied()
     }
+}
+
+/// Backend used by [`KafkaConsumer`]: fake (tests) or live broker I/O.
+pub enum KafkaBrokerBackend {
+    Fake(Arc<FakeKafkaBroker>),
+    Live(Arc<LiveKafkaClient>),
 }
 
 /// Decode buffer with reject policy (never wait on worker).
@@ -89,7 +96,7 @@ pub type AppendFn = Arc<dyn Fn(LogRecord) -> AppendAck + Send + Sync>;
 
 pub struct KafkaConsumer {
     pub decl: KafkaIngest,
-    pub broker: Arc<FakeKafkaBroker>,
+    pub broker: KafkaBrokerBackend,
     pub buffer: DecodeBuffer,
     pub append: AppendFn,
     pub runtime: Option<Arc<IngestRuntime>>,
@@ -102,7 +109,20 @@ impl KafkaConsumer {
     pub fn new(decl: KafkaIngest, broker: Arc<FakeKafkaBroker>, append: AppendFn) -> Self {
         Self {
             decl,
-            broker,
+            broker: KafkaBrokerBackend::Fake(broker),
+            buffer: DecodeBuffer::new(32 * 1024 * 1024),
+            append,
+            runtime: None,
+            skip_commit_once: Mutex::new(false),
+            stored: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Live broker Fetch / OffsetCommit path (production ingest).
+    pub fn with_live(decl: KafkaIngest, live: Arc<LiveKafkaClient>, append: AppendFn) -> Self {
+        Self {
+            decl,
+            broker: KafkaBrokerBackend::Live(live),
             buffer: DecodeBuffer::new(32 * 1024 * 1024),
             append,
             runtime: None,
@@ -121,11 +141,60 @@ impl KafkaConsumer {
         self
     }
 
-    /// Process one fetched message. Returns Ok(true) if committed.
+    /// Sync poll for FakeKafkaBroker (ALO unit tests).
     pub fn poll_one(&self) -> Result<bool, String> {
-        let Some(msg) = self.broker.fetch() else {
-            return Ok(false);
-        };
+        match &self.broker {
+            KafkaBrokerBackend::Fake(b) => {
+                let Some(msg) = b.fetch() else {
+                    return Ok(false);
+                };
+                self.handle_message(msg, |m| b.produce(m), |p, o| b.commit(p, o))
+            }
+            KafkaBrokerBackend::Live(_) => Err(
+                "poll_one is FakeKafka-only; use poll_one_async for live brokers".into(),
+            ),
+        }
+    }
+
+    /// Async poll: Fake or live broker.
+    pub async fn poll_one_async(&self) -> Result<bool, String> {
+        match &self.broker {
+            KafkaBrokerBackend::Fake(b) => {
+                let Some(msg) = b.fetch() else {
+                    return Ok(false);
+                };
+                self.handle_message(msg, |m| b.produce(m), |p, o| b.commit(p, o))
+            }
+            KafkaBrokerBackend::Live(live) => {
+                let Some(msg) = live.fetch_one().await? else {
+                    return Ok(false);
+                };
+                let partition = msg.partition;
+                let offset = msg.offset;
+                let live_requeue = Arc::clone(live);
+                let pending_commit = Mutex::new(None::<(i32, i64)>);
+                let outcome = self.handle_message(
+                    msg,
+                    |m| live_requeue.requeue(m),
+                    |p, o| {
+                        *pending_commit.lock() = Some((p, o));
+                    },
+                )?;
+                if let Some((p, o)) = pending_commit.into_inner() {
+                    live.commit(p, o).await?;
+                    let _ = (partition, offset);
+                }
+                Ok(outcome)
+            }
+        }
+    }
+
+    fn handle_message(
+        &self,
+        msg: KafkaMessage,
+        requeue: impl Fn(KafkaMessage),
+        commit: impl Fn(i32, i64),
+    ) -> Result<bool, String> {
         if !self.buffer.try_enqueue(msg.value.len()) {
             if let Some(rt) = &self.runtime {
                 rt.bump_dropped("kafka", "buffer_full");
@@ -137,19 +206,20 @@ impl KafkaConsumer {
                     "dropped",
                 );
             }
-            // Do not commit; re-queue for retry (at-least-once).
-            self.broker.produce(msg);
+            requeue(msg);
             return Ok(false);
         }
         let size = msg.value.len();
+        let partition = msg.partition;
+        let offset = msg.offset;
         let sidecar = KafkaSidecar {
             key: msg
                 .key
                 .as_ref()
                 .map(|k| String::from_utf8_lossy(k).into_owned()),
             topic: msg.topic.clone(),
-            partition: msg.partition,
-            offset: msg.offset,
+            partition,
+            offset,
             broker_ts: msg.broker_ts.clone(),
         };
         let mapped = map_kafka_payload(self.decl.format, &msg.value, &sidecar);
@@ -171,14 +241,12 @@ impl KafkaConsumer {
                         "parse_error",
                     );
                 }
-                // Skip: no commit for this offset; partition continues.
                 Ok(false)
             }
             Ok(rec) => {
                 let ack = (self.append)(rec.clone());
                 if !ack.durable {
-                    // Do not commit; retry later.
-                    self.broker.produce(msg);
+                    requeue(msg);
                     return Ok(false);
                 }
                 self.stored.lock().push(rec);
@@ -194,10 +262,9 @@ impl KafkaConsumer {
                 let mut skip = self.skip_commit_once.lock();
                 if *skip {
                     *skip = false;
-                    // Crash between durable ack and OffsetCommit — duplicates MAY appear.
                     return Ok(false);
                 }
-                self.broker.commit(msg.partition, msg.offset);
+                commit(partition, offset);
                 if let Some(rt) = &self.runtime {
                     rt.bump_offset_commit(&self.decl.namespace, &self.decl.container, "ok");
                 }
@@ -212,10 +279,4 @@ fn format_label(f: PayloadFormat) -> &'static str {
         PayloadFormat::Raw => "raw",
         PayloadFormat::Json => "json",
     }
-}
-
-// Keep kafka-protocol linked (pure-Rust framing; FakeKafkaBroker covers conformance).
-#[allow(dead_code)]
-fn _kafka_protocol_touch() {
-    let _ = std::mem::size_of::<kafka_protocol::messages::ResponseHeader>();
 }

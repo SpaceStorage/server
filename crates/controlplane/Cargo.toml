@@ -24,10 +24,13 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+futures = { workspace = true }
 spacestorage-clocks = { path = "../clocks" }
 spacestorage-internode = { path = "../internode" }
 spacestorage-membership = { path = "../membership" }
 spacestorage-storage = { path = "../storage" }
+# Edition-2024 openraft (needs rustc ≥ 1.88). Pulls validit / quorum-set transitively.
+openraft = { version = "=0.10.0-alpha.35", default-features = false, features = ["serde", "tokio-rt", "type-alias"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -11,6 +11,7 @@ publish = false
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
 spacestorage-protocol-core = { path = "../protocol-core" }
+spacestorage-query = { path = "../query" }
 md-5 = "0.10"
 tokio = { workspace = true }
 tracing = { workspace = true }

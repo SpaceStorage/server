@@ -1,4 +1,4 @@
-//! Classify-gated ES verb dispatch (015 elasticsearch-search.md HC MUST).
+//! Classify-gated ES verb dispatch via shared `PlannerEngine` (005 T085).
 
 use std::sync::{Arc, RwLock};
 
@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use spacestorage_compat::{
     classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
 };
-use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_types::ContainerCatalog;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EsReply {
@@ -29,33 +30,29 @@ impl SessionState {
         }
     }
 
-    fn ensure_index(&self, index: &str) -> Result<ContainerId, EsReply> {
-        let mut cat = self.catalog.write().expect("catalog");
-        match cat.describe(&self.namespace, index) {
-            Ok(c) => {
-                if c.model != L3Model::DocumentStore {
-                    return Err(error_reply(
-                        400,
-                        "illegal_argument_exception",
-                        "wrong container type for index",
-                    ));
-                }
-                Ok(c.id)
-            }
-            Err(TypeError::NotFound) => cat
-                .create(
-                    &self.namespace,
-                    index,
-                    L3Model::DocumentStore,
-                    false,
-                    None,
-                    StorageModeChoice::Persistent,
-                )
-                .map_err(|e| {
-                    error_reply(500, "server_error", &format!("{e:?}"))
-                }),
-            Err(e) => Err(error_reply(500, "server_error", &format!("{e:?}"))),
-        }
+    fn engine(&self) -> PlannerEngine {
+        PlannerEngine::new(Arc::clone(&self.catalog))
+    }
+
+    fn exec(&self, req: LogicalRequest) -> Result<QueryResult, EsReply> {
+        self.engine()
+            .execute_blocking(
+                &self.namespace,
+                "es",
+                "elasticsearch",
+                req,
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .map_err(|e| error_reply(500, "server_error", &e.to_string()))
+    }
+
+    fn ensure_index(&self, index: &str) -> Result<(), EsReply> {
+        self.exec(LogicalRequest::TypeOp {
+            container: index.into(),
+            op: "ensure_doc".into(),
+        })?;
+        Ok(())
     }
 }
 
@@ -71,16 +68,11 @@ fn error_reply(status: u16, typ: &str, reason: &str) -> EsReply {
 
 fn refuse(verb: &str, err: CompatError) -> EsReply {
     record_must_not(ProtocolId::Elasticsearch.as_str(), verb);
-    let typ = if err.code() == "agg_not_in_profile" {
-        "illegal_argument_exception"
-    } else {
-        "illegal_argument_exception"
-    };
-    // Never 200 + empty hits for MUST NOT.
+    let typ = "illegal_argument_exception";
     error_reply(400, typ, &err.to_string())
 }
 
-/// Dispatch ES verb (`INDEX`, `GET`, `SEARCH_MATCH`, `AGG_TERMS`, `ILM`, …).
+/// Dispatch ES verb (`INDEX`, `GET`, `SEARCH_MATCH`, …) through PlannerEngine IR.
 pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsReply {
     let upper = verb.to_ascii_uppercase().replace('-', "_");
     match classify_outcome(session.profile, ProtocolId::Elasticsearch, &upper) {
@@ -92,7 +84,7 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsRepl
         "CREATE_INDEX" | "LIST" | "CAT" => {
             let index = args.first().copied().unwrap_or("docs");
             match session.ensure_index(index) {
-                Ok(_) => EsReply::Ok(json!({ "acknowledged": true, "index": index })),
+                Ok(()) => EsReply::Ok(json!({ "acknowledged": true, "index": index })),
                 Err(e) => e,
             }
         }
@@ -100,32 +92,42 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsRepl
             let index = args.first().copied().unwrap_or("docs");
             let id = args.get(1).copied().unwrap_or("1");
             let body = args.get(2).copied().unwrap_or("{}");
-            let cid = match session.ensure_index(index) {
-                Ok(c) => c,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.put(cid, id, body.as_bytes().to_vec()) {
-                Ok(()) => EsReply::Ok(json!({
+            if let Err(e) = session.ensure_index(index) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Object {
+                container: index.into(),
+                key: id.into(),
+                bytes: body.as_bytes().to_vec(),
+            }) {
+                Ok(_) => EsReply::Ok(json!({
                     "_index": index,
                     "_id": id,
                     "result": "created"
                 })),
-                Err(e) => error_reply(500, "server_error", &format!("{e:?}")),
+                Err(e) => e,
             }
         }
         "GET" => {
             let index = args.first().copied().unwrap_or("docs");
             let id = args.get(1).copied().unwrap_or("1");
-            let cid = match session.ensure_index(index) {
-                Ok(c) => c,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            match cat.get(cid, id) {
-                Ok(Some(v)) => {
+            if let Err(e) = session.ensure_index(index) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Point {
+                container: index.into(),
+                key: id.into(),
+            }) {
+                Ok(r) if r.rows.is_empty() => {
+                    EsReply::Ok(json!({ "_index": index, "_id": id, "found": false }))
+                }
+                Ok(r) => {
+                    let raw = r.rows[0]
+                        .get(1)
+                        .and_then(|x| x.clone())
+                        .unwrap_or_else(|| "{}".into());
                     let source: Value =
-                        serde_json::from_slice(v).unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(v) }));
+                        serde_json::from_str(&raw).unwrap_or_else(|_| json!({ "raw": raw }));
                     EsReply::Ok(json!({
                         "_index": index,
                         "_id": id,
@@ -133,43 +135,50 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsRepl
                         "_source": source
                     }))
                 }
-                Ok(None) => EsReply::Ok(json!({ "_index": index, "_id": id, "found": false })),
-                Err(e) => error_reply(500, "server_error", &format!("{e:?}")),
+                Err(e) => e,
             }
         }
         "DELETE" => {
             let index = args.first().copied().unwrap_or("docs");
             let id = args.get(1).copied().unwrap_or("1");
-            let cid = match session.ensure_index(index) {
-                Ok(c) => c,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.delete_row(cid, id) {
-                Ok(true) => EsReply::Ok(json!({ "_index": index, "_id": id, "result": "deleted" })),
-                Ok(false) => EsReply::Ok(json!({ "_index": index, "_id": id, "result": "not_found" })),
-                Err(e) => error_reply(500, "server_error", &format!("{e:?}")),
+            if let Err(e) = session.ensure_index(index) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Mutate {
+                container: index.into(),
+                op: "delete".into(),
+                sql: id.into(),
+            }) {
+                Ok(r) if r.tag.contains('1') => {
+                    EsReply::Ok(json!({ "_index": index, "_id": id, "result": "deleted" }))
+                }
+                Ok(_) => {
+                    EsReply::Ok(json!({ "_index": index, "_id": id, "result": "not_found" }))
+                }
+                Err(e) => e,
             }
         }
         "SEARCH" | "SEARCH_QUERY_STRING" | "SEARCH_MATCH" | "SEARCH_TERM" | "SEARCH_RANGE"
         | "SEARCH_BOOL" => {
             let index = args.first().copied().unwrap_or("docs");
             let needle = args.get(1).copied().unwrap_or("");
-            let cid = match session.ensure_index(index) {
-                Ok(c) => c,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            let keys = match cat.keys(cid) {
-                Ok(k) => k,
-                Err(e) => return error_reply(500, "server_error", &format!("{e:?}")),
-            };
-            let mut hits = Vec::new();
-            for k in keys {
-                if let Ok(Some(v)) = cat.get(cid, &k) {
-                    let text = String::from_utf8_lossy(v);
-                    if needle.is_empty() || text.contains(needle) || k.contains(needle) {
-                        let source: Value = serde_json::from_slice(v)
+            if let Err(e) = session.ensure_index(index) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Scan {
+                container: index.into(),
+                filter: if needle.is_empty() {
+                    None
+                } else {
+                    Some(needle.into())
+                },
+            }) {
+                Ok(r) => {
+                    let mut hits = Vec::new();
+                    for row in r.rows {
+                        let k = row.first().and_then(|x| x.clone()).unwrap_or_default();
+                        let text = row.get(1).and_then(|x| x.clone()).unwrap_or_default();
+                        let source: Value = serde_json::from_str(&text)
                             .unwrap_or_else(|_| json!({ "raw": text }));
                         hits.push(json!({
                             "_index": index,
@@ -177,14 +186,15 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsRepl
                             "_source": source
                         }));
                     }
+                    EsReply::Ok(json!({
+                        "hits": {
+                            "total": { "value": hits.len(), "relation": "eq" },
+                            "hits": hits
+                        }
+                    }))
                 }
+                Err(e) => e,
             }
-            EsReply::Ok(json!({
-                "hits": {
-                    "total": { "value": hits.len(), "relation": "eq" },
-                    "hits": hits
-                }
-            }))
         }
         other => refuse(
             other,

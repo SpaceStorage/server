@@ -77,6 +77,7 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/backup", post(backup_alias))
         .route("/v1/restore", post(restore_alias))
         .route("/v1/snapshots", get(snapshots_stub))
+        .route("/v1/auth/login", post(auth_login))
         .route("/ui", get(ui_root))
         .route("/ui/cluster", get(ui_cluster))
         .route("/ui/console", get(ui_console))
@@ -531,6 +532,70 @@ fn ui_principal(node: &Node, headers: &HeaderMap) -> Option<spacestorage_admin_u
         .unwrap_or("");
     let ui = node.admin_ui.read().ok()?;
     (ui.resolve_principal)(token)
+}
+
+/// `014` AuthLogin: exchange static admin token (or password) for a SessionToken bearer.
+async fn auth_login(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    // Accept either Authorization: Bearer <admin-token-file> or JSON {"token":"..."}.
+    let hdr = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .strip_prefix("Bearer ")
+        .unwrap_or("");
+    let json_tok = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| {
+            v.get("token")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default();
+    let presented = if !hdr.is_empty() {
+        hdr
+    } else {
+        json_tok.as_str()
+    };
+    let expected = match node.config.load().admin_token_file.as_ref() {
+        Some(p) => std::fs::read_to_string(p).unwrap_or_default(),
+        None => String::new(),
+    };
+    if !check_bearer(presented, expected.trim()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "unauthorized".into(),
+                message: "invalid admin token".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
+    }
+    let (tok, _) = {
+        let mut store = node.sessions.write().unwrap();
+        store.issue(
+            uuid::Uuid::now_v7(),
+            "admin",
+            true,
+            1,
+            std::time::Duration::from_secs(12 * 3600),
+        )
+    };
+    with_headers(
+        &node,
+        Json(serde_json::json!({
+            "token": tok,
+            "token_type": "Bearer",
+            "expires_in": 12 * 3600,
+            "principal": "admin",
+            "cluster_admin": true
+        }))
+        .into_response(),
+    )
 }
 
 async fn cluster_map(

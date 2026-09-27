@@ -4,6 +4,7 @@ pub mod declaration;
 pub mod error;
 pub mod format;
 pub mod kafka;
+pub mod kafka_wire;
 pub mod parse_rfc3164;
 pub mod parse_rfc5424;
 pub mod record;
@@ -12,7 +13,10 @@ pub mod syslog;
 pub use declaration::{IngestAuthz, KafkaIngest, KafkaIngestStore, SyslogIngestBind};
 pub use error::{IngestError, UI_INGEST_SLICE11_REQUIRED};
 pub use format::{map_kafka_payload, PayloadFormat};
-pub use kafka::{AppendAck, DecodeBuffer, FakeKafkaBroker, KafkaConsumer, KafkaMessage};
+pub use kafka::{
+    AppendAck, DecodeBuffer, FakeKafkaBroker, KafkaBrokerBackend, KafkaConsumer, KafkaMessage,
+};
+pub use kafka_wire::{range_assign_partitions, LiveKafkaClient};
 pub use record::LogRecord;
 pub use syslog::SyslogHandler;
 

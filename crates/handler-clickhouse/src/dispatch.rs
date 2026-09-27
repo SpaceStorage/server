@@ -1,14 +1,12 @@
-//! Classify-gated ClickHouse SQL verbs (shared by native + HTTP entrypoints).
+//! Classify-gated ClickHouse SQL verbs via shared `PlannerEngine` (005 T085).
 
 use std::sync::{Arc, RwLock};
 
 use spacestorage_compat::{
     classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
 };
-use spacestorage_types::{
-    ContainerCatalog, ContainerId, ContainerSchema, Field, L3Model, StorageModeChoice, TypeError,
-    ValueDomain,
-};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_types::ContainerCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClickHouseReply {
@@ -43,51 +41,32 @@ impl SessionState {
         }
     }
 
-    fn ensure_table(&self, table: &str) -> Result<ContainerId, ClickHouseReply> {
-        let mut cat = self.catalog.write().expect("catalog");
-        match cat.describe(&self.namespace, table) {
-            Ok(c) => {
-                if c.model != L3Model::RelationalTable {
-                    return Err(ClickHouseReply::Error {
-                        code: "compat_must_not".into(),
-                        message: "wrong type".into(),
-                    });
-                }
-                Ok(c.id)
-            }
-            Err(TypeError::NotFound) => {
-                let schema = ContainerSchema {
-                    fields: vec![
-                        Field {
-                            name: "id".into(),
-                            domain: ValueDomain::Utf8,
-                            nullable: false,
-                        },
-                        Field {
-                            name: "v".into(),
-                            domain: ValueDomain::Utf8,
-                            nullable: true,
-                        },
-                    ],
-                };
-                cat.create(
-                    &self.namespace,
-                    table,
-                    L3Model::RelationalTable,
-                    false,
-                    Some(schema),
-                    StorageModeChoice::Persistent,
-                )
-                .map_err(|e| ClickHouseReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                })
-            }
-            Err(e) => Err(ClickHouseReply::Error {
+    fn engine(&self) -> PlannerEngine {
+        PlannerEngine::new(Arc::clone(&self.catalog))
+    }
+
+    fn exec(&self, req: LogicalRequest) -> Result<QueryResult, ClickHouseReply> {
+        self.engine()
+            .execute_blocking(
+                &self.namespace,
+                "ch",
+                "clickhouse",
+                req,
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .map_err(|e| ClickHouseReply::Error {
                 code: "server_error".into(),
-                message: format!("{e:?}"),
-            }),
-        }
+                message: e.to_string(),
+            })
+    }
+
+    fn ensure_table(&self, table: &str) -> Result<(), ClickHouseReply> {
+        self.exec(LogicalRequest::TypeOp {
+            container: table.into(),
+            op: "ensure_table".into(),
+        })?;
+        Ok(())
     }
 }
 
@@ -97,6 +76,16 @@ fn refuse(protocol: ProtocolId, verb: &str, err: CompatError) -> ClickHouseReply
         code: err.code().into(),
         message: err.to_string(),
     }
+}
+
+fn rows_from(result: QueryResult) -> ClickHouseReply {
+    let mut rows = Vec::new();
+    for r in result.rows {
+        let k = r.first().and_then(|x| x.clone()).unwrap_or_default();
+        let v = r.get(1).and_then(|x| x.clone()).unwrap_or_default();
+        rows.push((k, v));
+    }
+    ClickHouseReply::Rows(rows)
 }
 
 pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> ClickHouseReply {
@@ -110,11 +99,16 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> ClickH
         "CREATE" => {
             let table = args
                 .iter()
-                .find(|a| !matches!(a.to_ascii_uppercase().as_str(), "TABLE" | "IF" | "NOT" | "EXISTS"))
+                .find(|a| {
+                    !matches!(
+                        a.to_ascii_uppercase().as_str(),
+                        "TABLE" | "IF" | "NOT" | "EXISTS"
+                    )
+                })
                 .copied()
                 .unwrap_or("t");
             match session.ensure_table(table) {
-                Ok(_) => ClickHouseReply::Ok,
+                Ok(()) => ClickHouseReply::Ok,
                 Err(e) => e,
             }
         }
@@ -122,46 +116,30 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> ClickH
             let table = args.first().copied().unwrap_or("t");
             let key = args.get(1).copied().unwrap_or("k");
             let val = args.get(2).copied().unwrap_or("");
-            let id = match session.ensure_table(table) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.put(id, key, val.as_bytes().to_vec()) {
-                Ok(()) => ClickHouseReply::Ok,
-                Err(e) => ClickHouseReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                },
+            if let Err(e) = session.ensure_table(table) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Object {
+                container: table.into(),
+                key: key.into(),
+                bytes: val.as_bytes().to_vec(),
+            }) {
+                Ok(_) => ClickHouseReply::Ok,
+                Err(e) => e,
             }
         }
         "SELECT" | "SELECT_WHERE" => {
             let table = args.first().copied().unwrap_or("t");
-            let filter = args.get(1).copied();
-            let id = match session.ensure_table(table) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            match cat.keys(id) {
-                Ok(keys) => {
-                    let mut rows = Vec::new();
-                    for k in keys {
-                        if let Some(f) = filter {
-                            if k != f && !k.contains(f) {
-                                continue;
-                            }
-                        }
-                        if let Ok(Some(v)) = cat.get(id, &k) {
-                            rows.push((k, String::from_utf8_lossy(v).into_owned()));
-                        }
-                    }
-                    ClickHouseReply::Rows(rows)
-                }
-                Err(e) => ClickHouseReply::Error {
-                    code: "server_error".into(),
-                    message: format!("{e:?}"),
-                },
+            let filter = args.get(1).map(|s| (*s).to_string());
+            if let Err(e) = session.ensure_table(table) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Scan {
+                container: table.into(),
+                filter,
+            }) {
+                Ok(r) => rows_from(r),
+                Err(e) => e,
             }
         }
         other => refuse(

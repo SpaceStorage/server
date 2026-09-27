@@ -22,7 +22,8 @@ async fn kafka_and_syslog_receive_default_channel() {
     exp.emit(ev.clone()).unwrap();
     let got = exp.try_pop().expect("default channel event");
 
-    let kafka = KafkaProducer::new();
+    // Memory mode still builds real Produce frames without requiring a broker.
+    let kafka = KafkaProducer::memory();
     kafka
         .send(
             &KafkaSinkConfig {
@@ -34,6 +35,9 @@ async fn kafka_and_syslog_receive_default_channel() {
         .await
         .unwrap();
     assert_eq!(kafka.sent.load(std::sync::atomic::Ordering::Relaxed), 1);
+    let outbox = kafka.memory_outbox().expect("memory outbox");
+    assert_eq!(outbox.len(), 1);
+    assert!(outbox[0].wire_frame.len() > 4);
 
     let syslog = SyslogExporter::new();
     let msg = syslog.format_rfc5424(&got);

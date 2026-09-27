@@ -1,4 +1,4 @@
-//! Classify-gated S3 API verbs.
+//! Classify-gated S3 API verbs via shared `PlannerEngine` (005 T086).
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -6,7 +6,8 @@ use std::sync::{Arc, RwLock};
 use spacestorage_compat::{
     classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
 };
-use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_types::{ContainerCatalog, L3Model};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum S3Reply {
@@ -34,36 +35,32 @@ impl SessionState {
         }
     }
 
-    fn ensure_bucket(&self, bucket: &str) -> Result<ContainerId, S3Reply> {
-        let mut cat = self.catalog.write().expect("catalog");
-        match cat.describe(&self.namespace, bucket) {
-            Ok(c) => {
-                if c.model != L3Model::KvStore {
-                    return Err(S3Reply::Error {
-                        code: "InvalidBucketState".into(),
-                        message: "wrong type".into(),
-                    });
-                }
-                Ok(c.id)
-            }
-            Err(TypeError::NotFound) => cat
-                .create(
-                    &self.namespace,
-                    bucket,
-                    L3Model::KvStore,
-                    false,
-                    None,
-                    StorageModeChoice::Persistent,
-                )
-                .map_err(|e| S3Reply::Error {
-                    code: "InternalError".into(),
-                    message: format!("{e:?}"),
-                }),
-            Err(e) => Err(S3Reply::Error {
+    fn engine(&self) -> PlannerEngine {
+        PlannerEngine::new(Arc::clone(&self.catalog))
+    }
+
+    fn exec(&self, req: LogicalRequest) -> Result<QueryResult, S3Reply> {
+        self.engine()
+            .execute_blocking(
+                &self.namespace,
+                "s3",
+                "s3",
+                req,
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .map_err(|e| S3Reply::Error {
                 code: "InternalError".into(),
-                message: format!("{e:?}"),
-            }),
-        }
+                message: e.to_string(),
+            })
+    }
+
+    fn ensure_bucket(&self, bucket: &str) -> Result<(), S3Reply> {
+        self.exec(LogicalRequest::TypeOp {
+            container: bucket.into(),
+            op: "ensure_kv".into(),
+        })?;
+        Ok(())
     }
 }
 
@@ -81,17 +78,16 @@ pub fn put_object_bytes(
     key: &str,
     body: Vec<u8>,
 ) -> S3Reply {
-    let id = match session.ensure_bucket(bucket) {
-        Ok(id) => id,
-        Err(e) => return e,
-    };
-    let mut cat = session.catalog.write().expect("catalog");
-    match cat.put(id, key, body) {
-        Ok(()) => S3Reply::Ok,
-        Err(e) => S3Reply::Error {
-            code: "InternalError".into(),
-            message: format!("{e:?}"),
-        },
+    if let Err(e) = session.ensure_bucket(bucket) {
+        return e;
+    }
+    match session.exec(LogicalRequest::Object {
+        container: bucket.into(),
+        key: key.into(),
+        bytes: body,
+    }) {
+        Ok(_) => S3Reply::Ok,
+        Err(e) => e,
     }
 }
 
@@ -121,7 +117,10 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Repl
             let mut xml = String::from("<ListAllMyBucketsResult><Buckets>");
             for c in cat.list() {
                 if c.namespace.as_str() == session.namespace && c.model == L3Model::KvStore {
-                    xml.push_str(&format!("<Bucket><Name>{}</Name></Bucket>", c.name.as_str()));
+                    xml.push_str(&format!(
+                        "<Bucket><Name>{}</Name></Bucket>",
+                        c.name.as_str()
+                    ));
                 }
             }
             xml.push_str("</Buckets></ListAllMyBucketsResult>");
@@ -130,7 +129,7 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Repl
         "CREATEBUCKET" => {
             let bucket = args.first().copied().unwrap_or("bucket");
             match session.ensure_bucket(bucket) {
-                Ok(_) => S3Reply::Ok,
+                Ok(()) => S3Reply::Ok,
                 Err(e) => e,
             }
         }
@@ -143,65 +142,72 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Repl
         "GETOBJECT" | "HEADOBJECT" => {
             let bucket = args.first().copied().unwrap_or("bucket");
             let key = args.get(1).copied().unwrap_or("key");
-            let id = match session.ensure_bucket(bucket) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            match cat.get(id, key) {
-                Ok(Some(v)) => {
-                    if upper == "HEADOBJECT" {
-                        S3Reply::Ok
-                    } else {
-                        S3Reply::Body(v.to_vec())
-                    }
-                }
-                Ok(None) => S3Reply::Error {
+            if let Err(e) = session.ensure_bucket(bucket) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Point {
+                container: bucket.into(),
+                key: key.into(),
+            }) {
+                Ok(r) if r.rows.is_empty() => S3Reply::Error {
                     code: "NoSuchKey".into(),
                     message: key.into(),
                 },
-                Err(e) => S3Reply::Error {
-                    code: "InternalError".into(),
-                    message: format!("{e:?}"),
-                },
+                Ok(r) => {
+                    let v = r.rows[0]
+                        .get(1)
+                        .and_then(|x| x.as_ref())
+                        .map(|s| s.as_bytes().to_vec())
+                        .unwrap_or_default();
+                    if upper == "HEADOBJECT" {
+                        S3Reply::Ok
+                    } else {
+                        S3Reply::Body(v)
+                    }
+                }
+                Err(e) => e,
             }
         }
         "DELETEOBJECT" => {
             let bucket = args.first().copied().unwrap_or("bucket");
             let key = args.get(1).copied().unwrap_or("key");
-            let id = match session.ensure_bucket(bucket) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            let _ = cat.delete_row(id, key);
+            if let Err(e) = session.ensure_bucket(bucket) {
+                return e;
+            }
+            let _ = session.exec(LogicalRequest::Mutate {
+                container: bucket.into(),
+                op: "delete".into(),
+                sql: key.into(),
+            });
             S3Reply::Ok
         }
         "LISTOBJECTSV2" => {
             let bucket = args.first().copied().unwrap_or("bucket");
             let prefix = args.get(1).copied().unwrap_or("");
-            let id = match session.ensure_bucket(bucket) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let cat = session.catalog.read().expect("catalog");
-            let keys = match cat.keys(id) {
-                Ok(k) => k,
-                Err(e) => {
-                    return S3Reply::Error {
-                        code: "InternalError".into(),
-                        message: format!("{e:?}"),
-                    }
-                }
-            };
-            let mut xml = String::from("<ListBucketResult><Contents>");
-            for k in keys {
-                if prefix.is_empty() || k.starts_with(prefix) {
-                    xml.push_str(&format!("<Key>{k}</Key>"));
-                }
+            if let Err(e) = session.ensure_bucket(bucket) {
+                return e;
             }
-            xml.push_str("</Contents></ListBucketResult>");
-            S3Reply::Xml(xml)
+            match session.exec(LogicalRequest::Scan {
+                container: bucket.into(),
+                filter: if prefix.is_empty() {
+                    None
+                } else {
+                    Some(prefix.into())
+                },
+            }) {
+                Ok(r) => {
+                    let mut xml = String::from("<ListBucketResult><Contents>");
+                    for row in r.rows {
+                        let k = row.first().and_then(|x| x.clone()).unwrap_or_default();
+                        if prefix.is_empty() || k.starts_with(prefix) {
+                            xml.push_str(&format!("<Key>{k}</Key>"));
+                        }
+                    }
+                    xml.push_str("</Contents></ListBucketResult>");
+                    S3Reply::Xml(xml)
+                }
+                Err(e) => e,
+            }
         }
         "CREATEMULTIPARTUPLOAD" => {
             let bucket = args.first().copied().unwrap_or("bucket");
@@ -232,18 +238,7 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> S3Repl
             for p in parts {
                 assembled.extend_from_slice(&p);
             }
-            let id = match session.ensure_bucket(&bucket) {
-                Ok(id) => id,
-                Err(e) => return e,
-            };
-            let mut cat = session.catalog.write().expect("catalog");
-            match cat.put(id, &key, assembled) {
-                Ok(()) => S3Reply::Ok,
-                Err(e) => S3Reply::Error {
-                    code: "InternalError".into(),
-                    message: format!("{e:?}"),
-                },
-            }
+            put_object_bytes(session, &bucket, &key, assembled)
         }
         other => refuse(
             other,

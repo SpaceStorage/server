@@ -6,6 +6,8 @@ pub mod lease;
 pub mod membership;
 pub mod metrics_agg;
 pub mod namespace;
+pub mod openraft_adapter;
+pub mod openraft_store;
 pub mod ops;
 pub mod raft_net;
 pub mod raft_store;
@@ -19,9 +21,13 @@ use crate::cluster::{ClusterOp, ClusterState, MemberRecord, MemberStatus};
 use crate::error::{ControlPlaneError, Result};
 use crate::group::GroupId;
 use crate::membership::{first_binary_voter_set, MembershipOp, VoterSet};
+use crate::openraft_adapter::{
+    app_request_to_record, bootstrap_single_voter, start_raft, ControlRaft, RaftAppRequest,
+};
 use crate::raft_net::{InProcessRaftNet, RaftAppend, RaftRpc, RaftVote};
 use crate::raft_store::{RaftBody, RaftLogRecord, RaftStore};
 use crate::read::ReadIndex;
+use openraft::type_config::async_runtime::watch::WatchReceiver;
 use parking_lot::Mutex as SyncMutex;
 use spacestorage_clocks::HlcStamp;
 use std::collections::{BTreeMap, BTreeSet};
@@ -41,10 +47,14 @@ pub enum RaftRole {
     Leader,
 }
 
+/// One Raft group: openraft runtime (`Raft::new`) owns elections/commit; [`RaftStore`]
+/// keeps the SpaceStorage on-disk format for restore / read-index.
 pub struct RaftGroup {
     pub group: GroupId,
     pub node_id: Uuid,
     pub store: RaftStore,
+    /// Openraft 0.10 runtime (spawned via [`start_raft`]).
+    pub raft: ControlRaft,
     pub role: RaftRole,
     pub leader: Option<Uuid>,
     pub voter_set: VoterSet,
@@ -60,10 +70,12 @@ impl RaftGroup {
         voter_set: VoterSet,
     ) -> Result<Self> {
         let store = RaftStore::open(data_dir, group).await?;
+        let raft = start_raft(node_id).await?;
         Ok(Self {
             group,
             node_id,
             store,
+            raft,
             role: RaftRole::Follower,
             leader: None,
             voter_set,
@@ -86,15 +98,18 @@ impl RaftGroup {
         }
     }
 
-    /// Become leader when alone or after winning votes (in-process).
-    pub fn become_leader(&mut self) {
+    /// Bootstrap openraft membership `{self}` and mark this node Leader (single-voter path).
+    pub async fn become_leader(&mut self) -> Result<()> {
+        bootstrap_single_voter(&self.raft, self.node_id).await?;
         self.role = RaftRole::Leader;
         self.leader = Some(self.node_id);
-        self.store.current_term = self.store.current_term.saturating_add(1);
+        let m = self.raft.metrics().borrow_watched().clone();
+        self.store.current_term = m.current_term.max(1);
         self.elections_total.fetch_add(1, Ordering::Relaxed);
         for v in &self.voter_set.voters {
             self.match_index.insert(*v, self.store.commit_index);
         }
+        Ok(())
     }
 
     pub async fn append_as_leader(
@@ -112,6 +127,28 @@ impl RaftGroup {
         if !self.voter_set.is_voter(&self.node_id) {
             return Err(ControlPlaneError::NotMember);
         }
+
+        // Prefer openraft client_write when alone (production single-voter / first-binary).
+        if net.is_none() && self.voter_set.voters.len() == 1 {
+            let req = RaftAppRequest {
+                group: self.group,
+                body: body.clone(),
+            };
+            let resp = self
+                .raft
+                .client_write(req.clone())
+                .await
+                .map_err(|e| ControlPlaneError::Msg(format!("client_write: {e}")))?;
+            let index = resp.log_id.index();
+            let term = self.store.current_term.max(1);
+            let rec = app_request_to_record(self.group, term, index, req, hlc);
+            self.store.append_records(&[rec]).await?;
+            self.store.commit_index = index;
+            self.store.persist_meta().await?;
+            self.match_index.insert(self.node_id, index);
+            return Ok(index);
+        }
+
         let index = self.store.last_index() + 1;
         let term = self.store.current_term;
         let rec = RaftLogRecord {
@@ -124,7 +161,7 @@ impl RaftGroup {
         self.store.append_records(&[rec.clone()]).await?;
         self.match_index.insert(self.node_id, index);
 
-        // Replicate to other voters via in-process net when provided.
+        // Replicate to other voters via in-process net when provided (harness path).
         if let Some(net) = net {
             for peer in self.voter_set.voters.iter().copied() {
                 if peer == self.node_id {
@@ -160,12 +197,10 @@ impl RaftGroup {
             self.store.persist_meta().await?;
             Ok(index)
         } else if net.is_none() {
-            // No net: treat local-only as minority for multi-voter.
             Err(ControlPlaneError::Minority {
                 group: self.group,
             })
         } else {
-            // Optimistic commit for harness when peers will ack synchronously via handle_rpc.
             self.store.commit_index = index;
             self.store.persist_meta().await?;
             Ok(index)
@@ -265,7 +300,13 @@ impl RaftGroup {
             }
         }
         if votes >= self.voter_set.majority() {
-            self.become_leader();
+            // Harness path: mark leader locally without re-running openraft initialize.
+            self.role = RaftRole::Leader;
+            self.leader = Some(self.node_id);
+            self.elections_total.fetch_add(1, Ordering::Relaxed);
+            for v in &self.voter_set.voters {
+                self.match_index.insert(*v, self.store.commit_index);
+            }
             Ok(())
         } else {
             self.role = RaftRole::Follower;
@@ -300,7 +341,7 @@ impl ControlPlane {
         let cluster = ClusterState::bootstrap(cluster_uuid, cluster_name, node_id, node_name);
         let voter_set = cluster.voter_set.clone();
         let mut group = RaftGroup::open(&data_dir, GroupId::Cluster, node_id, voter_set).await?;
-        group.become_leader();
+        group.become_leader().await?;
         Ok(Self {
             data_dir,
             node_id,

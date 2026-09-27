@@ -8,6 +8,7 @@ use crate::schema::ContainerSchema;
 use crate::validate::{validate_definition, validate_schema_alter};
 use crate::{Container, L3Model};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct TypeCatalog {
@@ -58,13 +59,25 @@ impl TypeCatalog {
 
 pub type Catalog = ContainerCatalog;
 
-#[derive(Debug)]
 pub struct ContainerCatalog {
     pub types: TypeCatalog,
     containers: HashMap<(String, String), Container>,
     /// In-memory row store for CRUD smoke (canonical blob path readiness).
     rows: HashMap<ContainerId, HashMap<String, Vec<u8>>>,
+    /// Optional durable put (WAL) after memory insert — Persistent/Hybrid only.
+    durable_put: Option<DurablePutHook>,
+    /// Optional durable create (catalog definitions.jsonl).
+    durable_create: Option<DurableCreateHook>,
 }
+
+/// Sync hook invoked after an in-memory put for durable modes (013 residual).
+pub type DurablePutHook =
+    Arc<dyn Fn(ContainerId, StorageModeChoice, &str, &[u8]) -> Result<(), String> + Send + Sync>;
+
+/// Sync hook invoked after container create for Persistent/Hybrid (definitions persist).
+pub type DurableCreateHook = Arc<
+    dyn Fn(ContainerId, &str, &str, L3Model, StorageModeChoice) -> Result<(), String> + Send + Sync,
+>;
 
 impl Default for ContainerCatalog {
     fn default() -> Self {
@@ -78,7 +91,18 @@ impl ContainerCatalog {
             types: TypeCatalog::first_binary(),
             containers: HashMap::new(),
             rows: HashMap::new(),
+            durable_put: None,
+            durable_create: None,
         }
+    }
+
+    pub fn set_durable_hooks(
+        &mut self,
+        put: Option<DurablePutHook>,
+        create: Option<DurableCreateHook>,
+    ) {
+        self.durable_put = put;
+        self.durable_create = create;
     }
 
     /// Create via `validate_definition` + `TypeCatalog` lookup (FR-016).
@@ -116,8 +140,8 @@ impl ContainerCatalog {
         let id = new_container_id();
         let c = Container {
             id,
-            name: ContainerName::new(n),
-            namespace: NamespaceName::new(ns),
+            name: ContainerName::new(n.clone()),
+            namespace: NamespaceName::new(ns.clone()),
             model,
             multi_active: false,
             schema: def.schema.clone(),
@@ -125,7 +149,55 @@ impl ContainerCatalog {
         };
         self.rows.insert(id, HashMap::new());
         self.containers.insert(key, c);
+        if !matches!(def.mode, StorageModeChoice::Memory) {
+            if let Some(hook) = &self.durable_create {
+                hook(id, &ns, &n, model, def.mode).map_err(|e| TypeError::Msg(e))?;
+            }
+        }
         Ok(id)
+    }
+
+    /// Restore a container with a known id (boot from definitions.jsonl).
+    pub fn restore_container(
+        &mut self,
+        id: ContainerId,
+        namespace: impl Into<String>,
+        name: impl Into<String>,
+        model: L3Model,
+        mode: StorageModeChoice,
+        schema: Option<ContainerSchema>,
+    ) -> Result<(), TypeError> {
+        let ns = namespace.into();
+        let n = name.into();
+        let key = (ns.clone(), n.clone());
+        if self.containers.contains_key(&key) {
+            return Err(TypeError::AlreadyExists);
+        }
+        let c = Container {
+            id,
+            name: ContainerName::new(n),
+            namespace: NamespaceName::new(ns),
+            model,
+            multi_active: false,
+            schema,
+            mode,
+        };
+        self.rows.entry(id).or_default();
+        self.containers.insert(key, c);
+        Ok(())
+    }
+
+    /// Replace in-memory rows for a container (WAL content hydrate).
+    pub fn replace_rows(
+        &mut self,
+        id: ContainerId,
+        rows: HashMap<String, Vec<u8>>,
+    ) -> Result<(), TypeError> {
+        if !self.rows.contains_key(&id) {
+            return Err(TypeError::NotFound);
+        }
+        self.rows.insert(id, rows);
+        Ok(())
     }
 
     /// First-binary alter: type fixed for life; additive schema / mode updates (FR-017b).
@@ -184,6 +256,20 @@ impl ContainerCatalog {
     }
 
     pub fn put(&mut self, id: ContainerId, key: &str, value: Vec<u8>) -> Result<(), TypeError> {
+        let mode = self
+            .containers
+            .values()
+            .find(|c| c.id == id)
+            .map(|c| c.mode)
+            .ok_or(TypeError::NotFound)?;
+        if !self.rows.contains_key(&id) {
+            return Err(TypeError::NotFound);
+        }
+        if !matches!(mode, StorageModeChoice::Memory) {
+            if let Some(hook) = &self.durable_put {
+                hook(id, mode, key, &value).map_err(TypeError::Msg)?;
+            }
+        }
         let map = self.rows.get_mut(&id).ok_or(TypeError::NotFound)?;
         map.insert(key.into(), value);
         Ok(())
@@ -303,6 +389,8 @@ mod tests {
             types: TypeCatalog::empty(),
             containers: HashMap::new(),
             rows: HashMap::new(),
+            durable_put: None,
+            durable_create: None,
         };
         let def = ContainerDefinition {
             type_name: "kv_store".into(),

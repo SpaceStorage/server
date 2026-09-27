@@ -127,6 +127,20 @@ fn insert_row(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Que
         .describe(namespace, &name)
         .map_err(|e| ExecError::Msg(e.to_string()))?;
     let id = c.id;
+    // Document Store / K/V: canonical blob path (key, value) — same as Redis G11.
+    if matches!(c.model, L3Model::DocumentStore | L3Model::KvStore) {
+        let key = values
+            .first()
+            .cloned()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let val = values.get(1).cloned().unwrap_or_default();
+        cat.put(id, &key, val.as_bytes().to_vec())
+            .map_err(|e| ExecError::Msg(e.to_string()))?;
+        return Ok(QueryResult {
+            tag: "INSERT 0 1".into(),
+            ..Default::default()
+        });
+    }
     let cols: Vec<String> = c
         .schema
         .as_ref()
@@ -181,6 +195,30 @@ fn select_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
             .describe(namespace, &name)
             .map_err(|e| ExecError::Msg(e.to_string()))?;
         let id = c.id;
+        if matches!(c.model, L3Model::DocumentStore | L3Model::KvStore) {
+            let where_eq = parse_simple_where(sql);
+            let keys = cat.keys(id).map_err(|e| ExecError::Msg(e.to_string()))?;
+            let mut rows = Vec::new();
+            for k in keys {
+                if let Some((wk, wv)) = &where_eq {
+                    // Blob path: WHERE id = 'k' or WHERE key = 'k'
+                    if (wk == "id" || wk == "key") && k != *wv {
+                        continue;
+                    }
+                }
+                let raw = cat.get(id, &k).map_err(|e| ExecError::Msg(e.to_string()))?;
+                let Some(raw) = raw else { continue };
+                rows.push(vec![
+                    Some(k),
+                    Some(String::from_utf8_lossy(raw).into_owned()),
+                ]);
+            }
+            return Ok(QueryResult {
+                tag: format!("SELECT {}", rows.len()),
+                columns: vec!["id".into(), "value".into()],
+                rows,
+            });
+        }
         let cols: Vec<String> = c
             .schema
             .as_ref()
@@ -413,6 +451,176 @@ fn delete_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
     Ok(QueryResult {
         tag: format!("DELETE {n}"),
         ..Default::default()
+    })
+}
+
+/// Ensure a container exists for protocol IR (T084–T086). `model` is
+/// `kv` | `doc` | `table` (default relational with id/v columns).
+pub fn ensure_container(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    name: &str,
+    model: &str,
+) -> Result<QueryResult, ExecError> {
+    use spacestorage_types::TypeError;
+    let mut cat = catalog.write().expect("catalog");
+    match cat.describe(namespace, name) {
+        Ok(_) => {
+            return Ok(QueryResult {
+                tag: "ENSURE".into(),
+                ..Default::default()
+            })
+        }
+        Err(TypeError::NotFound) => {}
+        Err(e) => return Err(ExecError::Msg(e.to_string())),
+    }
+    let (l3, schema) = match model {
+        "kv" | "kv_store" | "KvStore" => (L3Model::KvStore, None),
+        "doc" | "document" | "DocumentStore" => (L3Model::DocumentStore, None),
+        _ => (
+            L3Model::RelationalTable,
+            Some(ContainerSchema {
+                fields: vec![
+                    Field {
+                        name: "id".into(),
+                        domain: ValueDomain::Utf8,
+                        nullable: false,
+                    },
+                    Field {
+                        name: "v".into(),
+                        domain: ValueDomain::Utf8,
+                        nullable: true,
+                    },
+                ],
+            }),
+        ),
+    };
+    cat.create(
+        namespace,
+        name,
+        l3,
+        false,
+        schema,
+        StorageModeChoice::Persistent,
+    )
+    .map_err(|e| ExecError::Msg(e.to_string()))?;
+    Ok(QueryResult {
+        tag: "ENSURE".into(),
+        ..Default::default()
+    })
+}
+
+/// Put raw object/blob bytes (S3/WebDAV/Redis/ES INDEX / CQL cell).
+pub fn object_put(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    key: &str,
+    bytes: Vec<u8>,
+) -> Result<QueryResult, ExecError> {
+    let mut cat = catalog.write().expect("catalog");
+    let id = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+        .id;
+    cat.put(id, key, bytes)
+        .map_err(|e| ExecError::Msg(e.to_string()))?;
+    Ok(QueryResult {
+        tag: "PUT 1".into(),
+        ..Default::default()
+    })
+}
+
+/// Point get returning raw value as `key`/`value` columns (non-SQL protocols).
+pub fn object_get(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    key: &str,
+) -> Result<QueryResult, ExecError> {
+    let cat = catalog.read().expect("catalog");
+    let c = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?;
+    match cat.get(c.id, key).map_err(|e| ExecError::Msg(e.to_string()))? {
+        Some(v) => Ok(QueryResult {
+            tag: "GET 1".into(),
+            columns: vec!["key".into(), "value".into()],
+            rows: vec![vec![
+                Some(key.into()),
+                Some(String::from_utf8_lossy(v).into_owned()),
+            ]],
+        }),
+        None => Ok(QueryResult {
+            tag: "GET 0".into(),
+            columns: vec!["key".into(), "value".into()],
+            rows: vec![],
+        }),
+    }
+}
+
+/// Delete one key from a container (IR mutate delete).
+pub fn object_delete(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    key: &str,
+) -> Result<QueryResult, ExecError> {
+    let mut cat = catalog.write().expect("catalog");
+    let id = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+        .id;
+    let n = if cat.delete_row(id, key).unwrap_or(false) {
+        1
+    } else {
+        0
+    };
+    Ok(QueryResult {
+        tag: format!("DELETE {n}"),
+        ..Default::default()
+    })
+}
+
+/// Scan keys (optional substring filter) returning key/value rows.
+pub fn object_scan(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    filter: Option<&str>,
+) -> Result<QueryResult, ExecError> {
+    let cat = catalog.read().expect("catalog");
+    let c = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?;
+    let keys = cat.keys(c.id).map_err(|e| ExecError::Msg(e.to_string()))?;
+    let mut rows = Vec::new();
+    for k in keys {
+        if let Some(f) = filter {
+            if f.is_empty() {
+                // keep
+            } else if !(k.contains(f) || k == f) {
+                // also match value substring below
+                let raw = cat.get(c.id, &k).ok().flatten();
+                let text = raw
+                    .map(|v| String::from_utf8_lossy(v).into_owned())
+                    .unwrap_or_default();
+                if !text.contains(f) {
+                    continue;
+                }
+            }
+        }
+        let val = cat
+            .get(c.id, &k)
+            .ok()
+            .flatten()
+            .map(|v| String::from_utf8_lossy(v).into_owned());
+        rows.push(vec![Some(k), val]);
+    }
+    Ok(QueryResult {
+        tag: format!("SCAN {}", rows.len()),
+        columns: vec!["key".into(), "value".into()],
+        rows,
     })
 }
 

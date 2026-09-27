@@ -24,6 +24,12 @@ bytes = { workspace = true }
 parking_lot = { workspace = true }
 axum = { workspace = true }
 uuid = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+webpki-roots = { workspace = true }
+# Pure-Rust Kafka Produce framing (no librdkafka / OpenSSL).
+kafka-protocol = { version = "0.14", default-features = false, features = ["client", "broker"] }
+anyhow = "1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

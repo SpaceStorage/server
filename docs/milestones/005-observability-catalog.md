@@ -15,7 +15,7 @@ Slice **9** DoD (`008-observability`):
 - Tenant `GET /metrics/namespaces/{name}` (404 `metrics_disabled` until enabled); filter isolates namespace
 - Aggregation freshness gauges (`spacestorage_shared_aggregation_up` / `last_success_timestamp_seconds`); freeze on primary-down
 - Config `metrics { }` / `log { kafka|syslog }` with `ObservabilitySlice9Required` / `SinkConfigInvalid` gates
-- Outbound log channels (default/slow_query/audit), pure-Rust Kafka Produce stub, RFC 5424 syslog, OTLP push stub
+- Outbound log channels (default/slow_query/audit), pure-Rust Kafka Produce (wire frames + TCP), RFC 5424 syslog, OTLP/HTTP protobuf push
 - Conformance: `metrics_first_binary`, `metrics_catalog`, `metrics_tenant`, `logs_sinks`; config fixture tests
 - Release profile `observability-catalog` (k=9)
 

@@ -225,9 +225,9 @@ description: "Task list for query execution, MapReduce, transactions, and fault-
 
 > **Not first-binary.** When slice-6 handlers land, each MUST lower wire requests to shared `LogicalRequest` and execute with `engine=planner` (extend T027/T076 — do **not** invent a second engine). First-binary MVP is not blocked on these.
 
-- [ ] T084 [P] [US1] When `crates/handler-cassandra` exists (`016` slice 6), lower CQL MUST-subset verbs to `LogicalRequest` and execute through `PlannerEngine` (`engine=planner`) — same IR ownership as PG/Redis (FR-002 / US1 A6)
-- [ ] T085 [P] [US1] When `crates/handler-clickhouse` and `crates/handler-elasticsearch` exist (`016` slice 6), lower ClickHouse SQL and Elasticsearch MUST-subset search/ops to `LogicalRequest` through `PlannerEngine` (FR-002 / US1 A6; ES agg ceiling remains T076)
-- [ ] T086 [P] [US1] When `crates/handler-s3` and `crates/handler-webdav` exist (`016` slice 6), lower S3/WebDAV MUST-subset GET/PUT (and documented verbs) to `LogicalRequest` through `PlannerEngine` (FR-002 / US1 A6)
+- [X] T084 [P] [US1] When `crates/handler-cassandra` exists (`016` slice 6), lower CQL MUST-subset verbs to `LogicalRequest` and execute through `PlannerEngine` (`engine=planner`) — same IR ownership as PG/Redis (FR-002 / US1 A6)
+- [X] T085 [P] [US1] When `crates/handler-clickhouse` and `crates/handler-elasticsearch` exist (`016` slice 6), lower ClickHouse SQL and Elasticsearch MUST-subset search/ops to `LogicalRequest` through `PlannerEngine` (FR-002 / US1 A6; ES agg ceiling remains T076)
+- [X] T086 [P] [US1] When `crates/handler-s3` and `crates/handler-webdav` exist (`016` slice 6), lower S3/WebDAV MUST-subset GET/PUT (and documented verbs) to `LogicalRequest` through `PlannerEngine` (FR-002 / US1 A6)
 
 ---
 

@@ -2,12 +2,12 @@
 //!
 //! ## Raft implementation choice
 //!
-//! Prefer `openraft` per research R2. Workspace edition 2024 + MSRV 1.85 currently
-//! fights stable openraft 0.9 / alpha 0.10 trait churn for a clean pin. This module
-//! (with [`crate::raft_net`] and the in-process group runtime) implements a **correct
-//! lightweight Raft**: RequestVote / AppendEntries / majority commit / odd voter sets /
-//! snapshot install — same contracts as [contracts/raft-rpc.md](../../../../specs/006-control-plane/contracts/raft-rpc.md).
-//! Revisit openraft when a stable edition-2024 pin lands.
+//! Prefer `openraft` per research R2. Active pin: **`openraft = 0.10.0-alpha.35`** (see
+//! [`crate::openraft_adapter`]) — requires rustc ≥ 1.88 / workspace MSRV 1.88 (`let` chains /
+//! `validit` / `quorum-set`). Production groups spawn a real [`openraft::Raft`] via
+//! [`crate::openraft_adapter::start_raft`] (`Raft::new`); this module keeps the SpaceStorage
+//! on-disk Raft format used by restore / read-index. In-process multi-voter harness RPCs remain
+//! in [`crate::RaftGroup`] alongside the openraft runtime.
 
 use crate::error::{ControlPlaneError, Result};
 use crate::group::GroupId;

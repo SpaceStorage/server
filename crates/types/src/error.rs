@@ -22,4 +22,6 @@ pub enum TypeError {
     UnsupportedStorageMode,
     #[error("incomplete descriptor")]
     IncompleteDescriptor,
+    #[error("{0}")]
+    Msg(String),
 }

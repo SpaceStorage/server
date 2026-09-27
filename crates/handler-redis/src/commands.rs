@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use spacestorage_compat::{ClassifyOutcome, DialectProfile, ProtocolId, classify_outcome};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
 use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
 
 pub const MUST_COMMANDS: &[&str] = &[
@@ -158,6 +159,19 @@ impl SessionState {
             let _ = cat.delete_row(id, key);
         }
     }
+
+    fn planner_exec(&self, req: LogicalRequest) -> Result<QueryResult, RedisReply> {
+        PlannerEngine::new(Arc::clone(&self.catalog))
+            .execute_blocking(
+                &self.namespace,
+                "redis",
+                "redis",
+                req,
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .map_err(|e| RedisReply::Error(format!("ERR {e}")))
+    }
 }
 
 pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisReply {
@@ -225,11 +239,12 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 }
                 i += 1;
             }
-            {
-                let mut cat = session.catalog.write().expect("catalog");
-                if let Err(e) = cat.put(id, key, val.as_bytes().to_vec()) {
-                    return RedisReply::Error(format!("ERR {e:?}"));
-                }
+            if let Err(e) = session.planner_exec(LogicalRequest::Object {
+                container: session.container.clone(),
+                key: (*key).into(),
+                bytes: val.as_bytes().to_vec(),
+            }) {
+                return e;
             }
             if let Some(secs) = ex {
                 session
@@ -251,11 +266,19 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 Err(e) => return e,
             };
             session.purge_if_expired(id, key);
-            let cat = session.catalog.read().expect("catalog");
-            match cat.get(id, key) {
-                Ok(Some(v)) => RedisReply::Bulk(Some(v.to_vec())),
-                Ok(None) => RedisReply::Bulk(None),
-                Err(e) => RedisReply::Error(format!("ERR {e:?}")),
+            match session.planner_exec(LogicalRequest::Point {
+                container: session.container.clone(),
+                key: (*key).into(),
+            }) {
+                Ok(r) if r.rows.is_empty() => RedisReply::Bulk(None),
+                Ok(r) => {
+                    let v = r.rows[0]
+                        .get(1)
+                        .and_then(|x| x.as_ref())
+                        .map(|s| s.as_bytes().to_vec());
+                    RedisReply::Bulk(v)
+                }
+                Err(e) => e,
             }
         }
         "DEL" => {
@@ -267,16 +290,19 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 Err(e) => return e,
             };
             let mut n = 0i64;
-            let mut cat = session.catalog.write().expect("catalog");
             let mut ttls = session.ttls.write().expect("ttl");
             for key in args {
-                match cat.delete_row(id, key) {
-                    Ok(true) => {
+                match session.planner_exec(LogicalRequest::Mutate {
+                    container: session.container.clone(),
+                    op: "delete".into(),
+                    sql: (*key).into(),
+                }) {
+                    Ok(r) if r.tag.contains('1') => {
                         ttls.clear(id, key);
                         n += 1;
                     }
-                    Ok(false) => {}
-                    Err(e) => return RedisReply::Error(format!("ERR {e:?}")),
+                    Ok(_) => {}
+                    Err(e) => return e,
                 }
             }
             RedisReply::Integer(n)

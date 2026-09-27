@@ -13,7 +13,9 @@ pub mod schema;
 pub mod validate;
 
 pub use ack::{AckKind, WriteAck};
-pub use catalog::{Catalog, ContainerCatalog, TypeCatalog};
+pub use catalog::{
+    Catalog, ContainerCatalog, DurableCreateHook, DurablePutHook, TypeCatalog,
+};
 pub use definition::{ContainerDefinition, StorageModeChoice};
 pub use descriptor::{Kind, Level, TypeDescriptor};
 pub use error::TypeError;

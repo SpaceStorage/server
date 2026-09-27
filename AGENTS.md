@@ -40,15 +40,21 @@ Specify order stays numeric `001`–`016`. **Implement** for the first binary:
 
 `016` is the release-profile / conformance / ledger seam — it does not replace behavior owned by `001`–`015`.
 
-## Defer (do not start as first-binary scope)
+## Defer (residuals, not unpaid slices)
 
-Slice **6+**: Cassandra / Elasticsearch / ClickHouse / S3 / WebDAV handlers; Raft control plane; full authz vocabulary; query beyond CRUD; full `008` catalog; migration / PITR; admin UIs and Kafka/syslog ingest. Record skips as deferred in `docs/milestones/`, not as deleted intent.
+Tip milestone [`docs/milestones/007-complete-product`](docs/milestones/007-complete-product.md) closed slices **1–11**. Do **not** reopen slice ledgers for residual hardening. Honest leftovers (track in milestone notes, not as `still_owed` slices):
+
+- WAL kill→reboot→re-read of client content; PostgreSQL Document Store blob gate (alongside Redis G11)
+- UI `/ui/*` real `014` session auth (vs interim bearer→cluster-admin)
+- Multi-node openraft peer RPC over internodes (single-voter `Raft::new` path landed; remote network still stubbed)
+
+Out of scope for residual passes unless explicitly requested: inventing new slice DoD debt.
 
 ## Status discipline
 
-- First-binary **skeleton** exists; stubs remain. DoD for slices 1–5 is **not** met until `cargo test -p spacestorage-conformance --features first-binary` passes and the milestone ledger is honest.
-- Do not brand slices 1–5 as a “v1” of the seven-protocol matrix.
-- Prefer marking incomplete work accurately over marking tasks `[X]` early.
+- Tip ledger: slices 1–11 **closed**; `cargo test -p spacestorage-conformance --features complete-product` is the full-matrix merge gate.
+- First-binary / handlers-complete profiles remain regression gates (`--features first-binary` / `handlers-complete`).
+- Prefer marking incomplete residuals accurately over marking tasks `[X]` early or claiming unpaid slices.
 
 ## Where truth lives
 
