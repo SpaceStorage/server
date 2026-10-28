@@ -7,6 +7,7 @@ Cursor-native agent context for this Spec Kit project. Short pointer: [`AGENT.md
 - Always treat **`server/`** as the Spec Kit / Cargo workspace root (`.specify/`, `specs/`, `Cargo.toml`).
 - Parent `spacestorage/` also has `test/` and `start` (vision dump). Do not run Speckit or `cargo` against the parent as if it were this project.
 - Do **not** claim a milestone complete until conformance is green for the active profile.
+- Leave git history untouched. Commit message and changelog are written only when a workflow finishes — see [Commits and changelog](#commits-and-changelog).
 
 ## Constitution (non-negotiable)
 
@@ -68,6 +69,23 @@ Also available, not part of the default cycle: `speckit-constitution`, `speckit-
 
 Open `[ ]` rows in older phases are often unmarked history. The live remainder is the latest Convergence section plus the milestone ledger. Do not mass-check historical tasks. Do not reopen closed slice ledgers for residual hardening.
 
+## Commits and changelog
+
+Agents do not commit. Do not run `git commit`, `git push`, `git amend`, or any other command that creates or publishes a commit. Leave the working tree for the human to commit.
+
+Subagents do not draft the message or touch the changelog. The main agent does both once, when a workflow finishes: a new-feature cycle that has reached a clean converge, or an existing-feature implement / converge loop that stops. Until then, write neither.
+
+1. **Commit message.** Draft one message (subject and short body) in the final report, in the style of recent commits in this repo. The human applies it. Do not commit it.
+2. **Changelog.** Create or append [`CHANGELOG.md`](CHANGELOG.md) at the workspace root. One entry per finished workflow:
+
+```markdown
+## YYYY-MM-DD — specs/NNN-slug
+
+- What the workflow changed, in a few lines.
+```
+
+Do not commit `CHANGELOG.md` either.
+
 ## First-binary implement order
 
 Specify order stays numeric `001`–`016`. **Implement** for the first binary:
@@ -105,4 +123,5 @@ Out of scope for residual passes unless explicitly requested: inventing new slic
 | Intent | `.specify/intent/01`–`16` (`start` is the original dump) |
 | Specs / tasks | `specs/001`–`016/` |
 | Milestone ledger | `docs/milestones/` (tip: `009-full-product`) |
+| Workflow changelog | `CHANGELOG.md` (appended when a workflow finishes; not committed by the agent) |
 | Context graph | `docs/agent-context-graph.md` (+ `.json`) |
