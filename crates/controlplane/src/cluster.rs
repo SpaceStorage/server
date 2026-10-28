@@ -39,6 +39,9 @@ pub struct ClusterState {
     pub namespaces: BTreeMap<Uuid, NamespaceListEntry>,
     /// Opaque roles blob until tenancy (007) types replace it.
     pub roles: serde_json::Value,
+    /// Kafka ingest declarations (009) — live-applied on every ready node.
+    #[serde(default)]
+    pub kafka_ingests: BTreeMap<Uuid, serde_json::Value>,
     pub voter_set: VoterSet,
     pub exclusive_data: bool,
     pub hlc: HlcStamp,
@@ -63,6 +66,7 @@ impl ClusterState {
             members,
             namespaces: BTreeMap::new(),
             roles: serde_json::json!({}),
+            kafka_ingests: BTreeMap::new(),
             voter_set,
             exclusive_data: false,
             hlc: HlcStamp {
@@ -91,6 +95,10 @@ pub enum ClusterOp {
     SetRoles { roles: serde_json::Value },
     SetExclusiveData { on: bool },
     SetVoterSet { voter_set: VoterSet },
+    /// Upsert Kafka ingest declaration (009) into the cluster log.
+    UpsertKafkaIngest { decl: serde_json::Value },
+    /// Delete Kafka ingest by id (009).
+    DeleteKafkaIngest { id: Uuid },
 }
 
 impl ClusterState {
@@ -125,6 +133,20 @@ impl ClusterState {
             }
             ClusterOp::SetVoterSet { voter_set } => {
                 self.voter_set = voter_set;
+            }
+            ClusterOp::UpsertKafkaIngest { decl } => {
+                let id = decl
+                    .get("id")
+                    .and_then(|v| match v {
+                        serde_json::Value::String(s) => Uuid::parse_str(s).ok(),
+                        other => serde_json::from_value::<Uuid>(other.clone()).ok(),
+                    });
+                if let Some(id) = id {
+                    self.kafka_ingests.insert(id, decl);
+                }
+            }
+            ClusterOp::DeleteKafkaIngest { id } => {
+                self.kafka_ingests.remove(&id);
             }
         }
         self.hlc = hlc;

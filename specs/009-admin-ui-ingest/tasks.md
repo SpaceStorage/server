@@ -247,3 +247,24 @@ Task: "Syslog 1:1 conformance in crates/conformance/tests/ingest_syslog.rs"
 - Exactly-once ingest is out of scope (FR-009)
 - Do not reuse `008` export metric series or producer paths for ingest
 - Commit after each task or logical group; stop at checkpoints to validate independently
+
+## Phase 7: Convergence
+
+- [X] T050 CRITICAL: Route console query, config, and container create through shared `005` execution and `001`/`006`/`007` admin surfaces (application `spacestorage-ui`, `015` pagination, `014` verbs) per FR-004, Constitution IV, US2/AC4, SC-006 (contradicts)
+- [X] T051 Compose live `GET /v1/cluster/map` from `004` topology, `011` membership, `004` replica health/lag, and `010` migration progress without minting replica ids per FR-001, FR-002, US1/AC1, US1/AC2, US1/AC5, plan R13 (partial)
+- [X] T052 Send the operator `Authorization` bearer from `cluster-map.js` and `console.js` on the same principal checks the HTML routes already enforce per FR-005, US1/AC1 (partial)
+- [X] T053 Persist `KafkaIngest` in the `006` cluster log and run the consumer on every `ready` node (group join, fetch, `log_stream.append` via `005` as `spacestorage-ingest`, durable ack on the `013` blocking pool, then OffsetCommit; parse failures skip without commit) per FR-006, FR-007, US3/AC1, US3/AC5, plan R8 (missing)
+- [X] T054 Bind each syslog accept to that entrypoint's namespace and container and append via `005` (UDP+TCP plaintext, TLS TCP-only, octet-counted RFC 5424 then RFC 3164, drain stops new accepts) per FR-008, US3/AC2, US3/AC7, syslog contract (partial)
+- [X] T055 Enforce declaration authz on `/v1/ingest/kafka` and `spacestorage ingest kafka` (`NAMESPACE_ADMIN`+`WRITE` or `CLUSTER_ADMIN`; `WRITE` alone → 403 `ingest_write_only` / CLI exit 3; list returns stored declarations) per FR-012, US3/AC6, US3/AC8, SC-007, contracts/cli.md (partial)
+
+## Phase 8: Convergence
+
+- [X] T056 CRITICAL: Move Kafka ingest cluster-log append and `sync_all` (`data_dir/cluster/kafka_ingest.jsonl`) onto the dedicated blocking pool so `POST`/`DELETE /v1/ingest/kafka` do not fsync on a Tokio worker per Constitution II (contradicts)
+
+## Phase 9: Convergence
+
+- [X] T057 Keep each ready node's Kafka consumer in the group for the life of the declaration: Heartbeat before session timeout, rejoin after coordinator errors, send OffsetFetch/OffsetCommit/Heartbeat to the group coordinator with the joined generation and member id, and Fetch only the currently assigned partitions from their metadata leaders per FR-007, US3/AC1, contracts/kafka-consumer.md, plan R5 (partial)
+- [X] T058 Speak Kafka broker TLS with rustls from declaration `tls` file refs (certificate and key paths, never inlined PEM → `ingest_cert_inline`); do not open a plaintext socket when `tls` is selected per plan R5, data-model `transport`, contracts/kafka-consumer.md (contradicts)
+- [X] T059 Filter `GET /v1/ingest/kafka` and `spacestorage ingest kafka list` so `CLUSTER_ADMIN` receives every declaration and `NAMESPACE_ADMIN` receives only that namespace; any other principal gets 403 with no foreign declarations per contracts/ingest-declaration.md, Constitution IX (partial)
+- [X] T060 Add the cluster and namespace configuration view on `GET /ui/console` and apply `POST /v1/console/config` through the settings `001`/`006`/`007` already expose (`CLUSTER_ADMIN` cluster-wide, `NAMESPACE_ADMIN` that namespace only) so a success is a real change, not an echoed body per FR-003, US2/AC1, US2/AC3 (partial)
+- [X] T061 Drive `ingest.syslog.recv` and `ingest.kafka.decode` from the node buffer registry: overflow policy **reject** (not wait), drop threshold equals the configured capacity, and usage/`limit_hits` update on that registry per plan R7, contracts/config-directives.md (partial)

@@ -1,5 +1,6 @@
 mod args;
 mod exit;
+mod http_client;
 mod output;
 
 use clap::Parser;
@@ -105,11 +106,16 @@ fn main() -> ExitCode {
                 ExitCode::from(exit::CONFIG_INVALID)
             }
         }
-        args::Command::Ingest { action } => {
+        args::Command::Ingest {
+            action,
+            endpoint,
+            token,
+        } => {
             if !cfg!(feature = "complete-product") {
                 eprintln!("UiIngestSlice11Required: enable complete-product profile");
                 return ExitCode::from(exit::CONFIG_INVALID);
             }
+            let token = token.or_else(|| std::env::var("SPACESTORAGE_TOKEN").ok());
             match action {
                 args::IngestAction::Syslog => {
                     println!(
@@ -117,20 +123,9 @@ fn main() -> ExitCode {
                     );
                     ExitCode::from(exit::OK)
                 }
-                args::IngestAction::Kafka { action } => match action {
-                    args::IngestKafkaAction::List => {
-                        println!("{{\"kafka\":[]}}");
-                        ExitCode::from(exit::OK)
-                    }
-                    args::IngestKafkaAction::Add { .. } => {
-                        eprintln!("use POST /v1/ingest/kafka");
-                        ExitCode::from(exit::USAGE)
-                    }
-                    args::IngestKafkaAction::Delete { id } => {
-                        eprintln!("use DELETE /v1/ingest/kafka/{id}");
-                        ExitCode::from(exit::USAGE)
-                    }
-                },
+                args::IngestAction::Kafka { action } => {
+                    ingest_kafka(&endpoint, token.as_deref(), action)
+                }
             }
         }
         args::Command::L0 { action, endpoint } => {
@@ -179,6 +174,131 @@ fn main() -> ExitCode {
         args::Command::Kms { endpoint } => {
             println!("GET {endpoint}/v1/kms/status");
             ExitCode::from(exit::OK)
+        }
+    }
+}
+
+fn ingest_kafka(
+    endpoint: &str,
+    token: Option<&str>,
+    action: args::IngestKafkaAction,
+) -> ExitCode {
+    match action {
+        args::IngestKafkaAction::List => match http_client::request(
+            "GET",
+            endpoint,
+            "/v1/ingest/kafka",
+            token,
+            None,
+        ) {
+            Ok(r) if r.status == 200 => {
+                print!("{}", r.body);
+                if !r.body.ends_with('\n') {
+                    println!();
+                }
+                ExitCode::from(exit::OK)
+            }
+            Ok(r) if r.status == 403 => {
+                eprintln!("{}", r.body);
+                ExitCode::from(exit::UNAUTHORIZED)
+            }
+            Ok(r) if r.status == 401 => {
+                eprintln!("{}", r.body);
+                ExitCode::from(exit::UNAUTHORIZED)
+            }
+            Ok(r) => {
+                eprintln!("HTTP {}: {}", r.status, r.body);
+                ExitCode::from(exit::CONNECT)
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(exit::CONNECT)
+            }
+        },
+        args::IngestKafkaAction::Add {
+            namespace,
+            container,
+            brokers,
+            topic,
+            group,
+            format,
+            name,
+        } => {
+            let name = name.unwrap_or_else(|| format!("{namespace}-{container}"));
+            let brokers: Vec<String> = brokers
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let body = serde_json::json!({
+                "id": "00000000-0000-0000-0000-000000000000",
+                "name": name,
+                "namespace": namespace,
+                "container": container,
+                "type": "log_stream",
+                "brokers": brokers,
+                "topic": topic,
+                "group": group,
+                "format": format,
+                "plaintext": true,
+            });
+            match http_client::request(
+                "POST",
+                endpoint,
+                "/v1/ingest/kafka",
+                token,
+                Some(&body.to_string()),
+            ) {
+                Ok(r) if (200..300).contains(&r.status) => {
+                    println!("{}", r.body);
+                    ExitCode::from(exit::OK)
+                }
+                Ok(r) if r.status == 403 => {
+                    eprintln!("{}", r.body);
+                    ExitCode::from(exit::UNAUTHORIZED)
+                }
+                Ok(r) => {
+                    eprintln!("HTTP {}: {}", r.status, r.body);
+                    ExitCode::from(if r.status == 401 {
+                        exit::UNAUTHORIZED
+                    } else {
+                        exit::USAGE
+                    })
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
+            }
+        }
+        args::IngestKafkaAction::Delete { id } => {
+            match http_client::request(
+                "DELETE",
+                endpoint,
+                &format!("/v1/ingest/kafka/{id}"),
+                token,
+                None,
+            ) {
+                Ok(r) if (200..300).contains(&r.status) || r.status == 204 => {
+                    ExitCode::from(exit::OK)
+                }
+                Ok(r) if r.status == 403 => {
+                    eprintln!("{}", r.body);
+                    ExitCode::from(exit::UNAUTHORIZED)
+                }
+                Ok(r) => {
+                    eprintln!("HTTP {}: {}", r.status, r.body);
+                    ExitCode::from(if r.status == 401 {
+                        exit::UNAUTHORIZED
+                    } else {
+                        exit::USAGE
+                    })
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
+            }
         }
     }
 }

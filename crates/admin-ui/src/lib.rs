@@ -10,7 +10,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 
-pub use console::{ConsoleAuthz, ConsoleService};
+pub use console::{
+    ConsoleAuthz, ConsoleBackend, ConsoleCreateContainer, ConsoleConfigRequest, ConsoleError,
+    ConsoleQueryRequest, ConsoleService, MAX_PAGE_BYTES, MAX_PAGE_ROWS,
+};
 pub use map::{
     ClusterMapView, ContainerMapEntry, MapAuthz, MapComposer, MapScope, MigrationProgress,
     NodeMapEntry, ReplicaMapEntry, ShardMapEntry, TopologySnapshot,

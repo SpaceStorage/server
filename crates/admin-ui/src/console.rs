@@ -1,8 +1,9 @@
-//! Namespace/cluster console — delegates to shared `005` path (application=spacestorage-ui).
+//! Namespace/cluster console — authz here; execution via shared `005` / admin surfaces.
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Max browse page size (015 result limits — paginate, never buffer whole stores).
@@ -65,6 +66,25 @@ pub struct ConsoleCreateContainer {
     pub type_name: String,
 }
 
+/// Shared `005` / `001`/`006`/`007` execution seam injected by the node.
+pub trait ConsoleBackend: Send + Sync {
+    fn query(
+        &self,
+        authz: &ConsoleAuthz,
+        req: &ConsoleQueryRequest,
+    ) -> Result<Value, ConsoleError>;
+    fn config(
+        &self,
+        authz: &ConsoleAuthz,
+        req: &ConsoleConfigRequest,
+    ) -> Result<Value, ConsoleError>;
+    fn create_container(
+        &self,
+        authz: &ConsoleAuthz,
+        req: &ConsoleCreateContainer,
+    ) -> Result<Value, ConsoleError>;
+}
+
 #[derive(Debug, Default)]
 struct Store {
     containers: Vec<(String, String, String)>, // ns, name, type
@@ -74,19 +94,31 @@ struct Store {
     ns_settings: std::collections::BTreeMap<String, Value>,
 }
 
-/// In-process console service (shared execution seam; labels as spacestorage-ui).
+/// Console service: authz + pagination; optional live backend (005/admin).
 #[derive(Clone)]
 pub struct ConsoleService {
     slice11: bool,
-    store: std::sync::Arc<Mutex<Store>>,
+    store: Arc<Mutex<Store>>,
+    backend: Option<Arc<dyn ConsoleBackend>>,
 }
 
 impl ConsoleService {
     pub fn new(slice11: bool) -> Self {
         Self {
             slice11,
-            store: std::sync::Arc::new(Mutex::new(Store::default())),
+            store: Arc::new(Mutex::new(Store::default())),
+            backend: None,
         }
+    }
+
+    /// Wire shared planner / admin surfaces (production path).
+    pub fn with_backend(mut self, backend: Arc<dyn ConsoleBackend>) -> Self {
+        self.backend = Some(backend);
+        self
+    }
+
+    pub fn set_backend(&mut self, backend: Arc<dyn ConsoleBackend>) {
+        self.backend = Some(backend);
     }
 
     pub fn last_application(&self) -> Option<String> {
@@ -108,10 +140,32 @@ impl ConsoleService {
         {
             return Err(ConsoleError::Forbidden);
         }
+        {
+            let mut store = self.store.lock();
+            store.last_application = Some(crate::APPLICATION_UI.into());
+        }
+        if let Some(backend) = &self.backend {
+            let mut out = backend.query(authz, &req)?;
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("application".into(), json!(crate::APPLICATION_UI));
+                obj.entry("engine").or_insert(json!("planner"));
+            }
+            return Ok(out);
+        }
+        self.query_memory(authz, &req)
+    }
+
+    fn query_memory(
+        &self,
+        _authz: &ConsoleAuthz,
+        req: &ConsoleQueryRequest,
+    ) -> Result<Value, ConsoleError> {
+        let ns = req.namespace.as_deref().unwrap_or("");
+        let container = req.container.as_deref().unwrap_or("");
+        let key = format!("{ns}/{container}");
         let limit = req.limit.unwrap_or(100).min(MAX_PAGE_ROWS);
         let offset = req.offset.unwrap_or(0);
-        let mut store = self.store.lock();
-        store.last_application = Some(crate::APPLICATION_UI.into());
+        let store = self.store.lock();
         let page: Vec<Value> = store
             .rows
             .iter()
@@ -144,9 +198,6 @@ impl ConsoleService {
                 if !authz.cluster_admin {
                     return Err(ConsoleError::Forbidden);
                 }
-                let mut store = self.store.lock();
-                store.cluster_settings = req.settings.clone();
-                Ok(json!({ "ok": true, "scope": "cluster" }))
             }
             "namespace" => {
                 let ns = req
@@ -156,11 +207,25 @@ impl ConsoleService {
                 if !authz.cluster_admin && !authz.namespace_admin.iter().any(|n| n == ns) {
                     return Err(ConsoleError::Forbidden);
                 }
+            }
+            _ => return Err(ConsoleError::Invalid("scope must be cluster|namespace".into())),
+        }
+        if let Some(backend) = &self.backend {
+            return backend.config(authz, &req);
+        }
+        match req.scope.as_str() {
+            "cluster" => {
+                let mut store = self.store.lock();
+                store.cluster_settings = req.settings.clone();
+                Ok(json!({ "ok": true, "scope": "cluster" }))
+            }
+            "namespace" => {
+                let ns = req.namespace.as_deref().unwrap();
                 let mut store = self.store.lock();
                 store.ns_settings.insert(ns.to_string(), req.settings.clone());
                 Ok(json!({ "ok": true, "scope": "namespace", "namespace": ns }))
             }
-            _ => Err(ConsoleError::Invalid("scope must be cluster|namespace".into())),
+            _ => unreachable!(),
         }
     }
 
@@ -183,8 +248,18 @@ impl ConsoleService {
         if !may_create {
             return Err(ConsoleError::Forbidden);
         }
+        {
+            let mut store = self.store.lock();
+            store.last_application = Some(crate::APPLICATION_UI.into());
+        }
+        if let Some(backend) = &self.backend {
+            let mut out = backend.create_container(authz, &req)?;
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("application".into(), json!(crate::APPLICATION_UI));
+            }
+            return Ok(out);
+        }
         let mut store = self.store.lock();
-        store.last_application = Some(crate::APPLICATION_UI.into());
         store
             .containers
             .push((req.namespace.clone(), req.name.clone(), req.type_name.clone()));
@@ -196,7 +271,7 @@ impl ConsoleService {
         }))
     }
 
-    /// Test helper: insert a browseable row.
+    /// Test helper: insert a browseable row (memory path).
     pub fn insert_row(&self, namespace: &str, container: &str, key: &str, value: Value) {
         let mut store = self.store.lock();
         store

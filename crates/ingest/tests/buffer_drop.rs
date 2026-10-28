@@ -31,6 +31,7 @@ fn kafka_buffer_full_drops_and_does_not_commit() {
         group: "g".into(),
         format: PayloadFormat::Raw,
         plaintext: true,
+        tls: None,
         created_by: None,
         state: "running".into(),
     };

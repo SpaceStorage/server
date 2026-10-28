@@ -3,6 +3,8 @@ pub mod buffer;
 pub mod effective;
 pub mod entrypoint;
 pub mod handler;
+pub mod ingest_append;
+pub mod kafka_runtime;
 pub mod later_surfaces;
 pub mod lifecycle;
 pub mod logging;
@@ -148,7 +150,7 @@ impl Node {
         ));
         let sessions_for_ui = Arc::clone(&sessions);
         let admin_ui = {
-            let mut st = if slice11 {
+            let st = if slice11 {
                 spacestorage_admin_ui::AdminUiState {
                     slice11_enabled: true,
                     map: spacestorage_admin_ui::MapComposer::empty(),
@@ -183,7 +185,6 @@ impl Node {
             } else {
                 spacestorage_admin_ui::AdminUiState::disabled()
             };
-            let _ = &mut st;
             Arc::new(std::sync::RwLock::new(st))
         };
         let node = Arc::new(Self {
@@ -283,6 +284,16 @@ impl Node {
                     node: Arc::clone(&node),
                 }))
                 .unwrap();
+            }
+        }
+        // Wire console to shared 005 catalog / 001 config (T050).
+        #[cfg(feature = "complete-product")]
+        {
+            let backend = Arc::new(crate::handler::console_backend::CatalogConsoleBackend::new(
+                Arc::clone(&node),
+            ));
+            if let Ok(mut ui) = node.admin_ui.write() {
+                ui.console.set_backend(backend);
             }
         }
         node
@@ -394,6 +405,11 @@ impl Node {
             return Ok(());
         }
         info!(state = "ready", "node ready");
+
+        #[cfg(feature = "complete-product")]
+        {
+            let _kafka_sup = crate::kafka_runtime::bootstrap_kafka(&self).await;
+        }
 
         // Wait until drain is requested (stop / SIGTERM / SIGINT) or external cancel.
         // Drain does **not** cancel accept loops yet — admin stays reachable (FR-015 / T088).

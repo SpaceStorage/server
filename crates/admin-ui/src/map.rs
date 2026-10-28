@@ -93,6 +93,11 @@ impl MapComposer {
         Self { topology }
     }
 
+    /// Replace the live topology snapshot (004/011/010 compose at the call site).
+    pub fn set_topology(&mut self, topology: TopologySnapshot) {
+        self.topology = topology;
+    }
+
     pub fn compose(
         &self,
         authz: &MapAuthz,

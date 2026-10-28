@@ -1,5 +1,6 @@
 //! Syslog handler: UDP+TCP plaintext; TLS=TCP only; 1:1 target container.
 
+use crate::buffer_gate::{LocalBufferGate, SharedBufferGate};
 use crate::declaration::SyslogIngestBind;
 use crate::parse_rfc3164;
 use crate::parse_rfc5424;
@@ -9,31 +10,38 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-#[derive(Debug)]
+/// Result of attempting to ingest one syslog line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestOutcome {
+    Ok,
+    /// Recv buffer reject — TCP should close; UDP drop.
+    BufferFull,
+    ParseError,
+    Draining,
+}
+
+/// Recv buffer with reject policy (never wait on worker).
 pub struct RecvBuffer {
-    capacity: usize,
-    used: AtomicU64,
+    gate: SharedBufferGate,
 }
 
 impl RecvBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            capacity,
-            used: AtomicU64::new(0),
+            gate: Arc::new(LocalBufferGate::new(capacity as u64)),
         }
+    }
+
+    pub fn from_gate(gate: SharedBufferGate) -> Self {
+        Self { gate }
     }
 
     pub fn try_enqueue(&self, bytes: usize) -> bool {
-        let cur = self.used.load(Ordering::SeqCst) as usize;
-        if cur + bytes > self.capacity {
-            return false;
-        }
-        self.used.fetch_add(bytes as u64, Ordering::SeqCst);
-        true
+        self.gate.try_reserve(bytes as u64)
     }
 
     pub fn release(&self, bytes: usize) {
-        let _ = self.used.fetch_sub(bytes as u64, Ordering::SeqCst);
+        self.gate.release(bytes as u64);
     }
 }
 
@@ -72,6 +80,11 @@ impl SyslogHandler {
         self
     }
 
+    pub fn with_buffer_gate(mut self, gate: SharedBufferGate) -> Self {
+        self.buffer = RecvBuffer::from_gate(gate);
+        self
+    }
+
     pub fn begin_drain(&self) {
         self.draining.store(1, Ordering::SeqCst);
     }
@@ -81,9 +94,9 @@ impl SyslogHandler {
     }
 
     /// Prefer 5424, fallback 3164; malformed → metric, listener not stalled.
-    pub fn ingest_line(&self, line: &str) -> bool {
+    pub fn ingest_line(&self, line: &str) -> IngestOutcome {
         if !self.accepting() {
-            return false;
+            return IngestOutcome::Draining;
         }
         let bytes = line.len();
         if !self.buffer.try_enqueue(bytes) {
@@ -97,7 +110,7 @@ impl SyslogHandler {
                     "dropped",
                 );
             }
-            return false;
+            return IngestOutcome::BufferFull;
         }
         let parsed = parse_rfc5424::parse(line)
             .map(|r| ("rfc5424", r))
@@ -116,7 +129,7 @@ impl SyslogHandler {
                         "ok",
                     );
                 }
-                true
+                IngestOutcome::Ok
             }
             Err(_) => {
                 if let Some(rt) = &self.runtime {
@@ -134,7 +147,7 @@ impl SyslogHandler {
                         "parse_error",
                     );
                 }
-                false
+                IngestOutcome::ParseError
             }
         }
     }

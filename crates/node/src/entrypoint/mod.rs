@@ -1,13 +1,13 @@
 pub mod tls;
 
-use crate::handler::{ClientStream, Handler};
 use crate::Node;
+use crate::handler::{ClientStream, Handler};
 use spacestorage_config::model::Transport;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{Instrument, error, info, warn};
 
 pub async fn bind_all(node: Arc<Node>) -> Result<Vec<tokio::task::JoinHandle<()>>, String> {
     let cfg = node.config.load();
@@ -49,6 +49,18 @@ pub async fn bind_all(node: Arc<Node>) -> Result<Vec<tokio::task::JoinHandle<()>
         } else {
             None
         };
+
+        // Syslog plaintext: also bind UDP on the same address (TLS = TCP only).
+        #[cfg(feature = "complete-product")]
+        if ep.handler == "syslog" && ep.transport != Transport::Tls {
+            let node_u = node.clone();
+            let cancel_u = node.cancel.clone();
+            let ep_name = ep.name.clone();
+            let h = tokio::spawn(async move {
+                crate::handler::syslog::serve_udp(node_u, addr, ep_name, cancel_u).await;
+            });
+            listeners.push(h);
+        }
 
         let listener = TcpListener::bind(addr)
             .await
@@ -143,8 +155,17 @@ async fn accept_loop(
                         let stats = node.stats.clone();
                         let ep_name = name.clone();
                         node.tasks.spawn(async move {
+                            // FR-004: entrypoint stays on this span so protocol_mismatch
+                            // events inside Handler::serve name both entrypoint and handler.
+                            let ep_for_span = ep_name.clone();
+                            let handler_for_span = handler.name().to_string();
+                            let span = tracing::info_span!(
+                                "client_conn",
+                                entrypoint = %ep_for_span,
+                                handler = %handler_for_span,
+                            );
                             stats.inc_inflight();
-                            let result = async {
+                            async move {
                                 let client: ClientStream = if let Some(acceptor) = tls_acceptor {
                                     match acceptor.accept(stream).await {
                                         Ok(tls) => Box::new(tls),
@@ -157,10 +178,10 @@ async fn accept_loop(
                                 } else {
                                     Box::new(stream)
                                 };
-                                handler.serve(client, force_cancel).await;
+                                handler.serve_named(client, force_cancel, &ep_name).await;
                             }
+                            .instrument(span)
                             .await;
-                            let _ = result;
                             stats.dec_inflight();
                         });
                         let _ = peer;

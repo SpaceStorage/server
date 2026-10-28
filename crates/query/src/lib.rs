@@ -24,7 +24,9 @@ pub mod engines;
 
 pub use admission::{AdmissionController, AdmissionLimits, AdmissionToken};
 pub use cancel::CancelToken;
-pub use catalog_exec::{QueryResult, SharedCatalog};
+pub use catalog_exec::{
+    ensure_container, object_put, object_scan, QueryResult, SharedCatalog,
+};
 pub use engine::{lower_sql, PlannerEngine, QueryEngine};
 pub use error::{ExecError, PartUnavailable};
 pub use local::LocalEngine;

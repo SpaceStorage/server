@@ -753,6 +753,36 @@ pub fn validate(
                 format!("ingest kafka '{}' has no brokers", k.name),
             ));
         }
+        if !k.plaintext {
+            match &k.tls {
+                None => errors.push(ConfigError::new(
+                    file,
+                    0,
+                    0,
+                    "ingest.kafka.tls",
+                    ErrorCode::TransportUndeclared,
+                    format!(
+                        "ingest kafka '{}' must declare tls {{…}} or plaintext;",
+                        k.name
+                    ),
+                )),
+                Some(tls) => {
+                    if tls.certificate.contains("-----BEGIN") || tls.key.contains("-----BEGIN") {
+                        errors.push(ConfigError::new(
+                            file,
+                            0,
+                            0,
+                            "ingest.kafka.tls",
+                            ErrorCode::CertInlineForbidden,
+                            format!(
+                                "ingest kafka '{}': certificate material must be path refs",
+                                k.name
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     errors

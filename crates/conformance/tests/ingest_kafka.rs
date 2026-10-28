@@ -22,16 +22,17 @@ fn decl() -> KafkaIngest {
         group: "g1".into(),
         format: PayloadFormat::Raw,
         plaintext: true,
+        tls: None,
         created_by: None,
         state: "running".into(),
     }
 }
 
-#[test]
-fn write_only_declare_refused() {
+#[tokio::test]
+async fn write_only_declare_refused() {
     let store = spacestorage_ingest::KafkaIngestStore::new(true);
     let authz = IngestAuthz::write_only_user("acme", "events");
-    let err = store.add(decl(), &authz).unwrap_err();
+    let err = store.add(decl(), &authz).await.unwrap_err();
     assert_eq!(err.code(), "ingest_write_only");
 }
 
@@ -99,9 +100,9 @@ fn crash_after_ack_before_commit_allows_duplicates() {
     assert_eq!(broker.committed_offset(0), Some(1));
 }
 
-#[test]
-fn namespace_admin_with_write_accepted() {
+#[tokio::test]
+async fn namespace_admin_with_write_accepted() {
     let store = spacestorage_ingest::KafkaIngestStore::new(true);
     let authz = IngestAuthz::namespace_admin_with_write("acme", "events");
-    assert!(store.add(decl(), &authz).is_ok());
+    assert!(store.add(decl(), &authz).await.is_ok());
 }

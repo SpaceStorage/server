@@ -10,11 +10,12 @@ mod wire;
 
 pub use auth::UserStore;
 pub use serve::{exec_sql_sync, serve};
-pub use sql::{execute_sql, ExecError, ExecResult, SharedCatalog};
+pub use sql::{ExecError, ExecResult, SharedCatalog, execute_sql};
 pub use wire::FEATURE_NOT_SUPPORTED;
 
 pub const WIRE_VERSION: &str = "3.0";
 
+use spacestorage_compat::DialectProfile;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::sync::CancellationToken;
@@ -23,11 +24,32 @@ use tokio_util::sync::CancellationToken;
 pub struct PostgresqlHandler {
     pub catalog: SharedCatalog,
     pub users: Arc<UserStore>,
+    /// Release dialect (`016` / `015`). Wire classify uses this, not a hard-coded first-binary profile.
+    pub profile: DialectProfile,
 }
 
 impl PostgresqlHandler {
     pub fn new(catalog: SharedCatalog, users: Arc<UserStore>) -> Self {
-        Self { catalog, users }
+        Self::with_profile(catalog, users, DialectProfile::FirstBinary)
+    }
+
+    pub fn with_profile(
+        catalog: SharedCatalog,
+        users: Arc<UserStore>,
+        profile: DialectProfile,
+    ) -> Self {
+        Self {
+            catalog,
+            users,
+            profile,
+        }
+    }
+
+    /// `release` is `first-binary`, `handlers-complete`, or `complete-product`.
+    pub fn with_release(catalog: SharedCatalog, users: Arc<UserStore>, release: &str) -> Self {
+        let profile = spacestorage_compat::profile_from_release(release)
+            .unwrap_or(DialectProfile::FirstBinary);
+        Self::with_profile(catalog, users, profile)
     }
 
     pub fn with_demo_users(catalog: SharedCatalog) -> Self {
@@ -43,7 +65,7 @@ impl PostgresqlHandler {
             stream,
             cancel,
             Arc::clone(&self.catalog),
-            spacestorage_compat::DialectProfile::FirstBinary,
+            self.profile,
             Arc::clone(&self.users),
         )
         .await;
@@ -51,7 +73,9 @@ impl PostgresqlHandler {
 
     /// Unit-test helper (no I/O). Prefer [`Self::serve`] for connections.
     pub fn exec_sql(&self, sql: &str) -> Result<(), (String, String)> {
-        exec_sql_sync(&self.catalog, "default", sql)
+        execute_sql(self.profile, &self.catalog, "default", sql)
+            .map(|_| ())
+            .map_err(|e| (e.sqlstate, e.message))
     }
 }
 
@@ -61,7 +85,7 @@ mod tests {
     use spacestorage_compat::DialectProfile;
     use spacestorage_types::ContainerCatalog;
     use std::sync::RwLock;
-    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 
     #[test]
     fn begin_returns_0a000() {
@@ -110,6 +134,30 @@ mod tests {
         cancel.cancel();
         drop(client);
         let _ = join.await;
-        let _ = DialectProfile::FirstBinary;
+    }
+
+    #[test]
+    fn complete_product_profile_accepts_begin() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let h = PostgresqlHandler::with_release(
+            Arc::clone(&cat),
+            Arc::new(UserStore::demo()),
+            "complete-product",
+        );
+        assert_eq!(h.profile, DialectProfile::CompleteProduct);
+        // Unique session: PlannerEngine txn state is process-wide and keyed by session id.
+        super::sql::execute_sql_session(h.profile, &cat, "ns", "cp-begin-t108", "BEGIN")
+            .expect("BEGIN is in the complete-product MUST set");
+        super::sql::execute_sql_session(h.profile, &cat, "ns", "cp-begin-t108", "ROLLBACK")
+            .unwrap();
+    }
+
+    #[test]
+    fn first_binary_release_still_refuses_begin() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let h = PostgresqlHandler::with_release(cat, Arc::new(UserStore::demo()), "first-binary");
+        let err = h.exec_sql("BEGIN").unwrap_err();
+        assert_eq!(err.0, FEATURE_NOT_SUPPORTED);
+        assert_eq!(h.profile, DialectProfile::FirstBinary);
     }
 }

@@ -118,6 +118,11 @@ pub enum Command {
     Ingest {
         #[command(subcommand)]
         action: IngestAction,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+        /// Bearer token (or set `SPACESTORAGE_TOKEN`).
+        #[arg(long)]
+        token: Option<String>,
     },
     /// L0 creatable workflow (full v1).
     L0 {

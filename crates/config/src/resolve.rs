@@ -919,11 +919,35 @@ pub fn resolve(
                                             decl.group = a.as_str();
                                         }
                                     }
-                                    "plaintext" => decl.plaintext = true,
+                                    "plaintext" => {
+                                        decl.plaintext = true;
+                                        decl.tls = None;
+                                    }
                                     _ => {}
                                 },
                                 Item::Block(tb) if tb.name == "tls" => {
                                     decl.plaintext = false;
+                                    let mut cert = None;
+                                    let mut key = None;
+                                    for it in &tb.items {
+                                        if let Item::Directive(d) = it {
+                                            match d.name.as_str() {
+                                                "certificate" => {
+                                                    cert = d.args.first().map(|a| a.as_str())
+                                                }
+                                                "key" => {
+                                                    key = d.args.first().map(|a| a.as_str())
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    if let (Some(c), Some(k)) = (cert, key) {
+                                        decl.tls = Some(TlsDecl {
+                                            certificate: c,
+                                            key: k,
+                                        });
+                                    }
                                 }
                                 _ => {}
                             }

@@ -236,6 +236,7 @@ pub struct KafkaIngestDecl {
     pub topic: String,
     pub group: String,
     pub plaintext: bool,
+    pub tls: Option<TlsDecl>,
 }
 
 impl Default for KafkaIngestDecl {
@@ -250,6 +251,7 @@ impl Default for KafkaIngestDecl {
             topic: String::new(),
             group: String::new(),
             plaintext: true,
+            tls: None,
         }
     }
 }
@@ -281,7 +283,7 @@ pub enum Transport {
     Undeclared,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TlsDecl {
     pub certificate: String,
     pub key: String,

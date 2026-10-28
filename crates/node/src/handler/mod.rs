@@ -20,6 +20,16 @@ pub trait Handler: Send + Sync {
         "01-runtime-cli-api"
     }
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken);
+
+    /// Entrypoint-aware serve (syslog 1:1 bind). Default ignores the name.
+    async fn serve_named(
+        &self,
+        stream: ClientStream,
+        cancel: CancellationToken,
+        _entrypoint: &str,
+    ) {
+        self.serve(stream, cancel).await
+    }
 }
 
 pub struct HandlerRegistry {
@@ -61,8 +71,10 @@ impl Default for HandlerRegistry {
 
 pub mod admin_http;
 pub mod admin_tcp;
+pub mod console_backend;
 pub mod echo;
 pub mod fabric;
+pub mod live_map;
 pub mod postgresql;
 pub mod redis;
 pub mod stub_cluster;

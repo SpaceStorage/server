@@ -1,8 +1,9 @@
 use spacestorage_admin_proto::{BufferRange, BufferReport};
 use spacestorage_config::{buffer_spec, NodeConfig, BUILTIN_BUFFERS};
+use spacestorage_ingest::{BufferGate, SharedBufferGate};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverflowPolicy {
@@ -41,7 +42,8 @@ impl Buffer {
     }
 
     pub fn release(&self, n: u64) {
-        self.used.fetch_sub(n.min(self.used.load(Ordering::SeqCst)), Ordering::SeqCst);
+        self.used
+            .fetch_sub(n.min(self.used.load(Ordering::SeqCst)), Ordering::SeqCst);
     }
 
     pub fn set_capacity(&self, cap: u64) {
@@ -76,6 +78,26 @@ impl Buffer {
     }
 }
 
+/// Gate bound to a named registry buffer (shared with ingest).
+struct RegistryGate {
+    registry: Arc<BufferRegistry>,
+    name: String,
+}
+
+impl BufferGate for RegistryGate {
+    fn try_reserve(&self, n: u64) -> bool {
+        self.registry.try_reserve(&self.name, n)
+    }
+
+    fn release(&self, n: u64) {
+        self.registry.release(&self.name, n);
+    }
+
+    fn capacity(&self) -> u64 {
+        self.registry.capacity(&self.name).unwrap_or(0)
+    }
+}
+
 pub struct BufferRegistry {
     inner: Mutex<HashMap<String, Buffer>>,
 }
@@ -84,7 +106,10 @@ impl BufferRegistry {
     pub fn from_config(cfg: &NodeConfig) -> Self {
         let mut map = HashMap::new();
         for (name, default, min, max) in BUILTIN_BUFFERS {
-            let policy = if *name == "request.queue" {
+            let policy = if *name == "request.queue"
+                || *name == "ingest.syslog.recv"
+                || *name == "ingest.kafka.decode"
+            {
                 OverflowPolicy::Reject
             } else {
                 OverflowPolicy::Wait
@@ -107,6 +132,34 @@ impl BufferRegistry {
         Self {
             inner: Mutex::new(map),
         }
+    }
+
+    pub fn try_reserve(&self, name: &str, n: u64) -> bool {
+        let g = self.inner.lock().unwrap();
+        match g.get(name) {
+            Some(b) => b.try_reserve(n),
+            None => false,
+        }
+    }
+
+    pub fn release(&self, name: &str, n: u64) {
+        let g = self.inner.lock().unwrap();
+        if let Some(b) = g.get(name) {
+            b.release(n);
+        }
+    }
+
+    pub fn capacity(&self, name: &str) -> Option<u64> {
+        let g = self.inner.lock().unwrap();
+        g.get(name).map(|b| b.capacity.load(Ordering::SeqCst))
+    }
+
+    /// Shared gate for ingest paths — usage/`limit_hits` update this registry.
+    pub fn gate(self: &Arc<Self>, name: &str) -> SharedBufferGate {
+        Arc::new(RegistryGate {
+            registry: Arc::clone(self),
+            name: name.to_string(),
+        })
     }
 
     pub fn reports(&self) -> Vec<BufferReport> {

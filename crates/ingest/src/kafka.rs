@@ -1,8 +1,9 @@
 //! Kafka consumer group: Fetch → decode → append → durable ack → OffsetCommit.
 
+use crate::buffer_gate::{LocalBufferGate, SharedBufferGate};
 use crate::declaration::KafkaIngest;
 use crate::format::{map_kafka_payload, KafkaSidecar, PayloadFormat};
-use crate::kafka_wire::LiveKafkaClient;
+use crate::kafka_wire::{KafkaWireError, LiveKafkaClient};
 use crate::record::LogRecord;
 use crate::IngestRuntime;
 use parking_lot::Mutex;
@@ -59,31 +60,28 @@ pub enum KafkaBrokerBackend {
 }
 
 /// Decode buffer with reject policy (never wait on worker).
-#[derive(Debug)]
+/// Prefer wiring [`SharedBufferGate`] from the node registry in production.
 pub struct DecodeBuffer {
-    capacity: usize,
-    used: AtomicU64,
+    gate: SharedBufferGate,
 }
 
 impl DecodeBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            capacity,
-            used: AtomicU64::new(0),
+            gate: Arc::new(LocalBufferGate::new(capacity as u64)),
         }
+    }
+
+    pub fn from_gate(gate: SharedBufferGate) -> Self {
+        Self { gate }
     }
 
     pub fn try_enqueue(&self, bytes: usize) -> bool {
-        let cur = self.used.load(Ordering::SeqCst) as usize;
-        if cur + bytes > self.capacity {
-            return false;
-        }
-        self.used.fetch_add(bytes as u64, Ordering::SeqCst);
-        true
+        self.gate.try_reserve(bytes as u64)
     }
 
     pub fn release(&self, bytes: usize) {
-        self.used.fetch_sub(bytes as u64, Ordering::SeqCst);
+        self.gate.release(bytes as u64);
     }
 }
 
@@ -136,6 +134,11 @@ impl KafkaConsumer {
         self
     }
 
+    pub fn with_buffer_gate(mut self, gate: SharedBufferGate) -> Self {
+        self.buffer = DecodeBuffer::from_gate(gate);
+        self
+    }
+
     pub fn with_runtime(mut self, rt: Arc<IngestRuntime>) -> Self {
         self.runtime = Some(rt);
         self
@@ -166,11 +169,17 @@ impl KafkaConsumer {
                 self.handle_message(msg, |m| b.produce(m), |p, o| b.commit(p, o))
             }
             KafkaBrokerBackend::Live(live) => {
-                let Some(msg) = live.fetch_one().await? else {
+                let msg = match live.fetch_one().await {
+                    Ok(m) => m,
+                    Err(KafkaWireError::RejoinRequired) => {
+                        live.rejoin().await?;
+                        return Ok(false);
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                let Some(msg) = msg else {
                     return Ok(false);
                 };
-                let partition = msg.partition;
-                let offset = msg.offset;
                 let live_requeue = Arc::clone(live);
                 let pending_commit = Mutex::new(None::<(i32, i64)>);
                 let outcome = self.handle_message(
@@ -181,8 +190,14 @@ impl KafkaConsumer {
                     },
                 )?;
                 if let Some((p, o)) = pending_commit.into_inner() {
-                    live.commit(p, o).await?;
-                    let _ = (partition, offset);
+                    match live.commit(p, o).await {
+                        Ok(()) => {}
+                        Err(KafkaWireError::RejoinRequired) => {
+                            live.rejoin().await?;
+                            return Ok(false);
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
                 }
                 Ok(outcome)
             }

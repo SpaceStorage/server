@@ -52,6 +52,8 @@ spacestorage-migrate = { path = "../migrate" }
 spacestorage-backup = { path = "../backup" }
 spacestorage-admin-ui = { path = "../admin-ui" }
 spacestorage-ingest = { path = "../ingest" }
+spacestorage-query = { path = "../query" }
+spacestorage-controlplane = { path = "../controlplane" }
 tokio = { workspace = true }
 uuid = { workspace = true }
 axum = { workspace = true }

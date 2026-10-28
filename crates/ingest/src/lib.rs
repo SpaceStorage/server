@@ -1,5 +1,6 @@
 //! Kafka and syslog ingest into Log Stream (009).
 
+pub mod buffer_gate;
 pub mod declaration;
 pub mod error;
 pub mod format;
@@ -10,15 +11,16 @@ pub mod parse_rfc5424;
 pub mod record;
 pub mod syslog;
 
-pub use declaration::{IngestAuthz, KafkaIngest, KafkaIngestStore, SyslogIngestBind};
+pub use buffer_gate::{BufferGate, LocalBufferGate, SharedBufferGate};
+pub use declaration::{IngestAuthz, KafkaIngest, KafkaIngestStore, KafkaTls, SyslogIngestBind};
 pub use error::{IngestError, UI_INGEST_SLICE11_REQUIRED};
 pub use format::{map_kafka_payload, PayloadFormat};
 pub use kafka::{
     AppendAck, DecodeBuffer, FakeKafkaBroker, KafkaBrokerBackend, KafkaConsumer, KafkaMessage,
 };
-pub use kafka_wire::{range_assign_partitions, LiveKafkaClient};
+pub use kafka_wire::{range_assign_partitions, KafkaWireError, LiveKafkaClient};
 pub use record::LogRecord;
-pub use syslog::SyslogHandler;
+pub use syslog::{IngestOutcome, SyslogHandler};
 
 /// Application name for ingest writes (`005`/`008`).
 pub const APPLICATION_INGEST: &str = "spacestorage-ingest";
@@ -36,6 +38,7 @@ pub struct IngestRuntime {
     pub slice11_enabled: bool,
     pub kafka: KafkaIngestStore,
     pub metrics: Option<std::sync::Arc<spacestorage_observability::Metrics>>,
+    syslog_handlers: parking_lot::Mutex<Vec<std::sync::Arc<SyslogHandler>>>,
 }
 
 impl IngestRuntime {
@@ -44,6 +47,18 @@ impl IngestRuntime {
             slice11_enabled,
             kafka: KafkaIngestStore::new(slice11_enabled),
             metrics: None,
+            syslog_handlers: parking_lot::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn register_syslog(&self, h: std::sync::Arc<SyslogHandler>) {
+        self.syslog_handlers.lock().push(h);
+    }
+
+    /// Drain stops new accepts (001) — mark all syslog handlers.
+    pub fn begin_syslog_drain(&self) {
+        for h in self.syslog_handlers.lock().iter() {
+            h.begin_drain();
         }
     }
 

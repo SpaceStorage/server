@@ -476,7 +476,9 @@ pub fn ensure_container(
     }
     let (l3, schema) = match model {
         "kv" | "kv_store" | "KvStore" => (L3Model::KvStore, None),
-        "doc" | "document" | "DocumentStore" => (L3Model::DocumentStore, None),
+        "doc" | "document" | "DocumentStore" | "document_store" | "log_stream" => {
+            (L3Model::DocumentStore, None)
+        }
         _ => (
             L3Model::RelationalTable,
             Some(ContainerSchema {

@@ -375,3 +375,10 @@ Task: "Declare per-protocol mapping() for all six interim types in each handler 
 - [X] T105 Feature-gate registration behind `handlers-complete` on `spacestorage-node` / `spacestoraged` / `spacestorage-conformance` so FirstBinary still yields `entrypoint_unknown_handler` for forbidden names
 - [X] T106 Classify-before-IR MUST smoke + one MUST-NOT per HC protocol (dispatch APIs; `compat_handlers_complete` suite)
 - Residual (closed): T043–T048 wire dialects + protocol-core signature matrix
+
+## Phase 12: Convergence
+
+**Purpose**: Live-path gaps not already tracked by open Phase 1–9 tasks. Does not re-list historical `[ ]` work (type matrix, quorum/options, drain, admin map, docs).
+
+- [X] T107 Log protocol-mismatch refusals with handler, reason, and the accept-loop entrypoint span per FR-004 (`partial`)
+- [X] T108 Drive PostgreSQL wire classify/execute from the build release profile per FR-038 (`partial`)

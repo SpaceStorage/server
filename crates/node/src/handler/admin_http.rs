@@ -612,9 +612,11 @@ async fn cluster_map(
     headers: HeaderMap,
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::response::Response {
-    let ui = node.admin_ui.read().unwrap().clone();
-    if !ui.slice11_enabled {
-        return slice11_required();
+    {
+        let ui = node.admin_ui.read().unwrap();
+        if !ui.slice11_enabled {
+            return slice11_required();
+        }
     }
     let Some(principal) = ui_principal(&node, &headers) else {
         return (
@@ -631,6 +633,13 @@ async fn cluster_map(
     if matches!(authz, spacestorage_admin_ui::MapAuthz::Forbidden) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    // Live compose from 011 membership, catalog, 010 jobs (004 replica ids when present).
+    let snap = crate::handler::live_map::build_topology_snapshot(&node).await;
+    {
+        let mut ui = node.admin_ui.write().unwrap();
+        ui.map.set_topology(snap);
+    }
+    let ui = node.admin_ui.read().unwrap().clone();
     let ns = q.get("namespace").map(|s| s.as_str());
     match ui.map.compose(&authz, ns) {
         Ok(view) => with_headers(&node, Json(view).into_response()),
@@ -845,14 +854,46 @@ fn ingest_err(e: spacestorage_ingest::IngestError) -> axum::response::Response {
         .into_response()
 }
 
+fn ingest_authz(node: &Node, headers: &HeaderMap) -> Result<spacestorage_ingest::IngestAuthz, ErrorBody> {
+    if let Some(p) = ui_principal(node, headers) {
+        return Ok(spacestorage_ingest::IngestAuthz::from_principal(
+            p.cluster_admin,
+            &p.namespace_admin,
+            &p.write_containers,
+        ));
+    }
+    // Bootstrap: static admin token file ⇒ cluster-admin (interim until full 014 grants).
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth.strip_prefix("Bearer ").unwrap_or("");
+    let expected = node
+        .config
+        .load()
+        .admin_token_file
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
+    if check_bearer(token, expected.trim()) {
+        return Ok(spacestorage_ingest::IngestAuthz::cluster_admin());
+    }
+    Err(ErrorBody {
+        code: "unauthorized".into(),
+        message: "invalid token".into(),
+        details: serde_json::json!({}),
+    })
+}
+
 async fn ingest_kafka_list(
     State(node): State<Arc<Node>>,
     headers: HeaderMap,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
-    }
-    match node.ingest.kafka.list() {
+    let authz = match ingest_authz(&node, &headers) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(e)).into_response(),
+    };
+    match node.ingest.kafka.list_for(&authz) {
         Ok(items) => with_headers(&node, Json(serde_json::json!({ "kafka": items })).into_response()),
         Err(e) => ingest_err(e),
     }
@@ -863,9 +904,10 @@ async fn ingest_kafka_add(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
-    }
+    let authz = match ingest_authz(&node, &headers) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(e)).into_response(),
+    };
     let mut decl: spacestorage_ingest::KafkaIngest = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -883,8 +925,7 @@ async fn ingest_kafka_add(
     if decl.id.is_nil() {
         decl.id = uuid::Uuid::now_v7();
     }
-    let authz = spacestorage_ingest::IngestAuthz::cluster_admin();
-    match node.ingest.kafka.add(decl, &authz) {
+    match node.ingest.kafka.add(decl, &authz).await {
         Ok(d) => (StatusCode::CREATED, with_headers(&node, Json(d).into_response())).into_response(),
         Err(e) => ingest_err(e),
     }
@@ -895,9 +936,10 @@ async fn ingest_kafka_delete(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
-    }
+    let authz = match ingest_authz(&node, &headers) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(e)).into_response(),
+    };
     let Ok(uid) = uuid::Uuid::parse_str(&id) else {
         return (
             StatusCode::BAD_REQUEST,
@@ -909,8 +951,7 @@ async fn ingest_kafka_delete(
         )
             .into_response();
     };
-    let authz = spacestorage_ingest::IngestAuthz::cluster_admin();
-    match node.ingest.kafka.delete(uid, &authz) {
+    match node.ingest.kafka.delete(uid, &authz).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => ingest_err(e),
     }

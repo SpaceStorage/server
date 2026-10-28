@@ -478,6 +478,8 @@ pub fn request_drain(node: &Node) -> bool {
     let started = node.state.begin_drain();
     if started {
         info!(state = "draining", "drain requested");
+        // Syslog: stop new accepts / enqueue (009 T054).
+        node.ingest.begin_syslog_drain();
         // Wake `Node::run` without tearing down listeners.
         node.drain_started.cancel();
     }

@@ -2258,6 +2258,7 @@ dependencies = [
  "kafka-protocol",
  "parking_lot",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "spacestorage-observability",
@@ -2267,6 +2268,7 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "uuid",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -2350,6 +2352,7 @@ dependencies = [
  "spacestorage-authz",
  "spacestorage-backup",
  "spacestorage-config",
+ "spacestorage-controlplane",
  "spacestorage-crypto",
  "spacestorage-handler-cassandra",
  "spacestorage-handler-clickhouse",
@@ -2363,6 +2366,7 @@ dependencies = [
  "spacestorage-membership",
  "spacestorage-migrate",
  "spacestorage-observability",
+ "spacestorage-query",
  "spacestorage-release-profile",
  "spacestorage-replication",
  "spacestorage-storage",
@@ -2420,6 +2424,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
