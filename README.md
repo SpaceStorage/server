@@ -1,5 +1,10 @@
 # SpaceStorage server
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/guide/images/logo-on-dark.svg">
+  <img alt="SpaceStorage" src="docs/guide/images/logo.svg" width="72" height="72">
+</picture>
+
 Rust / Tokio monolith for SpaceStorage: a multiparadigm database whose paradigms are **datatypes**, not bolted-on engines. Spec Kit project root is this directory (`server/`), not the parent monorepo.
 
 Parent layout: `spacestorage/` holds `server/` (this tree), `test/`, and `start` (original product-vision dump). Numbered intent under `.specify/intent/` wins for its domain after it exists.

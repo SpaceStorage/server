@@ -1,5 +1,10 @@
 # SpaceStorage guide
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/logo-on-dark.svg">
+  <img alt="SpaceStorage" src="images/logo.svg" width="72" height="72">
+</picture>
+
 Operator documentation for the server in this repository. The product tip is [`docs/milestones/009-full-product`](../milestones/009-full-product.md).
 
 | Page | What it covers |
