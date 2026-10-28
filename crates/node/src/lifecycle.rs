@@ -1,7 +1,7 @@
 use crate::Node;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -103,7 +103,9 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
     let max_wait = Duration::from_millis(cfg.storage.group_commit_max_wait_ms.unwrap_or(2));
     let max_bytes = cfg.storage.group_commit_max_bytes.unwrap_or(1024 * 1024) as usize;
     let metrics = Arc::new(spacestorage_storage::WalMetrics::default());
-    let engine = Arc::new(spacestorage_storage::StorageEngine::new(Arc::clone(&metrics)));
+    let engine = Arc::new(spacestorage_storage::StorageEngine::new(Arc::clone(
+        &metrics,
+    )));
     engine
         .open_drives(
             data_dir.as_deref(),
@@ -116,17 +118,13 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     // Catalog restore: disk definitions (if present) + in-memory Node catalog modes.
-    let mut catalog_entries =
-        spacestorage_storage::restore::restore_catalog(data_dir.as_deref())
-            .await
-            .map_err(|e| e.to_string())?;
+    let mut catalog_entries = spacestorage_storage::restore::restore_catalog(data_dir.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
     if let Some(dir) = data_dir.as_ref() {
         if let Ok(defs) = spacestorage_storage::load_definitions(dir).await {
             for d in defs {
-                if !catalog_entries
-                    .iter()
-                    .any(|e| e.container_id == d.id)
-                {
+                if !catalog_entries.iter().any(|e| e.container_id == d.id) {
                     catalog_entries.push(spacestorage_storage::restore::CatalogEntry {
                         container_id: d.id,
                         mode: d.mode,
@@ -284,7 +282,7 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
 /// - Fresh `011` bootstrap path → `ControlPlane::bootstrap` once.
 /// - Join without local raft yet → open as non-voting until admitted.
 /// Roster is pushed via `apply_controlplane_roster`; raft handler mounts on fabric.
-pub async fn start_controlplane(node: &Node) -> Result<(), String> {
+pub async fn start_controlplane(node: Arc<Node>) -> Result<(), String> {
     let cfg = node.config.load();
     let membership = node.membership.read().await.clone();
     let Some(svc) = membership else {
@@ -356,7 +354,64 @@ pub async fn start_controlplane(node: &Node) -> Result<(), String> {
     };
 
     cp.set_metrics(Arc::clone(&node.metrics));
-    if cp.elections_total.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+    let is_cluster_leader = cp
+        .cluster_group
+        .try_lock()
+        .ok()
+        .and_then(|group| group.as_ref().map(|group| group.is_leader()))
+        .unwrap_or(false);
+    // `007`: bootstrap-only, create-if-absent by the public namespace name.
+    // Replays/restarts see the applied cluster state first, so this is idempotent.
+    if let Some(name) = cfg.cluster.starter_namespace.as_deref() {
+        let exists = cp
+            .cluster_snapshot()
+            .namespaces
+            .values()
+            .any(|namespace| namespace.name == name);
+        if !exists && is_cluster_leader {
+            cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceCreate {
+                name: name.to_string(),
+            })
+            .await
+            .map_err(|error| format!("starter_namespace {name}: {error}"))?;
+        }
+    }
+    if is_cluster_leader {
+        let snapshot = cp.cluster_snapshot();
+        if !snapshot.tenancy_roles.contains_key("admin") {
+            let role = spacestorage_tenancy::roles::prepare_role_put(
+                spacestorage_authz::Verb::CLUSTER_ADMIN.bits(),
+                spacestorage_tenancy::roles::builtin_admin(),
+            )
+            .map_err(|error| format!("bootstrap role admin: {error}"))?;
+            cp.append_tenancy(spacestorage_tenancy::TenancyOp::RolePut { role })
+            .await
+            .map_err(|error| format!("bootstrap role admin: {error}"))?;
+        }
+        if !snapshot.tenancy_roles.contains_key("replication") {
+            let role = spacestorage_tenancy::roles::prepare_role_put(
+                spacestorage_authz::Verb::CLUSTER_ADMIN.bits(),
+                spacestorage_tenancy::roles::builtin_replication(),
+            )
+            .map_err(|error| format!("bootstrap role replication: {error}"))?;
+            cp.append_tenancy(spacestorage_tenancy::TenancyOp::RolePut { role })
+            .await
+            .map_err(|error| format!("bootstrap role replication: {error}"))?;
+        }
+    }
+    node.tenancy
+        .registry
+        .lock()
+        .replace_applied(cp.tenancy_namespaces());
+    *node.tenancy.roles.lock() = cp.cluster_snapshot().tenancy_roles.clone();
+    reconcile_tenancy_usage_from_catalog(node.as_ref());
+    wire_quota_delta_fanout(Arc::clone(&node));
+    spawn_tenancy_usage_reconcile(Arc::clone(&node));
+    if cp
+        .elections_total
+        .load(std::sync::atomic::Ordering::Relaxed)
+        > 0
+    {
         spacestorage_controlplane::record_election(
             &node.metrics,
             &cfg.node_name,
@@ -425,11 +480,7 @@ pub async fn start_membership(node: &Node) -> Result<(), String> {
         spacestorage_membership::MembershipStartOpts {
             data_dir,
             node_name: cfg.node_name.clone(),
-            cluster_name: cfg
-                .cluster
-                .name
-                .clone()
-                .unwrap_or_else(|| "cluster".into()),
+            cluster_name: cfg.cluster.name.clone().unwrap_or_else(|| "cluster".into()),
             quorum_domain,
             token_file: cfg.cluster.token_file.as_ref().map(PathBuf::from),
             bootstrap: cfg.cluster.bootstrap,
@@ -495,10 +546,7 @@ pub async fn drive_first_join(
         let text = tokio::fs::read_to_string(path)
             .await
             .map_err(|e| e.to_string())?;
-        Some(
-            uuid::Uuid::parse_str(text.trim())
-                .map_err(|e| format!("join_token_file: {e}"))?,
-        )
+        Some(uuid::Uuid::parse_str(text.trim()).map_err(|e| format!("join_token_file: {e}"))?)
     } else {
         None
     };
@@ -507,9 +555,7 @@ pub async fn drive_first_join(
         .await
         .map_err(|e| e.to_string())?;
     match ack {
-        spacestorage_membership::JoinAck::Refused { code } => {
-            Err(format!("join_refused:{code}"))
-        }
+        spacestorage_membership::JoinAck::Refused { code } => Err(format!("join_refused:{code}")),
         spacestorage_membership::JoinAck::Pending
         | spacestorage_membership::JoinAck::Admitted { .. }
         | spacestorage_membership::JoinAck::Replaced { .. } => {
@@ -573,11 +619,7 @@ async fn resolve_container_wal_keys(
     catalog: &[spacestorage_storage::restore::CatalogEntry],
 ) -> spacestorage_storage::restore::WalDataKeys {
     let authority = node.key_authority().await;
-    spacestorage_storage::restore::resolve_wal_data_keys(
-        catalog,
-        authority.as_deref(),
-    )
-    .await
+    spacestorage_storage::restore::resolve_wal_data_keys(catalog, authority.as_deref()).await
 }
 
 /// Begin graceful drain: refuse new **tenant** accepts via `is_draining`; keep admin /
@@ -630,7 +672,7 @@ fn handle_signal(node: &Arc<Node>) {
 pub async fn watch_os_signals(node: Arc<Node>) {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut sigterm = match signal(SignalKind::terminate()) {
             Ok(s) => s,
             Err(e) => {
@@ -661,4 +703,87 @@ pub async fn watch_os_signals(node: Arc<Node>) {
             handle_signal(&node);
         }
     }
+}
+
+fn reconcile_tenancy_usage_from_catalog(node: &Node) {
+    let registry = node.tenancy.registry.lock();
+    let cat = match node.catalog.read() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let usage_rows: Vec<_> = cat
+        .list()
+        .map(|container| {
+            let (bytes, objects) = cat.logical_usage(container.id);
+            (
+                container.namespace.as_str().to_string(),
+                container.model.machine_name().to_string(),
+                bytes,
+                objects,
+            )
+        })
+        .collect();
+    drop(cat);
+    node.tenancy
+        .usage
+        .reconcile_from_catalog(&registry, usage_rows.into_iter());
+}
+
+/// Periodic bytes/objects reconcile from catalog logical size (connections stay delta-only).
+fn spawn_tenancy_usage_reconcile(node: Arc<Node>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            reconcile_tenancy_usage_from_catalog(node.as_ref());
+        }
+    });
+}
+
+fn wire_quota_delta_fanout(node: Arc<Node>) {
+    let fabric = Arc::clone(&node.fabric);
+    let node_cb = Arc::clone(&node);
+    node.tenancy.usage.set_delta_notify(Some(Arc::new(
+        move |delta| {
+            let peers = quota_delta_peer_addrs(node_cb.as_ref());
+            spacestorage_internode::spawn_broadcast(Arc::clone(&fabric), peers, delta);
+        },
+    )));
+}
+
+fn quota_delta_peer_addrs(node: &Node) -> Vec<String> {
+    use std::collections::BTreeSet;
+    let mut addrs = BTreeSet::new();
+    let cfg = node.config.load();
+    for seed in &cfg.cluster.seeds {
+        addrs.insert(format!("{}:{}", seed.address, seed.port));
+    }
+    if let Ok(guard) = node.membership.try_read() {
+        if let Some(svc) = guard.as_ref() {
+            if let Some(view) = svc.view_snapshot() {
+                for pending in view.pending.values() {
+                    if !pending.internodes_address.is_empty() {
+                        addrs.insert(pending.internodes_address.clone());
+                    }
+                }
+                for member in view.members.values() {
+                    if let Some(addr) = member.labels.get("internodes_address") {
+                        if !addr.is_empty() {
+                            addrs.insert(addr.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let self_addr = cfg
+        .entrypoints
+        .iter()
+        .find(|e| e.handler == "internode")
+        .map(|e| format!("{}:{}", e.address, e.port));
+    if let Some(self_addr) = self_addr {
+        addrs.remove(&self_addr);
+    }
+    addrs.into_iter().collect()
 }

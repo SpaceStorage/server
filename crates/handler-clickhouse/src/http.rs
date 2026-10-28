@@ -12,7 +12,10 @@ use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
+use spacestorage_tenancy::NamespaceControl;
+
 use crate::dispatch::{ClickHouseReply, SessionState};
+use crate::namespace_admin::try_namespace_admin_sql;
 use crate::sql::execute_sql;
 
 pub struct ClickHouseHttpHandler {
@@ -20,6 +23,8 @@ pub struct ClickHouseHttpHandler {
     pub profile: DialectProfile,
     pub namespace: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub namespace_control: Option<Arc<dyn NamespaceControl>>,
 }
 
 impl ClickHouseHttpHandler {
@@ -33,7 +38,22 @@ impl ClickHouseHttpHandler {
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
             limit_services,
+            tenancy: None,
+            namespace_control: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
+    }
+
+    pub fn with_namespace_control(
+        mut self,
+        control: Arc<dyn NamespaceControl>,
+    ) -> Self {
+        self.namespace_control = Some(control);
+        self
     }
 
     pub async fn serve<S>(&self, mut stream: S, cancel: CancellationToken)
@@ -62,6 +82,12 @@ impl ClickHouseHttpHandler {
             protocol: spacestorage_compat::ProtocolId::ClickHouseHttp,
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            namespace_control: self.namespace_control.clone(),
+            connection_quota: None,
+            connection_charged_namespace: None,
+            principal: None,
+            registry_accepted: false,
         };
 
         let mut buf = BytesMut::from(peeked.as_slice());
@@ -84,6 +110,15 @@ impl ClickHouseHttpHandler {
                                     continue;
                                 }
                             };
+                            if let Some(db) = database_from_http_query(req.query.as_deref()) {
+                                if let Err(err) =
+                                    session.try_registry_accept_presented_database(&db)
+                                {
+                                    let body = format!("Code: 516. {err}\n");
+                                    let _ = write_http(&mut stream, 403, &body).await;
+                                    break;
+                                }
+                            }
                             if session.principal_hold.is_none() {
                                 match session.limit_services.try_hold_principal(&principal) {
                                     Ok(hold) => session.principal_hold = Some(hold),
@@ -94,8 +129,15 @@ impl ClickHouseHttpHandler {
                                     }
                                 }
                             }
+                            session.principal = Some(principal);
                             let sql = resolve_sql(&req);
-                            let reply = execute_sql(&mut session, &sql);
+                            let reply = if let Some(r) =
+                                try_namespace_admin_sql(&mut session, &sql).await
+                            {
+                                r
+                            } else {
+                                execute_sql(&mut session, &sql)
+                            };
                             let (status, body) = render(&reply);
                             if write_http(&mut stream, status, &body).await.is_err() {
                                 break;
@@ -181,6 +223,19 @@ fn decode_basic(b64: &str) -> Option<String> {
         }
     }
     String::from_utf8(out).ok()
+}
+
+fn database_from_http_query(query: Option<&str>) -> Option<String> {
+    query.and_then(|q| {
+        q.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            if k == "database" {
+                Some(urlencoding_decode(v))
+            } else {
+                None
+            }
+        })
+    })
 }
 
 fn resolve_sql(req: &HttpReq) -> String {
@@ -319,6 +374,40 @@ fn try_parse(buf: &mut BytesMut) -> std::io::Result<Option<HttpReq>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn http_ok_when_default_not_in_registry() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        let handler = ClickHouseHttpHandler::with_demo(Arc::clone(&cat)).with_tenancy(tenancy);
+        let (mut client, server) = tokio::io::duplex(8192);
+        let cancel = CancellationToken::new();
+        let c2 = cancel.clone();
+        tokio::spawn(async move { handler.serve(server, c2).await });
+
+        let body = "CREATE TABLE u (id String)";
+        let req = format!(
+            "POST /?database=acme HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}",
+            body.len()
+        );
+        client.write_all(req.as_bytes()).await.unwrap();
+        let mut resp = vec![0u8; 512];
+        let n = tokio::time::timeout(std::time::Duration::from_millis(500), client.read(&mut resp))
+            .await
+            .unwrap()
+            .unwrap();
+        let s = String::from_utf8_lossy(&resp[..n]);
+        assert!(s.contains("200") && s.contains("Ok."), "{s}");
+        cancel.cancel();
+    }
 
     #[tokio::test]
     async fn http_smoke_create_insert_select() {

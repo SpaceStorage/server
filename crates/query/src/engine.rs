@@ -4,8 +4,9 @@ use crate::admission::{AdmissionController, AdmissionLimits};
 use crate::cancel::{check_deadline, CancelToken};
 use crate::catalog_exec::{
     copy_in, copy_out, ensure_container, execute_adhoc_sql, object_delete, object_get, object_put,
-    object_scan, QueryResult, SharedCatalog,
+    object_scan, parse_set_transaction_isolation, QueryResult, SharedCatalog,
 };
+use spacestorage_compat::{ClassifyOutcome, DialectProfile};
 use crate::error::ExecError;
 use crate::options::{IsolationLevel, QueryOptions};
 use crate::planner::{self, explain_text};
@@ -77,6 +78,7 @@ pub struct PlannerEngine {
     shuffle: crate::engines::shuffle::ShuffleTransport,
     /// When false, BEGIN/COPY/distributed engines refuse (first-binary / HC dialect).
     distributed: bool,
+    tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 }
 
 impl PlannerEngine {
@@ -109,7 +111,13 @@ impl PlannerEngine {
             #[cfg(feature = "query-distributed")]
             shuffle: crate::engines::shuffle::ShuffleTransport::new(),
             distributed,
+            tenancy: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
     }
 
     pub fn set_data_dir(&mut self, dir: PathBuf) {
@@ -266,6 +274,65 @@ impl PlannerEngine {
         rec.plan_id = Some(lp.id);
         rec.set_stage(ExecutionStage::Planned);
 
+        // `007`: quota admission is coordinator-local and happens before query
+        // scheduling. It never contacts the cluster primary.
+        let mut quota_hold: Option<(uuid::Uuid, Vec<(spacestorage_tenancy::QuotaSpec, u64)>)> =
+            None;
+        if let Some(tenancy) = &self.tenancy {
+            let namespace_record = tenancy
+                .registry
+                .lock()
+                .get_by_name(namespace)
+                .cloned();
+            if let Some(namespace_record) = namespace_record {
+                let datatype = request_datatype(&self.catalog, namespace, &request);
+                if let Some(login) = options.principal.as_deref() {
+                    let roles = tenancy.roles.lock();
+                    let role = roles
+                        .get(login)
+                        .or_else(|| roles.get("admin").filter(|_| login == "admin"));
+                    if let Some(role) = role {
+                        let (bytes, objects) = request_usage(&request);
+                        let verb = if bytes > 0 || objects > 0 {
+                            spacestorage_authz::Verb::WRITE.bits()
+                        } else {
+                            spacestorage_authz::Verb::READ.bits()
+                        };
+                        spacestorage_tenancy::authorize_consuming(
+                            login,
+                            role,
+                            &namespace_record,
+                            datatype.as_deref().unwrap_or("*"),
+                            verb,
+                        )
+                        .map_err(|error| ExecError::Msg(error.to_string()))?;
+                    }
+                }
+                let (bytes, objects) = request_usage(&request);
+                let consuming: Vec<_> = namespace_record
+                    .quotas
+                    .iter()
+                    .filter(|spec| spec.applies_to(datatype.as_deref()))
+                    .filter_map(|spec| {
+                        let amount = match spec.unit {
+                            spacestorage_tenancy::QuotaUnit::Bytes if bytes > 0 => bytes,
+                            spacestorage_tenancy::QuotaUnit::Objects if objects > 0 => objects,
+                            spacestorage_tenancy::QuotaUnit::OpsPerSec if consumes_ops(&request) => {
+                                1
+                            }
+                            _ => return None,
+                        };
+                        Some((spec.clone(), amount))
+                    })
+                    .collect();
+                spacestorage_tenancy::admit(&tenancy.usage, &namespace_record, &consuming)
+                    .map_err(|error| ExecError::Msg(error.to_string()))?;
+                if !consuming.is_empty() {
+                    quota_hold = Some((namespace_record.id, consuming));
+                }
+            }
+        }
+
         let mem = pp
             .tasks
             .iter()
@@ -334,6 +401,11 @@ impl PlannerEngine {
             let _ = crate::spill::SpillDir::create(dir, rec.id);
         }
         self.push_record(rec);
+        if result.is_err() {
+            if let (Some(tenancy), Some((ns_id, specs))) = (&self.tenancy, quota_hold) {
+                spacestorage_tenancy::admit::release(&tenancy.usage, ns_id, &specs);
+            }
+        }
         result
     }
 
@@ -386,6 +458,20 @@ impl PlannerEngine {
                 self.txns.begin(session.into(), protocol, isolation)?;
                 Ok(QueryResult {
                     tag: "BEGIN".into(),
+                    ..Default::default()
+                })
+            }
+            LogicalRequest::TxnSetIsolation { isolation } => {
+                self.require_distributed("SET TRANSACTION")?;
+                self.txns.with_mut(session, |txn| {
+                    if txn.state != crate::txn::TxnState::Open {
+                        return Err(ExecError::Msg("no_active_txn".into()));
+                    }
+                    txn.isolation = isolation;
+                    Ok(())
+                })?;
+                Ok(QueryResult {
+                    tag: "SET".into(),
                     ..Default::default()
                 })
             }
@@ -613,6 +699,58 @@ impl PlannerEngine {
     }
 }
 
+fn consumes_ops(request: &LogicalRequest) -> bool {
+    !matches!(
+        request,
+        LogicalRequest::Explain { .. }
+            | LogicalRequest::TxnBegin { .. }
+            | LogicalRequest::TxnSetIsolation { .. }
+    )
+}
+
+fn request_datatype(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    request: &LogicalRequest,
+) -> Option<String> {
+    let container = match request {
+        LogicalRequest::Object { container, .. } => container.as_str(),
+        LogicalRequest::Mutate { container, .. } => container.as_str(),
+        LogicalRequest::CopyIn { container, .. } => container.as_str(),
+        _ => return None,
+    };
+    catalog
+        .read()
+        .ok()?
+        .describe(namespace, container)
+        .ok()
+        .map(|d| d.model.machine_name().to_string())
+}
+
+fn request_usage(request: &LogicalRequest) -> (u64, u64) {
+    match request {
+        LogicalRequest::Object { bytes, .. } => (bytes.len() as u64, 1),
+        LogicalRequest::Mutate { op, .. } if op.eq_ignore_ascii_case("delete") => (0, 0),
+        LogicalRequest::Mutate { .. } => (0, 1),
+        LogicalRequest::CopyIn { rows, .. } => {
+            let bytes = rows
+                .iter()
+                .flat_map(|row| row.iter())
+                .map(|value| value.as_ref().map(|value| value.len() as u64).unwrap_or(0))
+                .sum();
+            (bytes, rows.len() as u64)
+        }
+        LogicalRequest::AdHocSql { sql } => crate::catalog_exec::adhoc_sql_usage(sql),
+        LogicalRequest::Batch { requests } => requests
+            .iter()
+            .map(request_usage)
+            .fold((0u64, 0u64), |(ab, ao), (b, o)| {
+                (ab.saturating_add(b), ao.saturating_add(o))
+            }),
+        _ => (0, 0),
+    }
+}
+
 #[async_trait::async_trait]
 impl QueryEngine for PlannerEngine {
     async fn execute(
@@ -673,7 +811,15 @@ pub fn lower_sql(
         }
         "COMMIT" => Ok(LogicalRequest::TxnCommit),
         "ROLLBACK" => Ok(LogicalRequest::TxnRollback),
-        "COPY" => lower_copy(sql),
+        "COPY" => lower_copy(profile, sql),
+        "SET" => {
+            if let Some(isolation) = parse_set_transaction_isolation(sql)? {
+                return Ok(LogicalRequest::TxnSetIsolation { isolation });
+            }
+            Ok(LogicalRequest::AdHocSql {
+                sql: sql.to_string(),
+            })
+        }
         "EXPLAIN" => {
             let inner_sql = sql["EXPLAIN".len()..].trim();
             let inner = lower_sql(profile, inner_sql)?;
@@ -694,8 +840,27 @@ pub fn lower_sql(
     }
 }
 
-fn lower_copy(sql: &str) -> Result<LogicalRequest, ExecError> {
+fn refuse_pg_copy(outcome: ClassifyOutcome) -> ExecError {
+    match outcome {
+        ClassifyOutcome::MustNot(err) => ExecError::NotSupported(format!(
+            "feature_not_supported: COPY ({})",
+            err.code()
+        )),
+        ClassifyOutcome::Must => ExecError::NotSupported("feature_not_supported: COPY".into()),
+    }
+}
+
+fn lower_copy(profile: DialectProfile, sql: &str) -> Result<LogicalRequest, ExecError> {
     let upper = sql.to_ascii_uppercase();
+    let program = upper.contains("PROGRAM");
+    let freeze = upper.contains("FREEZE");
+    let format_label = if upper.contains("BINARY") {
+        Some("binary")
+    } else if upper.contains("CSV") {
+        Some("csv")
+    } else {
+        Some("text")
+    };
     let format = if upper.contains("BINARY") {
         crate::request::CopyFormat::Binary
     } else if upper.contains("CSV") {
@@ -703,6 +868,17 @@ fn lower_copy(sql: &str) -> Result<LogicalRequest, ExecError> {
     } else {
         crate::request::CopyFormat::Text
     };
+    let server_path = copy_target_is_server_path(&upper);
+    let gate = spacestorage_compat::classify_pg_copy(
+        profile,
+        format_label,
+        program,
+        freeze,
+        server_path,
+    );
+    if !gate.is_must() {
+        return Err(refuse_pg_copy(gate));
+    }
     // COPY name FROM STDIN / TO STDOUT
     if upper.contains(" FROM ") {
         let name = extract_ident_after(&upper, sql, "COPY")?;
@@ -721,6 +897,30 @@ fn lower_copy(sql: &str) -> Result<LogicalRequest, ExecError> {
     } else {
         Err(ExecError::Msg("COPY requires FROM or TO".into()))
     }
+}
+
+fn copy_target_is_server_path(upper: &str) -> bool {
+    let marker = if upper.contains(" FROM ") {
+        " FROM "
+    } else if upper.contains(" TO ") {
+        " TO "
+    } else {
+        return false;
+    };
+    let Some(pos) = upper.find(marker) else {
+        return false;
+    };
+    let target = upper[pos + marker.len()..].trim();
+    let head = target
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches('"')
+        .trim_matches('\'');
+    !head.is_empty()
+        && head != "STDIN"
+        && head != "STDOUT"
+        && !head.starts_with("(")
 }
 
 fn extract_table_from_dml(upper: &str, original: &str) -> Option<String> {
@@ -756,6 +956,196 @@ mod tests {
     use super::*;
     use spacestorage_types::ContainerCatalog;
     use std::sync::RwLock;
+
+    #[cfg(feature = "tenancy-quotas")]
+    #[test]
+    fn tenancy_admit_rejects_before_scheduled() {
+        let tenancy = Arc::new(spacestorage_tenancy::Tenancy::new());
+        let namespace = tenancy
+            .registry
+            .lock()
+            .create(spacestorage_authz::Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        tenancy
+            .registry
+            .lock()
+            .replace_quotas(
+                spacestorage_authz::Verb::CLUSTER_ADMIN.bits(),
+                namespace.id,
+                vec![spacestorage_tenancy::QuotaSpec {
+                    unit: spacestorage_tenancy::QuotaUnit::Bytes,
+                    limit: 0,
+                    datatype: None,
+                }],
+            )
+            .unwrap();
+        let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let engine = PlannerEngine::new(catalog).with_tenancy(tenancy);
+        let error = engine
+            .execute_blocking(
+                "acme",
+                "s",
+                "postgresql",
+                LogicalRequest::Object {
+                    container: "items".into(),
+                    key: "k".into(),
+                    bytes: vec![1],
+                },
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("QuotaExceeded"), "{error}");
+        assert!(
+            engine
+                .records_snapshot()
+                .last()
+                .map(|record| record.stage != ExecutionStage::Scheduled)
+                .unwrap_or(true)
+        );
+    }
+
+    #[cfg(feature = "tenancy-quotas")]
+    #[test]
+    fn adhoc_insert_admits_bytes_and_objects_quota() {
+        let tenancy = Arc::new(spacestorage_tenancy::Tenancy::new());
+        let namespace = tenancy
+            .registry
+            .lock()
+            .create(spacestorage_authz::Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        tenancy
+            .registry
+            .lock()
+            .replace_quotas(
+                spacestorage_authz::Verb::CLUSTER_ADMIN.bits(),
+                namespace.id,
+                vec![spacestorage_tenancy::QuotaSpec {
+                    unit: spacestorage_tenancy::QuotaUnit::Objects,
+                    limit: 1,
+                    datatype: None,
+                }],
+            )
+            .unwrap();
+        tenancy
+            .usage
+            .set(namespace.id, spacestorage_tenancy::QuotaUnit::Objects, &None, 1);
+        let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let engine = PlannerEngine::new(catalog).with_tenancy(tenancy);
+        let sql = "INSERT INTO t VALUES ('1', 'a')";
+        let err = engine
+            .execute_blocking(
+                "acme",
+                "s",
+                "postgresql",
+                LogicalRequest::AdHocSql {
+                    sql: sql.into(),
+                },
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("QuotaExceeded"),
+            "insert must consume objects: {err}"
+        );
+        assert!(err.to_string().contains("limit=1"), "{err}");
+        assert!(err.to_string().contains("usage=1"), "{err}");
+    }
+
+    #[cfg(feature = "tenancy-quotas")]
+    #[test]
+    fn adhoc_select_and_delete_skip_bytes_objects_quota() {
+        let tenancy = Arc::new(spacestorage_tenancy::Tenancy::new());
+        let namespace = tenancy
+            .registry
+            .lock()
+            .create(spacestorage_authz::Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        tenancy
+            .registry
+            .lock()
+            .replace_quotas(
+                spacestorage_authz::Verb::CLUSTER_ADMIN.bits(),
+                namespace.id,
+                vec![spacestorage_tenancy::QuotaSpec {
+                    unit: spacestorage_tenancy::QuotaUnit::Objects,
+                    limit: 0,
+                    datatype: None,
+                }],
+            )
+            .unwrap();
+        tenancy
+            .usage
+            .set(namespace.id, spacestorage_tenancy::QuotaUnit::Objects, &None, 0);
+        let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let engine = PlannerEngine::with_distributed(catalog.clone(), true).with_tenancy(tenancy);
+        for sql in ["SELECT 1", "DELETE FROM t WHERE id = '1'"] {
+            let outcome = engine.execute_blocking(
+                "acme",
+                "s",
+                "postgresql",
+                LogicalRequest::AdHocSql {
+                    sql: sql.into(),
+                },
+                QueryOptions::default(),
+                CancelToken::new(),
+            );
+            if let Err(err) = outcome {
+                assert!(
+                    !err.to_string().contains("QuotaExceeded"),
+                    "{sql} must not admit objects: {err}"
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "tenancy-quotas")]
+    #[test]
+    fn delete_mutate_does_not_admit_objects_quota() {
+        let tenancy = Arc::new(spacestorage_tenancy::Tenancy::new());
+        let namespace = tenancy
+            .registry
+            .lock()
+            .create(spacestorage_authz::Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        tenancy
+            .registry
+            .lock()
+            .replace_quotas(
+                spacestorage_authz::Verb::CLUSTER_ADMIN.bits(),
+                namespace.id,
+                vec![spacestorage_tenancy::QuotaSpec {
+                    unit: spacestorage_tenancy::QuotaUnit::Objects,
+                    limit: 1,
+                    datatype: None,
+                }],
+            )
+            .unwrap();
+        tenancy
+            .usage
+            .set(namespace.id, spacestorage_tenancy::QuotaUnit::Objects, &None, 1);
+        let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let engine = PlannerEngine::new(catalog).with_tenancy(tenancy);
+        let err = engine
+            .execute_blocking(
+                "acme",
+                "s",
+                "cassandra",
+                LogicalRequest::Mutate {
+                    container: "t".into(),
+                    op: "delete".into(),
+                    sql: "k".into(),
+                },
+                QueryOptions::default(),
+                CancelToken::new(),
+            )
+            .unwrap_err();
+        assert!(
+            !err.to_string().contains("QuotaExceeded"),
+            "delete must not consume objects quota: {err}"
+        );
+    }
 
     #[tokio::test]
     async fn engine_label_planner() {
@@ -863,5 +1253,80 @@ mod tests {
             .await
             .unwrap();
         assert!(!sel.rows.is_empty());
+    }
+
+    #[test]
+    fn lower_set_transaction_maps_to_txn_set_isolation() {
+        use spacestorage_compat::DialectProfile;
+        let req = lower_sql(
+            DialectProfile::CompleteProduct,
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        )
+        .unwrap();
+        assert!(matches!(
+            req,
+            LogicalRequest::TxnSetIsolation {
+                isolation: IsolationLevel::Snapshot
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn set_transaction_updates_open_txn_isolation() {
+        use spacestorage_compat::DialectProfile;
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let eng = PlannerEngine::with_distributed(cat, true);
+        let session = "iso-t078";
+        eng.execute(
+            "ns",
+            session,
+            "postgresql",
+            LogicalRequest::TxnBegin {
+                isolation: IsolationLevel::ReadCommitted,
+            },
+            QueryOptions::default(),
+            CancelToken::new(),
+        )
+        .await
+        .unwrap();
+        let req = lower_sql(
+            DialectProfile::CompleteProduct,
+            "SET TRANSACTION ISOLATION LEVEL SNAPSHOT",
+        )
+        .unwrap();
+        eng.execute(
+            "ns",
+            session,
+            "postgresql",
+            req,
+            QueryOptions::default(),
+            CancelToken::new(),
+        )
+        .await
+        .unwrap();
+        let txn = eng.txns().get(session).expect("open txn");
+        assert_eq!(txn.isolation, IsolationLevel::Snapshot);
+    }
+
+    #[test]
+    fn copy_program_refused_before_copy_ir() {
+        use spacestorage_compat::DialectProfile;
+        let err = lower_copy(
+            DialectProfile::CompleteProduct,
+            "COPY t FROM PROGRAM 'echo hi'",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("feature_not_supported: COPY"));
+    }
+
+    #[test]
+    fn copy_server_path_refused() {
+        use spacestorage_compat::DialectProfile;
+        let err = lower_copy(
+            DialectProfile::CompleteProduct,
+            "COPY t FROM '/tmp/data.csv'",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("feature_not_supported: COPY"));
     }
 }

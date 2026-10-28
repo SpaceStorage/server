@@ -7,6 +7,7 @@ use spacestorage_compat::{
     PrincipalHold, ProtocolId,
 };
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_tenancy::NamespaceControl;
 use spacestorage_types::ContainerCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,11 +21,19 @@ pub enum CassandraReply {
 pub struct SessionState {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub namespace: String,
+    /// Namespace bound at authentication (unchanged by `USE`).
+    pub bound_namespace: String,
     pub profile: DialectProfile,
     /// Native PREPARE id (hex) → CQL text.
     pub prepared: std::collections::HashMap<String, String>,
     pub limit_services: LimitServices,
     pub principal_hold: Option<PrincipalHold>,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub namespace_control: Option<Arc<dyn NamespaceControl>>,
+    pub connection_quota: Option<spacestorage_tenancy::ConnectionQuotaHold>,
+    pub principal: Option<String>,
+    /// Set once when bind/`USE` passes registry check; data CQL does not re-query the registry.
+    pub registry_accepted: bool,
 }
 
 impl SessionState {
@@ -32,15 +41,57 @@ impl SessionState {
         Self {
             catalog,
             namespace: "demo".into(),
+            bound_namespace: "demo".into(),
             profile: DialectProfile::HandlersComplete,
             prepared: std::collections::HashMap::new(),
             limit_services: LimitServices::built_in(),
             principal_hold: None,
+            tenancy: None,
+            namespace_control: None,
+            connection_quota: None,
+            principal: None,
+            registry_accepted: false,
+        }
+    }
+
+    fn refuse_data_without_registry_accept(&self) -> Option<CassandraReply> {
+        if self.tenancy.is_none() || self.registry_accepted {
+            return None;
+        }
+        Some(tenancy_error_reply(
+            &spacestorage_tenancy::TenancyError::NamespaceNotFound {
+                name: self.namespace.clone(),
+            },
+        ))
+    }
+
+    /// `STARTUP` keyspace option or other presented name: accept once when registered.
+    pub fn try_registry_accept_presented_keyspace(&mut self, name: &str) {
+        let before = self.registry_accepted;
+        spacestorage_tenancy::session::accept_registry_presented(
+            self.tenancy.as_ref(),
+            &mut self.registry_accepted,
+            name,
+        );
+        if !before && self.registry_accepted {
+            self.namespace = name.to_string();
         }
     }
 
     fn engine(&self) -> PlannerEngine {
-        PlannerEngine::new(Arc::clone(&self.catalog))
+        let mut engine = PlannerEngine::new(Arc::clone(&self.catalog));
+        if let Some(t) = &self.tenancy {
+            engine = engine.with_tenancy(Arc::clone(t));
+        }
+        engine
+    }
+
+    fn exec_opts(&self) -> QueryOptions {
+        let mut options = QueryOptions::default();
+        if let Some(login) = self.principal.as_deref() {
+            options.principal = Some(login.to_string());
+        }
+        options
     }
 
     fn exec(&self, req: LogicalRequest) -> Result<QueryResult, CassandraReply> {
@@ -50,7 +101,7 @@ impl SessionState {
                 "cql",
                 "cassandra",
                 req,
-                QueryOptions::default(),
+                self.exec_opts(),
                 CancelToken::new(),
             )
             .map_err(|e| CassandraReply::Error {
@@ -65,6 +116,13 @@ impl SessionState {
             op: "ensure_table".into(),
         })?;
         Ok(())
+    }
+}
+
+fn tenancy_error_reply(err: &spacestorage_tenancy::TenancyError) -> CassandraReply {
+    CassandraReply::Error {
+        code: "authorization".into(),
+        message: err.to_string(),
     }
 }
 
@@ -98,7 +156,69 @@ fn rows_from(result: QueryResult) -> CassandraReply {
     CassandraReply::Rows(rows)
 }
 
+async fn create_keyspace_via_control(
+    session: &mut SessionState,
+    args: &[&str],
+) -> CassandraReply {
+    let ks = args
+        .get(1)
+        .map(|s| s.trim_matches('"').to_string())
+        .unwrap_or_default();
+    if ks.is_empty() {
+        return CassandraReply::Error {
+            code: "invalid".into(),
+            message: "missing keyspace name".into(),
+        };
+    }
+    let login = session.principal.as_deref().unwrap_or("");
+    if login != "admin" {
+        return tenancy_error_reply(&spacestorage_tenancy::TenancyError::NotClusterAdmin);
+    }
+    let Some(control) = session.namespace_control.as_ref() else {
+        if session.tenancy.is_some() {
+            return CassandraReply::Error {
+                code: "server_error".into(),
+                message: "controlplane not started".into(),
+            };
+        }
+        session.namespace = ks;
+        return CassandraReply::Ok;
+    };
+    match control.create(&ks).await {
+        Ok(()) => {
+            session.namespace = ks.clone();
+            session.registry_accepted = true;
+            CassandraReply::Ok
+        }
+        Err(message) => CassandraReply::Error {
+            code: "server_error".into(),
+            message,
+        },
+    }
+}
+
 /// Dispatch a normalized CQL verb (`SELECT`, `INSERT`, …) before IR → PlannerEngine.
+pub async fn dispatch_async(session: &mut SessionState, verb: &str, args: &[&str]) -> CassandraReply {
+    let upper = verb.to_ascii_uppercase().replace('-', "_");
+    if upper == "CREATE"
+        && args
+            .first()
+            .map(|s| s.eq_ignore_ascii_case("KEYSPACE"))
+            .unwrap_or(false)
+    {
+        return create_keyspace_via_control(session, args).await;
+    }
+    dispatch(session, verb, args)
+}
+
+fn cassandra_data_verb_requires_registry(upper: &str) -> bool {
+    matches!(
+        upper,
+        "CREATE" | "DROP" | "ALTER" | "PREPARE" | "EXECUTE" | "QUERY" | "INSERT" | "SELECT"
+            | "UPDATE" | "DELETE"
+    )
+}
+
 pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> CassandraReply {
     let upper = verb.to_ascii_uppercase().replace('-', "_");
     match classify_outcome(session.profile, ProtocolId::Cassandra, &upper) {
@@ -106,11 +226,37 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> Cassan
         ClassifyOutcome::MustNot(err) => return refuse(&upper, err),
     }
 
+    if cassandra_data_verb_requires_registry(&upper) {
+        if let Some(reply) = session.refuse_data_without_registry_accept() {
+            return reply;
+        }
+    }
+
     match upper.as_str() {
         "STARTUP" | "OPTIONS" | "REGISTER" | "BATCH" => CassandraReply::Ok,
         "USE" => {
-            if let Some(ks) = args.first() {
-                session.namespace = ks.trim_matches('"').to_string();
+            let ks = args
+                .first()
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_default();
+            if !ks.is_empty() {
+                if let Some(t) = &session.tenancy {
+                    let login = session.principal.as_deref().unwrap_or("");
+                    if let Err(err) = spacestorage_tenancy::session::refuse_keyspace_open(
+                        login,
+                        &session.bound_namespace,
+                        &ks,
+                    ) {
+                        return tenancy_error_reply(&err);
+                    }
+                    if let Err(err) = spacestorage_tenancy::session::ensure_namespace_registered(
+                        t, &ks,
+                    ) {
+                        return tenancy_error_reply(&err);
+                    }
+                    session.registry_accepted = true;
+                }
+                session.namespace = ks;
             }
             CassandraReply::Ok
         }
@@ -120,10 +266,10 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> Cassan
                 .map(|s| s.to_ascii_uppercase())
                 .unwrap_or_default();
             if kind == "KEYSPACE" {
-                if let Some(ks) = args.get(1) {
-                    session.namespace = ks.trim_matches('"').to_string();
-                }
-                return CassandraReply::Ok;
+                return CassandraReply::Error {
+                    code: "server_error".into(),
+                    message: "CREATE KEYSPACE requires async dispatch".into(),
+                };
             }
             let table = if kind == "TABLE" {
                 args.get(1).copied().unwrap_or("t")
@@ -332,6 +478,35 @@ mod tests {
     }
 
     #[test]
+    fn update_delete_alter_must_smoke() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(cat);
+        assert!(matches!(
+            dispatch(&mut s, "CREATE", &["TABLE", "t"]),
+            CassandraReply::Ok
+        ));
+        assert!(matches!(
+            dispatch(&mut s, "UPDATE", &["t", "1", "b"]),
+            CassandraReply::Ok
+        ));
+        assert!(matches!(
+            dispatch(&mut s, "DELETE", &["t", "1"]),
+            CassandraReply::Ok
+        ));
+        assert!(matches!(dispatch(&mut s, "ALTER", &["t"]), CassandraReply::Ok));
+    }
+
+    #[test]
+    fn cdc_must_not() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(cat);
+        match dispatch(&mut s, "CDC", &[]) {
+            CassandraReply::Error { code, .. } => assert_eq!(code, "compat_must_not"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn lwt_must_not() {
         let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
         let mut s = SessionState::demo(cat);
@@ -339,6 +514,212 @@ mod tests {
             CassandraReply::Error { code, .. } => assert_eq!(code, "compat_must_not"),
             other => panic!("expected refuse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn use_and_create_keyspace_tenancy_gates() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::{NamespaceControl, Tenancy};
+        use std::sync::Arc;
+
+        struct RegistryCreate(Arc<Tenancy>);
+
+        #[async_trait::async_trait]
+        impl NamespaceControl for RegistryCreate {
+            async fn exists(&self, _name: &str) -> Result<bool, String> {
+                Ok(true)
+            }
+
+            async fn create(&self, name: &str) -> Result<(), String> {
+                self.0
+                    .registry
+                    .lock()
+                    .create(Verb::CLUSTER_ADMIN.bits(), name)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            }
+
+            async fn drop_namespace(&self, _name: &str) -> Result<(), String> {
+                Ok(())
+            }
+
+            async fn rename(&self, _name: &str, _new_name: &str) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "demo")
+            .unwrap();
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "other")
+            .unwrap();
+        let control: Arc<dyn NamespaceControl> = Arc::new(RegistryCreate(Arc::clone(&tenancy)));
+
+        let mut s = SessionState {
+            catalog: Arc::clone(&cat),
+            namespace: "demo".into(),
+            bound_namespace: "demo".into(),
+            profile: DialectProfile::HandlersComplete,
+            prepared: Default::default(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
+            tenancy: Some(Arc::clone(&tenancy)),
+            namespace_control: Some(Arc::clone(&control)),
+            connection_quota: None,
+            principal: Some("demo".into()),
+            registry_accepted: true,
+        };
+        match dispatch(&mut s, "USE", &["other"]) {
+            CassandraReply::Error { message, .. } => {
+                assert!(message.contains("AccessDenied"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        s.principal = Some("admin".into());
+        assert!(matches!(dispatch(&mut s, "USE", &["other"]), CassandraReply::Ok));
+        assert_eq!(s.namespace, "other");
+
+        s.principal = Some("demo".into());
+        s.namespace = "demo".into();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        match rt.block_on(dispatch_async(
+            &mut s,
+            "CREATE",
+            &["KEYSPACE", "brandnew"],
+        )) {
+            CassandraReply::Error { message, .. } => {
+                assert!(message.contains("NotClusterAdmin"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        s.principal = Some("admin".into());
+        assert!(matches!(
+            rt.block_on(dispatch_async(
+                &mut s,
+                "CREATE",
+                &["KEYSPACE", "brandnew"]
+            )),
+            CassandraReply::Ok
+        ));
+        assert!(tenancy.registry.lock().get_by_name("brandnew").is_some());
+    }
+
+    #[test]
+    fn data_cql_refuses_unregistered_namespace_without_recheck() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+        use std::sync::Arc;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "other")
+            .unwrap();
+
+        let mut s = SessionState {
+            catalog: cat,
+            namespace: "ghost".into(),
+            bound_namespace: "ghost".into(),
+            profile: DialectProfile::HandlersComplete,
+            prepared: Default::default(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
+            tenancy: Some(tenancy),
+            namespace_control: None,
+            connection_quota: None,
+            principal: Some("admin".into()),
+            registry_accepted: false,
+        };
+        match dispatch(&mut s, "SELECT", &["t"]) {
+            CassandraReply::Error { message, .. } => {
+                assert!(message.contains("NamespaceNotFound"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!s.registry_accepted);
+    }
+
+    #[test]
+    fn presented_keyspace_accepts_once_when_registered() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+        use std::sync::Arc;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+
+        let mut s = SessionState {
+            catalog: cat,
+            namespace: "demo".into(),
+            bound_namespace: "demo".into(),
+            profile: DialectProfile::HandlersComplete,
+            prepared: Default::default(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
+            tenancy: Some(tenancy),
+            namespace_control: None,
+            connection_quota: None,
+            principal: Some("demo".into()),
+            registry_accepted: false,
+        };
+        s.try_registry_accept_presented_keyspace("missing");
+        assert!(!s.registry_accepted);
+        s.try_registry_accept_presented_keyspace("acme");
+        assert!(s.registry_accepted);
+        assert_eq!(s.namespace, "acme");
+    }
+
+    #[test]
+    fn use_accepts_registry_once_for_later_select() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+        use std::sync::Arc;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "demo")
+            .unwrap();
+
+        let mut s = SessionState {
+            catalog: Arc::clone(&cat),
+            namespace: "ghost".into(),
+            bound_namespace: "demo".into(),
+            profile: DialectProfile::HandlersComplete,
+            prepared: Default::default(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
+            tenancy: Some(Arc::clone(&tenancy)),
+            namespace_control: None,
+            connection_quota: None,
+            principal: Some("admin".into()),
+            registry_accepted: false,
+        };
+        assert!(matches!(dispatch(&mut s, "USE", &["demo"]), CassandraReply::Ok));
+        assert!(s.registry_accepted);
+        assert!(matches!(
+            dispatch(&mut s, "CREATE", &["TABLE", "t"]),
+            CassandraReply::Ok
+        ));
     }
 
     #[test]

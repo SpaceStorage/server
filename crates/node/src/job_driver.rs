@@ -2,12 +2,12 @@
 
 use crate::Node;
 use spacestorage_migrate::{
-    admit_dest_bytes, recheck_dest_bytes, AuthzContext, BackupScope, BackupSpec, ContainerRef,
-    JobId, JobKind, JobRecord, JobStatus, MigrateError, MigratePolicy, MigrationSpec, PlacementCheck,
-    RestoreSpec, Strategy, TransformSpec,
+    AuthzContext, BackupScope, BackupSpec, ContainerRef, JobId, JobKind, JobRecord, JobStatus,
+    MigrateError, MigratePolicy, MigrationSpec, PlacementCheck, RestoreSpec, Strategy,
+    TransformSpec, admit_dest_bytes, recheck_dest_bytes,
 };
 use spacestorage_placement::topology::NodeTopo;
-use spacestorage_placement::{write_quorum_satisfied, Quorum};
+use spacestorage_placement::{Quorum, write_quorum_satisfied};
 use spacestorage_storage::{ContentStore, StorageMode};
 use spacestorage_types::{L3Model, StorageModeChoice, WriteAck};
 use std::collections::{BTreeMap, HashMap};
@@ -41,9 +41,8 @@ pub fn install(node: &Arc<Node>) {
     })));
 
     let n = Arc::clone(node);
-    node.jobs.set_persist_hook(Some(Arc::new(move |job| {
-        persist_job_record(&n, job)
-    })));
+    node.jobs
+        .set_persist_hook(Some(Arc::new(move |job| persist_job_record(&n, job))));
 
     // Dual-write interceptor (T067/T069): mapped target apply at write quorum before source ack.
     {
@@ -114,20 +113,14 @@ fn apply_target_at_quorum(
                 })
             });
         }
-        if n == 0 {
-            1
-        } else {
-            n
-        }
+        if n == 0 { 1 } else { n }
     };
 
     let key_s = String::from_utf8_lossy(key);
     let eng = match node.storage.try_read() {
         Ok(g) => g.clone(),
         Err(_) => {
-            return Err(MigrateError::Io(
-                "target apply: storage lock busy".into(),
-            ));
+            return Err(MigrateError::Io("target apply: storage lock busy".into()));
         }
     };
 
@@ -232,7 +225,12 @@ fn persist_job_record(node: &Node, job: &JobRecord) -> Result<(), String> {
         .and_then(|n| n.as_str())
         .unwrap_or("default")
         .to_string();
-    let jsonl_dir = node.config.load().storage_data_dir.clone().map(PathBuf::from);
+    let jsonl_dir = node
+        .config
+        .load()
+        .storage_data_dir
+        .clone()
+        .map(PathBuf::from);
 
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => tokio::task::block_in_place(|| {
@@ -380,8 +378,7 @@ async fn drive_migrate(node: &Arc<Node>, job: JobRecord) -> Result<(), MigrateEr
         serde_json::from_value(job.body.clone()).map_err(|e| MigrateError::Io(e.to_string()))?;
     let placement = placement_check_for(node).await;
     spec.validate_destination_placement(&placement)?;
-    let (source_id, rows, names, mut content, source_bytes) =
-        snapshot_source(node, &spec.source)?;
+    let (source_id, rows, names, mut content, source_bytes) = snapshot_source(node, &spec.source)?;
     let source_head = job
         .progress
         .last_source_seq
@@ -596,8 +593,14 @@ async fn drive_backup(node: &Arc<Node>, job: JobRecord) -> Result<(), MigrateErr
                 .join("data")
         });
     let orch = node.jobs.backup_orchestrator();
-    orch.run_backup(job, &spec, &engine, data_dir, &AuthzContext::cluster_admin())
-        .await?;
+    orch.run_backup(
+        job,
+        &spec,
+        &engine,
+        data_dir,
+        &AuthzContext::cluster_admin(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -622,8 +625,14 @@ async fn drive_restore(node: &Arc<Node>, job: JobRecord) -> Result<(), MigrateEr
                 .join("data")
         });
     let orch = node.jobs.backup_orchestrator();
-    orch.run_restore(job, &spec, &engine, data_dir, &AuthzContext::cluster_admin())
-        .await?;
+    orch.run_restore(
+        job,
+        &spec,
+        &engine,
+        data_dir,
+        &AuthzContext::cluster_admin(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -658,10 +667,7 @@ fn snapshot_source(
     }
     let mut names = HashMap::new();
     for c in cat.list() {
-        names.insert(
-            (c.namespace.as_str().into(), c.name.as_str().into()),
-            c.id,
-        );
+        names.insert((c.namespace.as_str().into(), c.name.as_str().into()), c.id);
     }
     let mut content = ContentStore::default();
     for c in cat.list() {
@@ -728,11 +734,7 @@ fn transform_publish_target_id(
             .filter(|id| *id != live_source_id)
     } else {
         let new_name = spec.new_name.clone().unwrap_or_else(|| {
-            format!(
-                "{}_xf_{}",
-                spec.source.container,
-                &job_id.to_string()[..8]
-            )
+            format!("{}_xf_{}", spec.source.container, &job_id.to_string()[..8])
         });
         names
             .get(&(spec.source.namespace.clone(), new_name))
@@ -791,14 +793,9 @@ fn apply_transform_to_catalog(
                         retain_name,
                     )
                     .map_err(|e| match e {
-                        spacestorage_types::TypeError::AlreadyExists => {
-                            MigrateError::NameExists {
-                                container: format!(
-                                    "{}.{}",
-                                    spec.source.namespace, retain_name
-                                ),
-                            }
-                        }
+                        spacestorage_types::TypeError::AlreadyExists => MigrateError::NameExists {
+                            container: format!("{}.{}", spec.source.namespace, retain_name),
+                        },
                         other => MigrateError::Io(other.to_string()),
                     })?;
                 } else if cat.describe(ns, retain_name).is_err() {

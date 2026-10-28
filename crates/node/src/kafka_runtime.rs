@@ -1,9 +1,9 @@
 //! Ready-node Kafka consumer supervisor (009 T053 / T057–T058 / T061).
 
-use crate::ingest_append;
 use crate::Node;
+use crate::ingest_append;
 use spacestorage_ingest::{
-    KafkaConsumer, KafkaIngest, KafkaTls, KafkaWireError, LiveKafkaClient, APPLICATION_INGEST,
+    APPLICATION_INGEST, KafkaConsumer, KafkaIngest, KafkaTls, KafkaWireError, LiveKafkaClient,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,7 +32,11 @@ impl KafkaSupervisor {
         let want: HashMap<Uuid, KafkaIngest> = decls.iter().map(|d| (d.id, d.clone())).collect();
         {
             let mut run = self.running.lock().await;
-            let stop: Vec<Uuid> = run.keys().copied().filter(|id| !want.contains_key(id)).collect();
+            let stop: Vec<Uuid> = run
+                .keys()
+                .copied()
+                .filter(|id| !want.contains_key(id))
+                .collect();
             for id in stop {
                 if let Some(r) = run.remove(&id) {
                     r.cancel.cancel();
@@ -46,7 +50,12 @@ impl KafkaSupervisor {
                 continue;
             }
             let cancel = tokio_util::sync::CancellationToken::new();
-            run.insert(id, Running { cancel: cancel.clone() });
+            run.insert(
+                id,
+                Running {
+                    cancel: cancel.clone(),
+                },
+            );
             drop(run);
             let node = Arc::clone(&self.node);
             let this = Arc::clone(self);

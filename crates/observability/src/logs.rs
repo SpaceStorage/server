@@ -95,7 +95,10 @@ impl LogExporter {
         let mut q = self.queue.lock();
         if q.len() >= QUEUE_CAP {
             self.export_errors.fetch_add(1, Ordering::Relaxed);
-            warn!(channel = event.channel.as_str(), "log export queue overflow; dropping");
+            warn!(
+                channel = event.channel.as_str(),
+                "log export queue overflow; dropping"
+            );
             return Ok(());
         }
         q.push_back(event);

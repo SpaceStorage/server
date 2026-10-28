@@ -67,9 +67,7 @@ impl MigrateError {
 impl From<spacestorage_backup::BackupError> for MigrateError {
     fn from(e: spacestorage_backup::BackupError) -> Self {
         match e {
-            spacestorage_backup::BackupError::BackupSlice10Required => {
-                Self::MigrateSlice10Required
-            }
+            spacestorage_backup::BackupError::BackupSlice10Required => Self::MigrateSlice10Required,
             spacestorage_backup::BackupError::KeyRefMissing { key_ref } => {
                 Self::KeyRefMissing(key_ref)
             }

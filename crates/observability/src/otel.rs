@@ -1,9 +1,9 @@
 //! OTLP/HTTP protobuf push (slice 9).
 
+use crate::ObservabilityError;
 use crate::filter::filter_namespace;
 use crate::otlp_encode::encode_otlp_metrics;
 use crate::sample::SeriesSnapshot;
-use crate::ObservabilityError;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -283,10 +283,13 @@ mod tests {
         let body = exp.last_captured().unwrap();
         assert!(!body.is_empty());
         assert_eq!(body[0], 0x0a);
-        assert!(body
-            .windows(b"service.name".len())
-            .any(|w| w == b"service.name")
-            || body.windows(b"spacestorage".len()).any(|w| w == b"spacestorage"));
+        assert!(
+            body.windows(b"service.name".len())
+                .any(|w| w == b"service.name")
+                || body
+                    .windows(b"spacestorage".len())
+                    .any(|w| w == b"spacestorage")
+        );
         assert_eq!(exp.pushes.load(Ordering::Relaxed), 1);
     }
 

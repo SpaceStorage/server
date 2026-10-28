@@ -204,9 +204,15 @@ mod tests {
         assert!(bytes.len() > 16);
         // Field 1 len-delimited tag = (1<<3)|2 = 0x0a
         assert_eq!(bytes[0], 0x0a);
-        assert!(bytes.windows(b"spacestorage".len()).any(|w| w == b"spacestorage"));
-        assert!(bytes
-            .windows(b"spacestorage_query_total".len())
-            .any(|w| w == b"spacestorage_query_total"));
+        assert!(
+            bytes
+                .windows(b"spacestorage".len())
+                .any(|w| w == b"spacestorage")
+        );
+        assert!(
+            bytes
+                .windows(b"spacestorage_query_total".len())
+                .any(|w| w == b"spacestorage_query_total")
+        );
     }
 }

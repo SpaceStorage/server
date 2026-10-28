@@ -24,8 +24,11 @@ pub use composition::{
     Composition, CompositionCatalog, CompositionKind, CompositionMember, PlanetaryPlacement,
     L4_COMPOSITIONS,
 };
-pub use definition::{ContainerDefinition, StorageModeChoice};
-pub use descriptor::{Kind, Level, TypeDescriptor};
+pub use definition::{
+    ContainerDefinition, EncryptionAlgorithm, EncryptionDeclaration, EncryptionScope,
+    StorageModeChoice,
+};
+pub use descriptor::{Kind, Level, ProductVersion, TypeDescriptor};
 pub use error::TypeError;
 pub use ident::{new_container_id, ContainerId, ContainerName, NamespaceName};
 pub use l0::{L0Catalog, L0Container, L0ContainerSummary, L0CreateRequest, L0_CREATABLE, L0_NOT_CREATABLE};
@@ -97,6 +100,7 @@ pub struct Container {
     pub multi_active: bool,
     pub schema: Option<ContainerSchema>,
     pub mode: StorageModeChoice,
+    pub encryption: Option<EncryptionDeclaration>,
 }
 
 #[cfg(test)]

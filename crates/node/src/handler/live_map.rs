@@ -9,7 +9,7 @@ use spacestorage_admin_ui::{
 };
 use spacestorage_membership::events::MemberStatus;
 use spacestorage_migrate::JobKind;
-use spacestorage_placement::{apply_placement_event, DescribeSnapshot, PlacementEvent};
+use spacestorage_placement::{DescribeSnapshot, PlacementEvent, apply_placement_event};
 use std::sync::Arc;
 
 /// Resolve the shared describe snapshot: Raft-applied state when controlplane is selected,
@@ -26,10 +26,7 @@ pub async fn placement_describe_snapshot(node: &Arc<Node>) -> DescribeSnapshot {
 
 /// Append `PlacementEvent::ReplicaHealth` through the node's `RaftClusterStore` when
 /// selected; otherwise apply locally so describe still works without internodes (T099).
-pub async fn append_placement_event(
-    node: &Arc<Node>,
-    event: PlacementEvent,
-) -> Result<(), String> {
+pub async fn append_placement_event(node: &Arc<Node>, event: PlacementEvent) -> Result<(), String> {
     if let Some(cp) = node.controlplane.read().await.as_ref() {
         cp.append_placement_event(event)
             .await
@@ -62,10 +59,7 @@ pub async fn build_topology_snapshot(node: &Arc<Node>) -> TopologySnapshot {
         nodes.push(NodeMapEntry {
             id: cfg.node_name.clone(),
             name: cfg.node_name.clone(),
-            ready: matches!(
-                node.state.get(),
-                crate::lifecycle::NodeState::Ready
-            ),
+            ready: matches!(node.state.get(), crate::lifecycle::NodeState::Ready),
         });
     }
 

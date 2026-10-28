@@ -1,8 +1,8 @@
 //! PostgreSQL SQL — classify via `015`, execute via shared `PlannerEngine` (005).
 
-use spacestorage_compat::{classify_pg_verb, ClassifyOutcome, DialectProfile, Limits};
+use spacestorage_compat::{ClassifyOutcome, DialectProfile, Limits, classify_pg_verb};
 use spacestorage_query::{
-    lower_sql, CancelToken, CursorPortal, PlannerEngine, QueryOptions, QueryResult,
+    CancelToken, CursorPortal, PlannerEngine, QueryOptions, QueryResult, lower_sql,
 };
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};
@@ -23,6 +23,47 @@ pub struct ExecError {
 }
 
 pub type SharedCatalog = Arc<RwLock<ContainerCatalog>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NamespaceCommand {
+    Create(String),
+    Drop(String),
+    Rename { name: String, new_name: String },
+}
+
+pub(crate) fn parse_namespace_command(sql: &str) -> Option<NamespaceCommand> {
+    let parts: Vec<&str> = sql
+        .trim()
+        .trim_end_matches(';')
+        .split_whitespace()
+        .collect();
+    match parts.as_slice() {
+        [create, database, name]
+            if create.eq_ignore_ascii_case("create")
+                && database.eq_ignore_ascii_case("database") =>
+        {
+            Some(NamespaceCommand::Create((*name).trim_matches('"').into()))
+        }
+        [drop, database, name, ..]
+            if drop.eq_ignore_ascii_case("drop")
+                && database.eq_ignore_ascii_case("database") =>
+        {
+            Some(NamespaceCommand::Drop((*name).trim_matches('"').into()))
+        }
+        [alter, database, name, rename, to, new_name]
+            if alter.eq_ignore_ascii_case("alter")
+                && database.eq_ignore_ascii_case("database")
+                && rename.eq_ignore_ascii_case("rename")
+                && to.eq_ignore_ascii_case("to") =>
+        {
+            Some(NamespaceCommand::Rename {
+                name: (*name).trim_matches('"').into(),
+                new_name: (*new_name).trim_matches('"').into(),
+            })
+        }
+        _ => None,
+    }
+}
 
 fn first_verb(sql: &str) -> String {
     sql.trim_start()
@@ -77,30 +118,56 @@ fn map_exec_err(e: spacestorage_query::ExecError) -> ExecError {
     }
 }
 
+fn cursor_declare_forbidden(upper: &str) -> Option<&'static str> {
+    if upper.contains("WITH HOLD") {
+        return Some("WITH HOLD");
+    }
+    if upper.contains("INSENSITIVE") {
+        return Some("INSENSITIVE");
+    }
+    if scrollable_cursor_declared(upper) {
+        return Some("SCROLL");
+    }
+    None
+}
+
+/// True for `SCROLL` / holdable scroll forms, not for the MUST `NO SCROLL` prefix.
+fn scrollable_cursor_declared(upper: &str) -> bool {
+    let Some(pos) = upper.find("SCROLL") else {
+        return false;
+    };
+    let before = upper[..pos].trim_end();
+    !before.ends_with("NO")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FetchLimit {
+    Count(usize),
+    All,
+}
+
 /// Parse `DECLARE name [NO SCROLL] CURSOR [WITHOUT HOLD] FOR <query>`.
 fn parse_declare(sql: &str) -> Result<(String, String), ExecError> {
     let upper = sql.to_ascii_uppercase();
-    if upper.contains("WITH HOLD") || upper.contains(" SCROLL") {
+    if let Some(kind) = cursor_declare_forbidden(&upper) {
         return Err(ExecError {
             sqlstate: FEATURE_NOT_SUPPORTED.into(),
-            message: "feature_not_supported: WITH HOLD/SCROLL".into(),
+            message: format!("feature_not_supported: {kind}"),
         });
     }
     let parts: Vec<&str> = sql.split_whitespace().collect();
     // DECLARE <name> …
     let name = parts.get(1).copied().unwrap_or("c").to_string();
-    let for_pos = upper
-        .find(" FOR ")
-        .ok_or_else(|| ExecError {
-            sqlstate: FEATURE_NOT_SUPPORTED.into(),
-            message: "DECLARE requires FOR <query>".into(),
-        })?;
+    let for_pos = upper.find(" FOR ").ok_or_else(|| ExecError {
+        sqlstate: FEATURE_NOT_SUPPORTED.into(),
+        message: "DECLARE requires FOR <query>".into(),
+    })?;
     let query = sql[for_pos + 5..].trim().to_string();
     Ok((name, query))
 }
 
-fn parse_fetch(sql: &str) -> Result<(String, usize), ExecError> {
-    // FETCH [FORWARD] [n] FROM name | FETCH name
+fn parse_fetch(sql: &str) -> Result<(String, FetchLimit), ExecError> {
+    // FETCH [FORWARD] [n|ALL] FROM name | FETCH name
     let upper = sql.to_ascii_uppercase();
     if upper.contains("BACKWARD") {
         return Err(ExecError {
@@ -108,21 +175,40 @@ fn parse_fetch(sql: &str) -> Result<(String, usize), ExecError> {
             message: "feature_not_supported: FETCH BACKWARD".into(),
         });
     }
+    if upper.contains(" PRIOR") || parts_has_token(&upper, "PRIOR") {
+        return Err(ExecError {
+            sqlstate: FEATURE_NOT_SUPPORTED.into(),
+            message: "feature_not_supported: FETCH PRIOR".into(),
+        });
+    }
+    if upper.contains("ABSOLUTE") {
+        return Err(ExecError {
+            sqlstate: FEATURE_NOT_SUPPORTED.into(),
+            message: "feature_not_supported: FETCH ABSOLUTE".into(),
+        });
+    }
     let parts: Vec<&str> = sql.split_whitespace().collect();
-    let mut n = 1usize;
+    let mut limit = FetchLimit::Count(1);
     let mut name = String::from("c");
     if let Some(from_i) = parts.iter().position(|p| p.eq_ignore_ascii_case("FROM")) {
         name = parts.get(from_i + 1).copied().unwrap_or("c").to_string();
-        // FETCH FORWARD n FROM name — n before FROM
         for p in &parts[1..from_i] {
-            if let Ok(v) = p.parse::<usize>() {
-                n = v;
+            if p.eq_ignore_ascii_case("ALL") {
+                limit = FetchLimit::All;
+            } else if let Ok(v) = p.parse::<usize>() {
+                limit = FetchLimit::Count(v);
             }
         }
     } else if parts.len() >= 2 {
         name = parts[1].to_string();
     }
-    Ok((name, n))
+    Ok((name, limit))
+}
+
+fn parts_has_token(upper: &str, token: &str) -> bool {
+    upper
+        .split_whitespace()
+        .any(|p| p.eq_ignore_ascii_case(token))
 }
 
 fn parse_close(sql: &str) -> String {
@@ -143,10 +229,10 @@ fn run_cursor(
     cancel: &CancelToken,
 ) -> Result<ExecResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
-    if upper.contains("WITH HOLD") || upper.contains(" SCROLL") {
+    if let Some(kind) = cursor_declare_forbidden(&upper) {
         return Err(ExecError {
             sqlstate: FEATURE_NOT_SUPPORTED.into(),
-            message: "feature_not_supported: WITH HOLD/SCROLL".into(),
+            message: format!("feature_not_supported: {kind}"),
         });
     }
 
@@ -203,7 +289,7 @@ fn run_cursor(
             })
         }
         "FETCH" => {
-            let (name, n) = parse_fetch(sql)?;
+            let (name, limit) = parse_fetch(sql)?;
             let mut out_cols = Vec::new();
             let mut out_rows = Vec::new();
             engine
@@ -213,12 +299,22 @@ fn run_cursor(
                         spacestorage_query::ExecError::Msg(format!("unknown_portal:{name}"))
                     })?;
                     out_cols = portal.columns.clone();
-                    for _ in 0..n {
-                        if portal.pos >= portal.rows.len() {
-                            break;
+                    match limit {
+                        FetchLimit::All => {
+                            while portal.pos < portal.rows.len() {
+                                out_rows.push(portal.rows[portal.pos].clone());
+                                portal.pos += 1;
+                            }
                         }
-                        out_rows.push(portal.rows[portal.pos].clone());
-                        portal.pos += 1;
+                        FetchLimit::Count(n) => {
+                            for _ in 0..n {
+                                if portal.pos >= portal.rows.len() {
+                                    break;
+                                }
+                                out_rows.push(portal.rows[portal.pos].clone());
+                                portal.pos += 1;
+                            }
+                        }
                     }
                     Ok(())
                 })
@@ -288,6 +384,30 @@ pub fn execute_sql_cancel(
     cancel: CancelToken,
     limits: &Limits,
 ) -> Result<ExecResult, ExecError> {
+    execute_sql_cancel_tenancy(
+        profile,
+        catalog,
+        namespace,
+        session,
+        sql,
+        cancel,
+        limits,
+        None,
+        None,
+    )
+}
+
+pub fn execute_sql_cancel_tenancy(
+    profile: DialectProfile,
+    catalog: &SharedCatalog,
+    namespace: &str,
+    session: &str,
+    sql: &str,
+    cancel: CancelToken,
+    limits: &Limits,
+    tenancy: Option<&std::sync::Arc<spacestorage_tenancy::Tenancy>>,
+    principal: Option<&str>,
+) -> Result<ExecResult, ExecError> {
     let sql = sql.trim().trim_end_matches(';');
     if sql.is_empty() {
         return Ok(ExecResult {
@@ -325,18 +445,25 @@ pub fn execute_sql_cancel(
     }
 
     let distributed = matches!(profile, DialectProfile::CompleteProduct);
-    let engine = PlannerEngine::with_distributed(Arc::clone(catalog), distributed);
+    let mut engine = PlannerEngine::with_distributed(Arc::clone(catalog), distributed);
+    if let Some(t) = tenancy {
+        engine = engine.with_tenancy(std::sync::Arc::clone(t));
+    }
     let req = lower_sql(profile, sql).map_err(|e| ExecError {
         sqlstate: FEATURE_NOT_SUPPORTED.into(),
         message: e.to_string(),
     })?;
+    let mut options = QueryOptions::default();
+    if let Some(login) = principal {
+        options.principal = Some(login.to_string());
+    }
 
     match engine.execute_blocking(
         namespace,
         session,
         "postgresql",
         req,
-        QueryOptions::default(),
+        options,
         cancel,
     ) {
         Ok(r) => {
@@ -361,10 +488,8 @@ pub fn execute_sql_cancel(
 
 /// Drop all portals for a session (disconnect / force cancel).
 pub fn drop_session_portals(session: &str) {
-    let engine = PlannerEngine::with_distributed(
-        Arc::new(RwLock::new(ContainerCatalog::new())),
-        true,
-    );
+    let engine =
+        PlannerEngine::with_distributed(Arc::new(RwLock::new(ContainerCatalog::new())), true);
     let _ = engine.txns().with_mut(session, |t| {
         t.clear_portals();
         Ok(())
@@ -431,14 +556,7 @@ mod tests {
         // COMMIT buffered insert so DECLARE SELECT sees rows (autocommit-style inside txn buffer).
         execute_sql_session(p, &cat, "ns", s, "COMMIT").unwrap();
         execute_sql_session(p, &cat, "ns", s, "BEGIN").unwrap();
-        execute_sql_session(
-            p,
-            &cat,
-            "ns",
-            s,
-            "DECLARE c CURSOR FOR SELECT * FROM t",
-        )
-        .unwrap();
+        execute_sql_session(p, &cat, "ns", s, "DECLARE c CURSOR FOR SELECT * FROM t").unwrap();
         let fetched = execute_sql_session(p, &cat, "ns", s, "FETCH 1 FROM c").unwrap();
         assert_eq!(fetched.rows.len(), 1);
         execute_sql_session(p, &cat, "ns", s, "CLOSE c").unwrap();
@@ -451,15 +569,58 @@ mod tests {
         let p = DialectProfile::CompleteProduct;
         let s = "hold-t063";
         execute_sql_session(p, &cat, "ns", s, "BEGIN").unwrap();
-        let e = execute_sql_session(
+        let e = execute_sql_session(p, &cat, "ns", s, "DECLARE c CURSOR WITH HOLD FOR SELECT 1")
+            .unwrap_err();
+        assert_eq!(e.sqlstate, FEATURE_NOT_SUPPORTED);
+        execute_sql_session(p, &cat, "ns", s, "ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn no_scroll_declare_and_fetch_count_all() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let p = DialectProfile::CompleteProduct;
+        let s = "no-scroll-t085";
+        execute_sql_session(p, &cat, "ns", s, "BEGIN").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "CREATE TABLE t (id text, v text)").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "INSERT INTO t VALUES ('1', 'a')").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "INSERT INTO t VALUES ('2', 'b')").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "INSERT INTO t VALUES ('3', 'c')").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "COMMIT").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "BEGIN").unwrap();
+        execute_sql_session(
             p,
             &cat,
             "ns",
             s,
-            "DECLARE c CURSOR WITH HOLD FOR SELECT 1",
+            "DECLARE c NO SCROLL CURSOR FOR SELECT * FROM t ORDER BY id",
         )
-        .unwrap_err();
-        assert_eq!(e.sqlstate, FEATURE_NOT_SUPPORTED);
+        .unwrap();
+        let two = execute_sql_session(p, &cat, "ns", s, "FETCH FORWARD 2 FROM c").unwrap();
+        assert_eq!(two.rows.len(), 2);
+        let rest = execute_sql_session(p, &cat, "ns", s, "FETCH ALL FROM c").unwrap();
+        assert_eq!(rest.rows.len(), 1);
+        execute_sql_session(p, &cat, "ns", s, "CLOSE c").unwrap();
+        execute_sql_session(p, &cat, "ns", s, "COMMIT").unwrap();
+    }
+
+    #[test]
+    fn cursor_forbidden_variants_refused() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let p = DialectProfile::CompleteProduct;
+        let s = "cursor-forbidden-t085";
+        execute_sql_session(p, &cat, "ns", s, "BEGIN").unwrap();
+        for sql in [
+            "DECLARE c INSENSITIVE CURSOR FOR SELECT 1",
+            "DECLARE c SCROLL CURSOR FOR SELECT 1",
+        ] {
+            let e = execute_sql_session(p, &cat, "ns", s, sql).unwrap_err();
+            assert_eq!(e.sqlstate, FEATURE_NOT_SUPPORTED, "{sql}");
+        }
+        execute_sql_session(p, &cat, "ns", s, "DECLARE c NO SCROLL CURSOR FOR SELECT 1").unwrap();
+        for sql in ["FETCH PRIOR FROM c", "FETCH ABSOLUTE 1 FROM c", "FETCH BACKWARD FROM c"] {
+            let e = execute_sql_session(p, &cat, "ns", s, sql).unwrap_err();
+            assert_eq!(e.sqlstate, FEATURE_NOT_SUPPORTED, "{sql}");
+        }
         execute_sql_session(p, &cat, "ns", s, "ROLLBACK").unwrap();
     }
 
@@ -469,13 +630,19 @@ mod tests {
         {
             use spacestorage_types::{L3Model, StorageModeChoice};
             let mut g = cat.write().unwrap();
-            g.create("ns", "kv", L3Model::KvStore, false, None, StorageModeChoice::Memory)
-                .unwrap();
+            g.create(
+                "ns",
+                "kv",
+                L3Model::KvStore,
+                false,
+                None,
+                StorageModeChoice::Memory,
+            )
+            .unwrap();
         }
         let p = DialectProfile::CompleteProduct;
         let s = "snap-t062";
-        execute_sql_session(p, &cat, "ns", s, "BEGIN ISOLATION LEVEL REPEATABLE READ")
-            .unwrap();
+        execute_sql_session(p, &cat, "ns", s, "BEGIN ISOLATION LEVEL REPEATABLE READ").unwrap();
         let e = execute_sql_session(p, &cat, "ns", s, "SELECT * FROM kv").unwrap_err();
         assert!(
             e.message.contains("snapshot_unsupported") || e.sqlstate == FEATURE_NOT_SUPPORTED,
@@ -496,8 +663,27 @@ mod tests {
         let p = DialectProfile::FirstBinary;
         let tok = CancelToken::new();
         tok.cancel();
-        let e =
-            execute_sql_cancel(p, &cat, "ns", "c", "SELECT 1", tok, &Limits::default()).unwrap_err();
+        let e = execute_sql_cancel(p, &cat, "ns", "c", "SELECT 1", tok, &Limits::default())
+            .unwrap_err();
         assert_eq!(e.sqlstate, "57014");
+    }
+
+    #[test]
+    fn parses_database_registry_operations() {
+        assert_eq!(
+            parse_namespace_command("CREATE DATABASE acme"),
+            Some(NamespaceCommand::Create("acme".into()))
+        );
+        assert_eq!(
+            parse_namespace_command("DROP DATABASE acme"),
+            Some(NamespaceCommand::Drop("acme".into()))
+        );
+        assert_eq!(
+            parse_namespace_command("ALTER DATABASE acme RENAME TO contoso"),
+            Some(NamespaceCommand::Rename {
+                name: "acme".into(),
+                new_name: "contoso".into(),
+            })
+        );
     }
 }

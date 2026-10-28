@@ -4,20 +4,18 @@
 //! Unit / conformance tests use [`KafkaProducer::memory`] which still encodes a
 //! Produce frame but records locally without requiring a broker.
 
-use crate::logs::LogEvent;
 use crate::ObservabilityError;
+use crate::logs::LogEvent;
 use bytes::{Bytes, BytesMut};
 use kafka_protocol::{
     messages::{
-        produce_request::{PartitionProduceData, TopicProduceData},
         ApiKey, ProduceRequest, ProduceResponse, RequestHeader, ResponseHeader, TopicName,
+        produce_request::{PartitionProduceData, TopicProduceData},
     },
-    protocol::{
-        Decodable as KafkaDecodable, Encodable as KafkaEncodable, HeaderVersion, StrBytes,
-    },
+    protocol::{Decodable as KafkaDecodable, Encodable as KafkaEncodable, HeaderVersion, StrBytes},
     records::{
-        Compression, Record, RecordBatchEncoder, RecordEncodeOptions, TimestampType,
-        NO_PRODUCER_EPOCH, NO_PRODUCER_ID, NO_SEQUENCE,
+        Compression, NO_PRODUCER_EPOCH, NO_PRODUCER_ID, NO_SEQUENCE, Record, RecordBatchEncoder,
+        RecordEncodeOptions, TimestampType,
     },
 };
 use parking_lot::Mutex;
@@ -130,9 +128,10 @@ impl KafkaProducer {
             "fields": event.fields,
             "audit": event.audit,
         });
-        let value = serde_json::to_vec(&payload).map_err(|e| ObservabilityError::SinkConfigInvalid {
-            detail: format!("kafka json: {e}"),
-        })?;
+        let value =
+            serde_json::to_vec(&payload).map_err(|e| ObservabilityError::SinkConfigInvalid {
+                detail: format!("kafka json: {e}"),
+            })?;
         let frame = encode_produce_frame(
             &cfg.topic,
             key.as_bytes(),
@@ -155,19 +154,17 @@ impl KafkaProducer {
                 self.sent.fetch_add(1, Ordering::Relaxed);
                 Ok(())
             }
-            ProduceMode::Live => {
-                match self.produce_live(cfg, &frame).await {
-                    Ok(()) => {
-                        self.sent.fetch_add(1, Ordering::Relaxed);
-                        Ok(())
-                    }
-                    Err(e) => {
-                        self.errors.fetch_add(1, Ordering::Relaxed);
-                        warn!(error = %e, "kafka produce failed");
-                        Err(e)
-                    }
+            ProduceMode::Live => match self.produce_live(cfg, &frame).await {
+                Ok(()) => {
+                    self.sent.fetch_add(1, Ordering::Relaxed);
+                    Ok(())
                 }
-            }
+                Err(e) => {
+                    self.errors.fetch_add(1, Ordering::Relaxed);
+                    warn!(error = %e, "kafka produce failed");
+                    Err(e)
+                }
+            },
         }
     }
 
@@ -208,8 +205,8 @@ impl KafkaProducer {
                     })?;
                     let resp = <ProduceResponse as KafkaDecodable>::decode(&mut buf, PRODUCE_API)
                         .map_err(|e| ObservabilityError::SinkConfigInvalid {
-                            detail: format!("kafka resp body: {e}"),
-                        })?;
+                        detail: format!("kafka resp body: {e}"),
+                    })?;
                     for t in resp.responses {
                         for p in t.partition_responses {
                             if p.error_code != 0 {
@@ -273,11 +270,15 @@ fn encode_produce_frame(
     let mut req = ProduceRequest::default();
     req.acks = 1;
     req.timeout_ms = 5000;
-    req.topic_data = vec![TopicProduceData::default()
-        .with_name(TopicName(StrBytes::from_string(topic.to_string())))
-        .with_partition_data(vec![PartitionProduceData::default()
-            .with_index(0)
-            .with_records(Some(encoded.freeze()))])];
+    req.topic_data = vec![
+        TopicProduceData::default()
+            .with_name(TopicName(StrBytes::from_string(topic.to_string())))
+            .with_partition_data(vec![
+                PartitionProduceData::default()
+                    .with_index(0)
+                    .with_records(Some(encoded.freeze())),
+            ]),
+    ];
 
     let mut header = RequestHeader::default();
     header.request_api_key = ApiKey::Produce as i16;

@@ -11,6 +11,7 @@ publish = false
 default = []
 # Slice 8: join / aggregate / MapReduce / shuffle / subscribe / BEGIN+COPY execution.
 query-distributed = []
+tenancy-quotas = ["spacestorage-tenancy/tenancy-quotas"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -25,7 +26,10 @@ async-trait = { workspace = true }
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
 spacestorage-placement = { path = "../placement" }
+spacestorage-tenancy = { path = "../tenancy" }
+spacestorage-authz = { path = "../authz" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 tempfile = { workspace = true }
+spacestorage-authz = { path = "../authz" }

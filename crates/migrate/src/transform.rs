@@ -1,13 +1,13 @@
 //! TransformSpec + five rewrite kinds + swap (010 US3).
 
 use crate::authz::AuthzContext;
-use crate::dual_write::{incomplete_name, DualWriteRegistry, DualWriteRewrite, DualWriteWindow};
+use crate::dual_write::{DualWriteRegistry, DualWriteRewrite, DualWriteWindow, incomplete_name};
 use crate::error::MigrateError;
 use crate::job::{JobKind, JobRecord, Strategy};
 use crate::mapping::{
-    apply_row_transform, execute_mapping_query, resolve_mapping, MappingQuery, MappingSpec,
+    MappingQuery, MappingSpec, apply_row_transform, execute_mapping_query, resolve_mapping,
 };
-use crate::quota::{measure_row_bytes, refresh_quota_view, QuotaView};
+use crate::quota::{QuotaView, measure_row_bytes, refresh_quota_view};
 use crate::store::JobStore;
 use serde::{Deserialize, Serialize};
 use spacestorage_storage::{ContentStore, StorageMode};
@@ -92,8 +92,10 @@ impl TransformSpec {
             .target_type
             .clone()
             .unwrap_or_else(|| self.source_type.clone());
-        let complex = matches!(self.rewrite, RewriteKind::TypeModel | RewriteKind::IncompatibleSchema)
-            && !self.rewrite.identity_ok();
+        let complex = matches!(
+            self.rewrite,
+            RewriteKind::TypeModel | RewriteKind::IncompatibleSchema
+        ) && !self.rewrite.identity_ok();
         let _ = resolve_mapping(
             &self.source_type,
             &to,
@@ -136,10 +138,9 @@ impl TransformRunner {
         // FR-011 / R11: refuse before any copy when a second copy does not fit.
         quota.check_fits(source_bytes)?;
 
-        let new_name = spec
-            .new_name
-            .clone()
-            .unwrap_or_else(|| format!("{}_xf_{}", spec.source.container, &job.id.to_string()[..8]));
+        let new_name = spec.new_name.clone().unwrap_or_else(|| {
+            format!("{}_xf_{}", spec.source.container, &job.id.to_string()[..8])
+        });
         let dest_key = (spec.source.namespace.clone(), new_name.clone());
         if names.contains_key(&dest_key) {
             return Err(MigrateError::NameExists {
@@ -155,12 +156,8 @@ impl TransformRunner {
             spec.rewrite,
             RewriteKind::TypeModel | RewriteKind::IncompatibleSchema
         );
-        let mapping: MappingSpec = resolve_mapping(
-            &spec.source_type,
-            &to,
-            spec.mapping_query.as_ref(),
-            complex,
-        )?;
+        let mapping: MappingSpec =
+            resolve_mapping(&spec.source_type, &to, spec.mapping_query.as_ref(), complex)?;
 
         let target_id = Uuid::now_v7();
         job.target_internal_name = Some(incomplete_name(job.id));
@@ -247,19 +244,13 @@ impl TransformRunner {
         names.insert(dest_key.clone(), target_id);
 
         if spec.swap {
-            let src_key = (
-                spec.source.namespace.clone(),
-                spec.source.container.clone(),
-            );
+            let src_key = (spec.source.namespace.clone(), spec.source.container.clone());
             if let Some(old_id) = names.remove(&src_key) {
                 names.insert(src_key, target_id);
                 if !spec.retain_source {
                     content.clear_content(old_id);
                 } else {
-                    let retain = format!(
-                        "{}__pre_transform_{}",
-                        spec.source.container, job.id
-                    );
+                    let retain = format!("{}__pre_transform_{}", spec.source.container, job.id);
                     let rk = (spec.source.namespace.clone(), retain);
                     if names.contains_key(&rk) {
                         let _ = self.dual.unregister(source_id);

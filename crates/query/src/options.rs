@@ -82,6 +82,9 @@ pub struct QueryOptions {
     pub async_job: Sourced<bool>,
     /// Recorded when default quorum was clamped.
     pub quorum_clamped: bool,
+    /// Authenticated principal for tenancy role/policy checks (`007`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
 }
 
 impl Default for QueryOptions {
@@ -95,6 +98,7 @@ impl Default for QueryOptions {
             partial_ok: Sourced::BuiltIn(false),
             async_job: Sourced::BuiltIn(false),
             quorum_clamped: false,
+            principal: None,
         }
     }
 }

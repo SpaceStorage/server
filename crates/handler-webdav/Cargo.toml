@@ -12,6 +12,7 @@ spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
 spacestorage-protocol-core = { path = "../protocol-core" }
 spacestorage-query = { path = "../query" }
+spacestorage-tenancy = { path = "../tenancy" }
 md-5 = "0.10"
 tokio = { workspace = true }
 tracing = { workspace = true }

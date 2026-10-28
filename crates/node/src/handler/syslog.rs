@@ -1,8 +1,8 @@
 //! Syslog protocol adapter (009) — 1:1 entrypoint → container via `005` append.
 
-use crate::ingest_append;
-use crate::handler::{ClientStream, Handler};
 use crate::Node;
+use crate::handler::{ClientStream, Handler};
+use crate::ingest_append;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -156,7 +156,12 @@ async fn read_syslog_frame<R: AsyncReadExt + Unpin>(
 }
 
 /// UDP datagram loop for plaintext syslog entrypoints (TLS remains TCP-only).
-pub async fn serve_udp(node: Arc<Node>, bind: std::net::SocketAddr, ep_name: String, cancel: CancellationToken) {
+pub async fn serve_udp(
+    node: Arc<Node>,
+    bind: std::net::SocketAddr,
+    ep_name: String,
+    cancel: CancellationToken,
+) {
     if !node.ingest.slice11_enabled {
         return;
     }

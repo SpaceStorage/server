@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod backpressure;
 pub mod fanout;
+pub mod quota;
 pub mod frame;
 pub mod heartbeat;
 pub mod raft_client;
@@ -20,7 +21,8 @@ pub use raft_wire::{
     decode_raft_body, decode_raft_frame, encode_raft_payload, is_raft_peer_rpc, RaftRpcKind,
     RaftWireError,
 };
-pub use rpc::{FanoutRead, FanoutWrite, RpcAck};
+pub use quota::{broadcast_quota_delta, spawn_broadcast};
+pub use rpc::{FanoutRead, FanoutWrite, QuotaDelta, RpcAck};
 
 use async_trait::async_trait;
 use parking_lot::RwLock;

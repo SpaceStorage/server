@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::sample::{LabelSet, SeriesSnapshot};
 use crate::Registry;
+use crate::sample::{LabelSet, SeriesSnapshot};
 
 /// Freshness state for one (namespace, datatype) shared aggregate.
 #[derive(Debug, Clone)]
@@ -76,7 +76,11 @@ impl AggregationStore {
         self.inner.lock().get(&(namespace_id, datatype_id)).cloned()
     }
 
-    pub fn mark_stale_all_silent(&self, mute: Duration, last_push: &BTreeMap<(Uuid, Uuid), std::time::Instant>) {
+    pub fn mark_stale_all_silent(
+        &self,
+        mute: Duration,
+        last_push: &BTreeMap<(Uuid, Uuid), std::time::Instant>,
+    ) {
         let mut g = self.inner.lock();
         for (key, fresh) in g.iter_mut() {
             if last_push
@@ -135,9 +139,9 @@ pub fn merge_push(
     datatype: &str,
     series: BTreeMap<String, f64>,
 ) {
-    let mut fresh = store
-        .get(namespace_id, datatype_id)
-        .unwrap_or_else(|| AggregationFreshness::new(namespace_id, datatype_id, namespace, datatype));
+    let mut fresh = store.get(namespace_id, datatype_id).unwrap_or_else(|| {
+        AggregationFreshness::new(namespace_id, datatype_id, namespace, datatype)
+    });
     fresh.namespace = namespace.into();
     fresh.datatype = datatype.into();
     fresh.mark_success(series);

@@ -11,7 +11,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use crate::cql::classify_cql;
-use crate::dispatch::{CassandraReply, SessionState, dispatch};
+use crate::dispatch::{CassandraReply, SessionState, dispatch_async};
+use spacestorage_tenancy::NamespaceControl;
 use crate::frame::{
     encode_auth_success, encode_authenticate, encode_error, encode_prepared_result,
     encode_protocol_error, encode_ready, encode_rows_result, encode_supported, encode_void_result,
@@ -33,6 +34,8 @@ pub struct CassandraHandler {
     pub expected_user: String,
     pub expected_pass: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub namespace_control: Option<Arc<dyn NamespaceControl>>,
 }
 
 impl CassandraHandler {
@@ -48,7 +51,22 @@ impl CassandraHandler {
             expected_user: "demo".into(),
             expected_pass: "demo".into(),
             limit_services,
+            tenancy: None,
+            namespace_control: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
+    }
+
+    pub fn with_namespace_control(
+        mut self,
+        control: Arc<dyn NamespaceControl>,
+    ) -> Self {
+        self.namespace_control = Some(control);
+        self
     }
 
     pub async fn serve<S>(&self, stream: S, cancel: CancellationToken)
@@ -70,10 +88,16 @@ impl CassandraHandler {
         let mut session = SessionState {
             catalog: Arc::clone(&self.catalog),
             namespace: self.namespace.clone(),
+            bound_namespace: self.namespace.clone(),
             profile: self.profile,
             prepared: std::collections::HashMap::new(),
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            namespace_control: self.namespace_control.clone(),
+            connection_quota: None,
+            principal: None,
+            registry_accepted: false,
         };
         let mut phase = ConnPhase::PreAuth;
         let mut wire_version = VERSION_V4;
@@ -136,7 +160,9 @@ async fn drain_frames<W: AsyncWrite + Unpin>(
                     &frame,
                     expected_user,
                     expected_pass,
-                ) {
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(msg) => {
                         vec![encode_error(
@@ -160,7 +186,7 @@ async fn drain_frames<W: AsyncWrite + Unpin>(
     }
 }
 
-fn handle_frame(
+async fn handle_frame(
     session: &mut SessionState,
     phase: &mut ConnPhase,
     frame: &crate::frame::Frame,
@@ -175,7 +201,14 @@ fn handle_frame(
             Ok(vec![encode_supported(v, stream)])
         }
         OP_STARTUP => {
-            let _opts = parse_startup(&frame.body).map_err(|e| e.to_string())?;
+            let opts = parse_startup(&frame.body).map_err(|e| e.to_string())?;
+            if let Some(ks) = opts
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("KEYSPACE"))
+                .map(|(_, v)| v.as_str())
+            {
+                session.try_registry_accept_presented_keyspace(ks);
+            }
             Ok(vec![encode_authenticate(v, stream)])
         }
         OP_AUTH_RESPONSE if *phase == ConnPhase::PreAuth => {
@@ -190,6 +223,23 @@ fn handle_frame(
                     "Invalid credentials",
                 )]);
             }
+            if session.connection_quota.is_none() {
+                match spacestorage_tenancy::bind_namespace_session(
+                    session.tenancy.as_ref(),
+                    expected_user,
+                    session.namespace.as_str(),
+                ) {
+                    Ok(hold) => session.connection_quota = hold,
+                    Err(err) => {
+                        return Ok(vec![encode_error(
+                            v,
+                            stream,
+                            0x0100,
+                            &err.to_string(),
+                        )]);
+                    }
+                }
+            }
             if session.principal_hold.is_none() {
                 match session.limit_services.try_hold_principal(expected_user) {
                     Ok(hold) => session.principal_hold = Some(hold),
@@ -203,6 +253,7 @@ fn handle_frame(
                     }
                 }
             }
+            session.principal = Some(expected_user.to_string());
             *phase = ConnPhase::Ready;
             Ok(vec![
                 encode_auth_success(v, stream),
@@ -220,7 +271,7 @@ fn handle_frame(
             }
             let reply = if let Some((verb, args)) = classify_cql(&cql) {
                 let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-                dispatch(session, &verb, &arg_refs)
+                dispatch_async(session, &verb, &arg_refs).await
             } else {
                 CassandraReply::Error {
                     code: "invalid".into(),
@@ -232,14 +283,14 @@ fn handle_frame(
         OP_PREPARE if *phase == ConnPhase::Ready => {
             let cql = parse_prepare_cql(&frame.body).map_err(|e| e.to_string())?;
             // Classify PREPARE as MUST, store CQL under id.
-            let reply = dispatch(session, "PREPARE", &[&cql]);
+            let reply = dispatch_async(session, "PREPARE", &[&cql]).await;
             Ok(vec![reply_to_frame(v, stream, &reply)])
         }
         OP_EXECUTE if *phase == ConnPhase::Ready => {
             let id = parse_execute_id(&frame.body).map_err(|e| e.to_string())?;
             // Prepared id on the wire is the UTF-8 key stored at PREPARE time.
             let id_str = String::from_utf8_lossy(&id).into_owned();
-            let reply = dispatch(session, "EXECUTE", &[&id_str]);
+            let reply = dispatch_async(session, "EXECUTE", &[&id_str]).await;
             Ok(vec![reply_to_frame(v, stream, &reply)])
         }
         OP_QUERY | OP_PREPARE | OP_EXECUTE => Err("connection not ready".into()),
@@ -428,6 +479,64 @@ mod tests {
         .await
         .unwrap();
         let _drop = read_one_frame(&mut cr, &mut acc).await;
+        cancel.cancel();
+    }
+
+    #[tokio::test]
+    async fn auth_ok_when_default_missing_from_registry() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        let handler = CassandraHandler::with_demo(Arc::clone(&cat)).with_tenancy(tenancy);
+        let (client, server) = tokio::io::duplex(65536);
+        let (mut cr, mut cw) = tokio::io::split(client);
+        cw.write_all(&encode_frame(VERSION_V4, 0, OP_OPTIONS, 0, &[]))
+            .await
+            .unwrap();
+        let cancel = CancellationToken::new();
+        let c2 = cancel.clone();
+        tokio::spawn(async move {
+            handler.serve(server, c2).await;
+        });
+
+        let mut acc = BytesMut::new();
+        let _ = read_one_frame(&mut cr, &mut acc).await;
+        cw.write_all(&encode_frame(VERSION_V4, 1, OP_STARTUP, 0, &startup_body()))
+            .await
+            .unwrap();
+        let _ = read_one_frame(&mut cr, &mut acc).await;
+        cw.write_all(&encode_frame(
+            VERSION_V4,
+            1,
+            OP_AUTH_RESPONSE,
+            0,
+            &auth_plain("demo", "demo"),
+        ))
+        .await
+        .unwrap();
+        let f1 = read_one_frame(&mut cr, &mut acc).await;
+        assert_eq!(f1.opcode, crate::frame::OP_AUTH_SUCCESS);
+        let f2 = read_one_frame(&mut cr, &mut acc).await;
+        assert_eq!(f2.opcode, crate::frame::OP_READY);
+
+        cw.write_all(&encode_frame(
+            VERSION_V4,
+            2,
+            OP_QUERY,
+            0,
+            &query_body("SELECT * FROM t"),
+        ))
+        .await
+        .unwrap();
+        let err = read_one_frame(&mut cr, &mut acc).await;
+        assert_eq!(err.opcode, crate::frame::OP_ERROR);
         cancel.cancel();
     }
 

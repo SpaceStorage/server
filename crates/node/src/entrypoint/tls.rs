@@ -1,7 +1,7 @@
 //! rustls acceptor from file-referenced PEM cert/key (FR-027 / FR-028).
 
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -12,10 +12,7 @@ use tracing::warn;
 
 /// Load a `TlsAcceptor` from PEM certificate and key paths.
 /// Fails if files are unreadable, PEM is invalid, or the leaf is not currently valid.
-pub async fn load_acceptor(
-    certificate: &str,
-    key: &str,
-) -> Result<TlsAcceptor, String> {
+pub async fn load_acceptor(certificate: &str, key: &str) -> Result<TlsAcceptor, String> {
     let cert_path = certificate.to_string();
     let key_path = key.to_string();
     tokio::task::spawn_blocking(move || load_acceptor_blocking(&cert_path, &key_path))
@@ -29,7 +26,9 @@ fn load_acceptor_blocking(certificate: &str, key: &str) -> Result<TlsAcceptor, S
     let certs = load_certs(Path::new(certificate))?;
     let key = load_key(Path::new(key))?;
     if certs.is_empty() {
-        return Err(format!("certificate '{certificate}': no certificates in PEM"));
+        return Err(format!(
+            "certificate '{certificate}': no certificates in PEM"
+        ));
     }
     check_leaf_validity(certs[0].as_ref(), certificate)?;
 
@@ -58,8 +57,8 @@ fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>, String> {
 
 /// Minimal X.509 Validity extraction (notBefore / notAfter) without pulling `time` 1.88+.
 fn check_leaf_validity(der: &[u8], path: &str) -> Result<(), String> {
-    let (not_before, not_after) = parse_validity_unix(der)
-        .map_err(|e| format!("certificate '{path}': invalid: {e}"))?;
+    let (not_before, not_after) =
+        parse_validity_unix(der).map_err(|e| format!("certificate '{path}': invalid: {e}"))?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

@@ -3,6 +3,7 @@
 //! Behavior is supplied by sibling crates (`001`–`015`). This crate owns the
 //! gate tests under `--features first-binary`.
 
+use spacestorage_admin_proto::AdminOp;
 use spacestorage_config::{ValidateOptions, parse_validate};
 use spacestorage_internode::{decode_frame, encode_frame, registry};
 use spacestorage_node::lifecycle::NodeState;
@@ -64,6 +65,25 @@ pub fn handlers_complete_handler_names() -> &'static [&'static str] {
 pub fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../specs/016-mvp-and-nongoals/contracts/fixtures")
+}
+
+/// `007` contract fixtures (quota validation, namespace block, encryption).
+pub fn tenancy_fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../specs/007-tenancy-security/contracts/fixtures")
+}
+
+fn inject_cluster_directive(conf: &str, directive: &str) -> String {
+    let marker = directive.split_whitespace().next().unwrap_or("");
+    if !marker.is_empty() && conf.contains(marker) {
+        return conf.to_string();
+    }
+    let Some(idx) = conf.find("cluster {") else {
+        return conf.to_string();
+    };
+    let mut out = conf.to_string();
+    out.insert_str(idx + "cluster {".len(), &format!("\n  {directive}"));
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -321,6 +341,26 @@ pub async fn boot_from_fixture(
 ) -> LabNode {
     std::fs::create_dir_all(&work).unwrap();
     let template = std::fs::read_to_string(fixtures_dir().join(fixture_name)).unwrap();
+    boot_from_template(
+        template,
+        work,
+        ports,
+        seed_internode,
+        join_token_file,
+        shared_join_secret,
+    )
+    .await
+}
+
+async fn boot_from_template(
+    template: String,
+    work: PathBuf,
+    ports: PortMap,
+    seed_internode: Option<(String, u16)>,
+    join_token_file: Option<PathBuf>,
+    shared_join_secret: Option<PathBuf>,
+) -> LabNode {
+    std::fs::create_dir_all(&work).unwrap();
     if let Some(src) = shared_join_secret.as_ref() {
         let dst = work.join("join.secret");
         std::fs::copy(src, &dst).unwrap();
@@ -333,7 +373,7 @@ pub async fn boot_from_fixture(
         }
     }
     let text = rewrite_fixture(
-        &template,
+        template.as_str(),
         &work,
         &ports,
         seed_internode,
@@ -350,7 +390,7 @@ pub async fn boot_from_fixture(
         handlers,
         ValidateOptions::first_binary(),
     )
-    .unwrap_or_else(|e| panic!("validate {fixture_name}: {e:?}"));
+    .unwrap_or_else(|e| panic!("validate {}: {e:?}", conf_path.display()));
 
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
     let node = Node::boot_first_binary(conf_path.clone(), cfg, threads, source);
@@ -376,6 +416,72 @@ pub async fn boot_one_node(root: &Path) -> LabNode {
     let lab = boot_from_fixture("first-binary-one-node.conf", work, ports, None, None, None).await;
     lab.wait_ready(Duration::from_secs(10)).await;
     lab
+}
+
+/// `007` one-node lab with `cluster { starter_namespace acme; }` applied at bootstrap.
+pub async fn boot_tenancy_one_node(root: &Path) -> LabNode {
+    let work = root.join("tenancy");
+    let ports = PortMap::ephemeral().await;
+    let template = std::fs::read_to_string(fixtures_dir().join("first-binary-one-node.conf")).unwrap();
+    let template = inject_cluster_directive(&template, "starter_namespace acme");
+    let lab = boot_from_template(template, work, ports, None, None, None).await;
+    lab.wait_ready(Duration::from_secs(10)).await;
+    lab
+}
+
+/// Stop and start again from the same on-disk config and data directory.
+pub async fn reboot_lab(lab: LabNode) -> LabNode {
+    let work = lab.dir.clone();
+    let conf_path = lab.conf_path.clone();
+    let ports = lab.ports.clone();
+    lab.shutdown().await;
+    let text = std::fs::read_to_string(&conf_path).unwrap();
+    let next = boot_from_template(text, work, ports, None, None, None).await;
+    next.wait_ready(Duration::from_secs(15)).await;
+    next
+}
+
+pub const LAB_ADMIN_TOKEN: &str = "lab-admin-token";
+
+/// Admin TCP JSON op (`001` FR-020 parity seam for conformance).
+pub async fn admin_tcp_json(port: u16, token: &str, op: AdminOp) -> serde_json::Value {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let hello = serde_json::json!({"proto_version": 1, "token": token, "client": "conformance"});
+    stream
+        .write_all(
+            &spacestorage_admin_proto::encode_frame(&serde_json::to_vec(&hello).unwrap())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut buf = bytes::BytesMut::new();
+    loop {
+        let n = stream.read_buf(&mut buf).await.unwrap();
+        if n == 0 {
+            panic!("eof on admin hello");
+        }
+        if spacestorage_admin_proto::decode_frame(&mut buf)
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+    }
+    stream
+        .write_all(
+            &spacestorage_admin_proto::encode_frame(&serde_json::to_vec(&op).unwrap()).unwrap(),
+        )
+        .await
+        .unwrap();
+    loop {
+        let n = stream.read_buf(&mut buf).await.unwrap();
+        if n == 0 {
+            panic!("eof on admin op");
+        }
+        if let Some(payload) = spacestorage_admin_proto::decode_frame(&mut buf).unwrap() {
+            return serde_json::from_slice(&payload).unwrap();
+        }
+    }
 }
 
 /// G2: bootstrap A then join B and C with one-time tokens.
@@ -587,6 +693,23 @@ pub async fn quorum_two_write(
 /// Validate-only helpers for invalid fixtures (G1 omitted-transport / G8 cassandra).
 pub fn validate_fixture(rel: &str) -> Result<(), Vec<spacestorage_config::ConfigError>> {
     let path = fixtures_dir().join(rel);
+    let text = std::fs::read_to_string(&path).unwrap();
+    parse_validate(
+        &text,
+        &path,
+        &[],
+        first_binary_handler_names(),
+        ValidateOptions {
+            check_secrets_readable: false,
+            ..ValidateOptions::first_binary()
+        },
+    )
+    .map(|_| ())
+}
+
+/// Validate-only helper for `007` invalid fixtures.
+pub fn validate_tenancy_fixture(rel: &str) -> Result<(), Vec<spacestorage_config::ConfigError>> {
+    let path = tenancy_fixtures_dir().join(rel);
     let text = std::fs::read_to_string(&path).unwrap();
     parse_validate(
         &text,

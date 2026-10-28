@@ -23,7 +23,7 @@ impl NamespaceName {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NamespaceRecord {
     pub id: NamespaceId,
     pub name: String,
@@ -39,7 +39,13 @@ impl NamespaceRecord {
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
         validate_namespace_name(&name)?;
-        let id = Uuid::new_v4();
+        Self::with_id(Uuid::new_v4(), name)
+    }
+
+    /// Deterministic cluster-log apply constructor: the leader assigns `id` in the log body.
+    pub fn with_id(id: Uuid, name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        validate_namespace_name(&name)?;
         Ok(Self {
             id,
             name,
@@ -51,6 +57,27 @@ impl NamespaceRecord {
             deleted: false,
         })
     }
+
+    /// `on` waits for observability export (`08`). Omitted / `off` is allowed.
+    pub fn set_private_telemetry(
+        &mut self,
+        private_metrics: bool,
+        private_logs: bool,
+    ) -> Result<()> {
+        if private_metrics {
+            return Err(TenancyError::ObservabilityRequired {
+                op: "private_metrics".into(),
+            });
+        }
+        if private_logs {
+            return Err(TenancyError::ObservabilityRequired {
+                op: "private_logs".into(),
+            });
+        }
+        self.private_metrics = false;
+        self.private_logs = false;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -60,12 +87,11 @@ pub struct NamespaceRegistry {
 }
 
 impl NamespaceRegistry {
-    pub fn create(&mut self, name: &str) -> Result<NamespaceRecord> {
+    pub fn create(&mut self, verb_bits: u16, name: &str) -> Result<NamespaceRecord> {
+        crate::ops::require_cluster_admin(verb_bits)?;
         validate_namespace_name(name)?;
         if self.by_name.contains_key(name) {
-            return Err(TenancyError::NamespaceExists {
-                name: name.into(),
-            });
+            return Err(TenancyError::NamespaceExists { name: name.into() });
         }
         let rec = NamespaceRecord::new(name)?;
         self.by_name.insert(rec.name.clone(), rec.id);
@@ -73,16 +99,20 @@ impl NamespaceRegistry {
         Ok(rec)
     }
 
-    pub fn rename(&mut self, id: Uuid, new_name: &str) -> Result<()> {
+    pub fn rename(&mut self, verb_bits: u16, id: Uuid, new_name: &str) -> Result<()> {
+        crate::ops::require_cluster_admin(verb_bits)?;
         validate_namespace_name(new_name)?;
         if self.by_name.contains_key(new_name) {
             return Err(TenancyError::NamespaceExists {
                 name: new_name.into(),
             });
         }
-        let rec = self.by_id.get_mut(&id).ok_or_else(|| TenancyError::NamespaceNotFound {
-            name: id.to_string(),
-        })?;
+        let rec = self
+            .by_id
+            .get_mut(&id)
+            .ok_or_else(|| TenancyError::NamespaceNotFound {
+                name: id.to_string(),
+            })?;
         let old = rec.name.clone();
         rec.name = new_name.into();
         self.by_name.remove(&old);
@@ -90,10 +120,20 @@ impl NamespaceRegistry {
         Ok(())
     }
 
-    pub fn delete(&mut self, id: Uuid, cascade: bool, containers: &[Uuid]) -> Result<()> {
-        let rec = self.by_id.get(&id).ok_or_else(|| TenancyError::NamespaceNotFound {
-            name: id.to_string(),
-        })?;
+    pub fn delete(
+        &mut self,
+        verb_bits: u16,
+        id: Uuid,
+        cascade: bool,
+        containers: &[Uuid],
+    ) -> Result<()> {
+        crate::ops::require_cluster_admin(verb_bits)?;
+        let rec = self
+            .by_id
+            .get(&id)
+            .ok_or_else(|| TenancyError::NamespaceNotFound {
+                name: id.to_string(),
+            })?;
         if !cascade && !containers.is_empty() {
             return Err(TenancyError::CascadeRequired {
                 name: rec.name.clone(),
@@ -110,11 +150,31 @@ impl NamespaceRegistry {
         self.by_name.get(name).and_then(|id| self.by_id.get(id))
     }
 
+    pub fn get_by_id(&self, id: uuid::Uuid) -> Option<&NamespaceRecord> {
+        self.by_id.get(&id)
+    }
+
     pub fn list(&self) -> Vec<&NamespaceRecord> {
         self.by_id.values().collect()
     }
 
-    pub fn replace_quotas(&mut self, id: Uuid, quotas: Vec<QuotaSpec>) -> Result<()> {
+    /// Replace the local read cache from cluster-applied records.
+    pub fn replace_applied(&mut self, records: impl IntoIterator<Item = NamespaceRecord>) {
+        self.by_id.clear();
+        self.by_name.clear();
+        for record in records {
+            self.by_name.insert(record.name.clone(), record.id);
+            self.by_id.insert(record.id, record);
+        }
+    }
+
+    pub fn replace_quotas(
+        &mut self,
+        verb_bits: u16,
+        id: Uuid,
+        quotas: Vec<QuotaSpec>,
+    ) -> Result<()> {
+        crate::ops::require_cluster_admin(verb_bits)?;
         #[cfg(not(feature = "tenancy-quotas"))]
         {
             let _ = (id, quotas);
@@ -124,9 +184,12 @@ impl NamespaceRegistry {
         }
         #[cfg(feature = "tenancy-quotas")]
         {
-            let rec = self.by_id.get_mut(&id).ok_or_else(|| TenancyError::NamespaceNotFound {
-                name: id.to_string(),
-            })?;
+            let rec = self
+                .by_id
+                .get_mut(&id)
+                .ok_or_else(|| TenancyError::NamespaceNotFound {
+                    name: id.to_string(),
+                })?;
             rec.quotas = quotas;
             Ok(())
         }
@@ -136,13 +199,18 @@ impl NamespaceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use spacestorage_authz::Verb;
+
+    fn admin() -> u16 {
+        Verb::CLUSTER_ADMIN.bits()
+    }
 
     #[test]
     fn create_rename_unique() {
         let mut r = NamespaceRegistry::default();
-        let a = r.create("acme").unwrap();
-        assert!(r.create("acme").is_err());
-        r.rename(a.id, "contoso").unwrap();
+        let a = r.create(admin(), "acme").unwrap();
+        assert!(r.create(admin(), "acme").is_err());
+        r.rename(admin(), a.id, "contoso").unwrap();
         assert!(r.get_by_name("acme").is_none());
         assert!(r.get_by_name("contoso").is_some());
         assert_eq!(r.get_by_name("contoso").unwrap().id, a.id);
@@ -151,9 +219,43 @@ mod tests {
     #[test]
     fn cascade_required() {
         let mut r = NamespaceRegistry::default();
-        let a = r.create("acme").unwrap();
+        let a = r.create(admin(), "acme").unwrap();
         let c = Uuid::from_u128(1);
-        let err = r.delete(a.id, false, &[c]).unwrap_err();
+        let err = r.delete(admin(), a.id, false, &[c]).unwrap_err();
         assert!(matches!(err, TenancyError::CascadeRequired { .. }));
+    }
+
+    #[test]
+    fn namespace_admin_cannot_create_or_replace_quotas() {
+        let mut r = NamespaceRegistry::default();
+        let bits = Verb::NAMESPACE_ADMIN.bits();
+        assert!(matches!(
+            r.create(bits, "acme"),
+            Err(TenancyError::NotClusterAdmin)
+        ));
+        let id = Uuid::from_u128(1);
+        assert!(matches!(
+            r.replace_quotas(bits, id, Vec::new()),
+            Err(TenancyError::NotClusterAdmin)
+        ));
+        assert!(matches!(
+            r.replace_quotas(Verb::CONFIGURE.bits(), id, Vec::new()),
+            Err(TenancyError::NotClusterAdmin)
+        ));
+    }
+
+    #[test]
+    fn private_telemetry_on_requires_observability() {
+        let mut rec = NamespaceRecord::new("acme").unwrap();
+        assert!(rec.set_private_telemetry(false, false).is_ok());
+        assert!(matches!(
+            rec.set_private_telemetry(true, false),
+            Err(TenancyError::ObservabilityRequired { .. })
+        ));
+        assert!(matches!(
+            rec.set_private_telemetry(false, true),
+            Err(TenancyError::ObservabilityRequired { .. })
+        ));
+        assert!(!rec.private_metrics && !rec.private_logs);
     }
 }

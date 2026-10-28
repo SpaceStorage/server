@@ -292,3 +292,52 @@ Task: "T045–T047 introduced_in + peers_ok + format_too_new"
 
 - [X] T069 Count each authenticated session with `SessionCounters::try_accept_principal` (and `release_principal` on disconnect) against the effective `max_connections_per_principal`, and reject with named `limit_exceeded` without waiting; `try_accept_principal` currently has no caller outside `crates/compat` per FR-011 (partial)
 - [X] T070 Enforce the effective configured `Limits` (not `Limits::default()` alone) for `max_key`, `max_value`, `max_query_text`, and `max_result` on the paths [limits.md](contracts/limits.md) names that still accept oversize input: S3 object key and assembled object (multipart sum), Elasticsearch document and body, Cassandra CQL text and values, ClickHouse query text, WebDAV path and body, plus PostgreSQL bound values and the existing Redis/PostgreSQL gates per FR-011 (partial)
+
+## Phase 12: Convergence
+
+- [X] T071 Publish process-local `spacestorage_compat_must_not_total{protocol,verb}` on admin `/metrics` by merging `compat::must_not_snapshot` into the `008` Prometheus scrape (`Metrics::render_with_system_extra` from `crates/node/src/handler/admin_http.rs`). Absolute values, not re-incremented (T059)
+- [X] T072 Stock-client wire conformance for Cassandra native, Elasticsearch HTTP, ClickHouse native and HTTP, S3 SigV4, and WebDAV, beyond the dispatch APIs (T060). Dispatch-level `compat_must_not` checks stay; this is a separate integration suite
+
+## Phase 13: Convergence
+
+- [X] T073 In `crates/handler-elasticsearch/src/router.rs`, classify `_search` bodies per FR-015 and [elasticsearch-search.md](contracts/elasticsearch-search.md): parse `query_string`, `range`, and `bool` (clauses of those only) into the matching MUST verbs with a filter needle; send `script`, `significant_terms`, `composite`, `date_histogram`, and any aggregation outside the closed list to MustNot so the reply is HTTP 400 `illegal_argument_exception` and never HTTP 200 via the `SEARCH_MATCH` fallback; route ingest, ML, and CCR through `classify` the way ILM is routed, not the 404 `index_not_found_exception` catch-all per FR-015 (contradicts)
+- [X] T074 In `crates/handler-clickhouse/src/sql.rs`, classify `CREATE MATERIALIZED VIEW` and replication DDL (`Replicated` engines) as `MATERIALIZED_VIEW` / `REPLICATION` before the generic `CREATE` arm so both native and HTTP return `compat_must_not` instead of `ClickHouseReply::Ok` per FR-003 (contradicts)
+- [X] T075 In `crates/handler-s3/src/handler.rs`, dispatch bucket subresources `object-lock`, `replication`, and `acl` to MustNot verbs (`OBJECTLOCK`, `REPLICATION`, `ACL`) before `CREATEBUCKET` / `GETOBJECT` / `PUTOBJECT`, so those requests return 501 `compat_must_not` instead of HTTP 200 per FR-003 (contradicts)
+
+## Phase 14: Convergence
+
+- [X] T076 In `crates/handler-elasticsearch/src/router.rs`, route document delete and cat/list to the existing MUST verbs so `DELETE /{index}/_doc/{id}` dispatches `DELETE` and `GET /_cat` plus `GET /_cat/indices` dispatches `CAT`/`LIST`; those requests must succeed through `dispatch` instead of the 404 `index_not_found_exception` catch-all per FR-015 / US1/AC4 (missing)
+- [X] T077 In `crates/handler-s3/src/handler.rs`, dispatch a bucket-less `GET` (SigV4 ListBuckets, path `/`) to `LISTBUCKETS` before the `GETOBJECT` fallback so the service root returns the bucket list instead of GetObject on a default key per FR-001 (missing)
+
+## Phase 15: Convergence
+
+- [X] T078 In `crates/query/src/engine.rs` `lower_sql` and `crates/query/src/catalog_exec.rs`, map `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ` and `SNAPSHOT` onto the open transaction as `Snapshot`, and refuse `SERIALIZABLE` on that statement. Do not return the adhoc `SET` success tag while the transaction stays `READ COMMITTED` per FR-006 (contradicts)
+- [X] T079 In `crates/query/src/engine.rs` `lower_copy`, call `classify_pg_copy` before `CopyIn` / `CopyOut` so `COPY … PROGRAM`, `FREEZE`, and a server filesystem path (not `STDIN` / `STDOUT`) return that protocol's not-supported error instead of `COPY 0` per FR-008 (contradicts)
+- [X] T080 In `crates/handler-cassandra/src/cql.rs`, route CQL `UPDATE`, `DELETE`, and `ALTER` to the existing Must dispatch arms so they succeed, and route a `CREATE`/`ALTER` that enables CDC (`cdc` in `WITH`) to `CDC` so it is MustNot instead of a successful `CREATE` per US1/AC2 / FR-003 (partial)
+- [X] T081 In `crates/handler-s3/src/handler.rs`, do not dispatch a key-less `DELETE` (DeleteBucket) as `DELETEOBJECT` with a synthetic key; return 501 `compat_must_not` instead of HTTP 200. Keep `DELETE` with an object key on `DELETEOBJECT` per FR-003 (contradicts)
+- [X] T082 Add `TypeDescriptor.introduced_in: ProductVersion` (default 1) in `crates/types/src/descriptor.rs` and refuse `ContainerCatalog::create` / `create_from_definition` in `crates/types/src/catalog.rs` with `type_too_new{type,introduced_in,local}` when `introduced_in` is greater than the local product version per FR-013 / plan R13 (missing)
+
+## Phase 16: Convergence
+
+- [X] T083 In `crates/handler-s3/src/handler.rs`, do not dispatch a key-less `GET` that is not ListObjectsV2 (`list-type=2`) and not ListBuckets as `GETOBJECT` with a synthetic key `key`; return 501 `compat_must_not` instead of HTTP 200. Keep `GET` with an object key on `GETOBJECT` per FR-003 (contradicts)
+- [X] T084 In `crates/handler-s3/src/handler.rs`, do not dispatch `GET` or `DELETE` that carry an `uploadId` query (ListParts / AbortMultipartUpload, outside the classified MUST multipart verbs) as `GETOBJECT` / `DELETEOBJECT`; return 501 `compat_must_not` instead of reading or deleting the object per FR-003 (contradicts)
+
+## Phase 17: Convergence
+
+- [X] T085 In `crates/handler-postgresql/src/sql.rs` `run_cursor` / `parse_declare` / `parse_fetch`, accept complete-product `DECLARE name [NO SCROLL] [BINARY] CURSOR [WITHOUT HOLD] FOR query` inside an open transaction. Do not refuse `NO SCROLL` because `contains(" SCROLL")` is also true for that MUST form. Refuse `INSENSITIVE`, `FETCH PRIOR`, and `FETCH ABSOLUTE` with that protocol's not-supported error (`0A000`), the same way `WITH HOLD`, `SCROLL`, and `FETCH BACKWARD` are refused. `FETCH [FORWARD] [count|ALL]` must return `count` rows or every remaining row for `ALL`, not a single default row. Keep `WITH HOLD`, scrollable cursors, and use after `COMMIT` not-supported per FR-014 (contradicts)
+- [X] T086 In `crates/handler-elasticsearch/src/router.rs` `classify_query` / `classify_search`, do not map a null or empty `query` to `SEARCH_MATCH` (that returns HTTP 200 and an unfiltered scan). A `_search` body whose top-level `query` is not `query_string`, `match`, `term`, `range`, or `bool` of those only — including `null` and `{}` — must be MustNot (HTTP 400 `illegal_argument_exception`) even when a closed-list aggregation is also present. Keep named MUST search and CompleteProduct closed-list aggregations succeeding per FR-015 (contradicts)
+- [X] T087 In `crates/compat/src/matrix.rs` `classify_webdav`, stop treating `HEAD` and `OPTIONS` as Must. Those methods are outside the WebDAV MUST list, so `crates/handler-webdav/src/dispatch.rs` must return that protocol's not-supported error instead of `WebDavReply::Ok` / HTTP 200 with an empty body. Keep PROPFIND, GET, PUT, DELETE, MKCOL, MOVE, and COPY succeeding per FR-003 (contradicts)
+
+## Phase 18: Convergence
+
+- [X] T088 In `crates/handler-elasticsearch/src/router.rs` `classify_aggs`, do not return on the first aggregation kind. A `_search` body that contains any aggregation outside the closed list — `date_histogram`, `significant_terms`, `composite`, `script`, or any other unnamed kind — must be MustNot (HTTP 400 `illegal_argument_exception`) even when an earlier sibling is a closed-list aggregation such as `terms` or `avg`. Keep a body whose aggregations are only the closed list succeeding on CompleteProduct per FR-015 (contradicts)
+
+## Phase 19: Convergence
+
+- [X] T089 In `crates/handler-cassandra/src/cql.rs` `classify_cql`, route a `DELETE` that is an LWT (the same ` IF ` condition already used for `INSERT` and `UPDATE`, including `IF EXISTS`) to `LWT` so `dispatch` returns `compat_must_not` instead of `CassandraReply::Ok`. Keep an unconditional `DELETE FROM … WHERE …` succeeding per US1/AC2 / FR-003 (contradicts)
+- [X] T090 In `crates/handler-elasticsearch/src/router.rs` `route` / `classify_search`, classify the `GET /{index}/_search` body the same way as `POST` (do not pass an empty body), and do not return `SEARCH_QUERY_STRING` from a `q` parameter before that classification. A body whose top-level `query` is outside `query_string` / `match` / `term` / `range` / `bool`, or that contains any aggregation outside the closed list, must be MustNot (HTTP 400 `illegal_argument_exception`) even when `q` is also set. Keep `q` with an empty body, a MUST query, or only closed-list aggregations succeeding, and keep POST JSON MUST search succeeding per FR-015 / [elasticsearch-search.md](contracts/elasticsearch-search.md) (contradicts)
+
+## Phase 20: Convergence
+
+- [X] T091 In `crates/query/src/catalog_exec.rs` `execute_adhoc_sql`, accept `ALTER TABLE` mapped to a container so it succeeds. Do not return `not_supported` (`0A000`) for that statement. `CREATE TABLE` and `DROP TABLE` already succeed; `ALTER` falls through to `other => Err(ExecError::NotSupported)`. Keep `ALTER` that is not container DDL on the not-supported path per US1/AC1 / [matrix.md](contracts/matrix.md) (missing)
+- [X] T092 In `crates/query/src/catalog_exec.rs` `create_table` / `drop_table`, do not treat `CREATE FOREIGN TABLE` / `DROP FOREIGN TABLE` as local `CREATE TABLE` / `DROP TABLE` because the SQL contains the word `TABLE`. Return that protocol's not-supported error (`0A000`) for FDW. Keep plain `CREATE TABLE` / `DROP TABLE` succeeding per US1/AC1 / FR-003 (contradicts)

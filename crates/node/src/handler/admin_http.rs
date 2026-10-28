@@ -1,8 +1,8 @@
-use crate::admin::auth::check_bearer;
+use crate::Node;
 use crate::admin::AdminService;
+use crate::admin::auth::check_bearer;
 use crate::handler::ClientStream;
 use crate::lifecycle::NodeState;
-use crate::Node;
 use async_trait::async_trait;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, State};
@@ -64,6 +64,7 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/buffers", get(buffers))
         .route("/v1/reload", post(reload))
         .route("/v1/stop", post(stop))
+        .route("/v1/admin", post(admin_op))
         .route("/v1/health/live", get(live))
         .route("/v1/health/ready", get(ready))
         .route("/metrics", get(metrics))
@@ -86,12 +87,21 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/console/query", post(console_query))
         .route("/v1/console/config", post(console_config))
         .route("/v1/console/containers", post(console_containers))
-        .route("/v1/ingest/kafka", get(ingest_kafka_list).post(ingest_kafka_add))
-        .route("/v1/ingest/kafka/{id}", axum::routing::delete(ingest_kafka_delete))
+        .route(
+            "/v1/ingest/kafka",
+            get(ingest_kafka_list).post(ingest_kafka_add),
+        )
+        .route(
+            "/v1/ingest/kafka/{id}",
+            axum::routing::delete(ingest_kafka_delete),
+        )
         .route("/v1/l0/containers", get(l0_list).post(l0_create))
         .route("/v1/l0/containers/{namespace}/{name}", get(l0_get))
         .route("/v1/legal/holds", post(legal_hold_place))
-        .route("/v1/legal/holds/{id}", axum::routing::delete(legal_hold_release))
+        .route(
+            "/v1/legal/holds/{id}",
+            axum::routing::delete(legal_hold_release),
+        )
         .route("/v1/legal/erase", post(legal_erase))
         .route("/v1/cdc/streams", post(cdc_create))
         .route("/v1/compositions", post(composition_create))
@@ -100,6 +110,34 @@ fn router(node: Arc<Node>) -> Router {
         .fallback(fallback)
         .layer(DefaultBodyLimit::max(ADMIN_HTTP_BODY_LIMIT))
         .with_state(node)
+}
+
+async fn admin_op(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> axum::response::Response {
+    if let Err(error) = auth(&headers, &node).await {
+        return (StatusCode::UNAUTHORIZED, Json(error)).into_response();
+    }
+    let op: AdminOp = match serde_json::from_slice(&body) {
+        Ok(op) => op,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorBody {
+                    code: "unknown_op".into(),
+                    message: error.to_string(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match AdminService::execute(&node, op).await {
+        Ok(value) => with_headers(&node, Json(value).into_response()),
+        Err(error) => (StatusCode::BAD_REQUEST, Json(error)).into_response(),
+    }
 }
 
 async fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
@@ -283,9 +321,96 @@ fn system_snapshot(node: &Node) -> spacestorage_observability::NodeSystemSnapsho
     }
 }
 
+fn tenancy_usage_series(node: &Node) -> Vec<spacestorage_observability::SeriesSnapshot> {
+    use spacestorage_observability::{help_for, LabelSet, SampleKind, SeriesSnapshot};
+    use spacestorage_tenancy::QuotaUnit;
+    let registry = node.tenancy.registry.lock();
+    let mut out = Vec::new();
+    for record in registry.list() {
+        for unit in [
+            QuotaUnit::Bytes,
+            QuotaUnit::Objects,
+            QuotaUnit::Connections,
+        ] {
+            let usage = node
+                .tenancy
+                .usage
+                .get(record.id, unit, &None);
+            let name = match unit {
+                QuotaUnit::Bytes => "spacestorage_namespace_usage_bytes",
+                QuotaUnit::Objects => "spacestorage_namespace_usage_objects",
+                QuotaUnit::Connections => "spacestorage_namespace_connections",
+                QuotaUnit::OpsPerSec => continue,
+            };
+            let mut labels = LabelSet::new();
+            let _ = labels.insert("namespace", record.name.as_str());
+            out.push(SeriesSnapshot {
+                name: name.into(),
+                labels,
+                kind: SampleKind::Gauge,
+                help: help_for(name),
+                counter: None,
+                gauge: Some(usage as f64),
+                hist_bounds: None,
+                hist_counts: None,
+                hist_sum: None,
+                hist_count: None,
+            });
+        }
+    }
+    for (ns_id, unit, count) in node.tenancy.usage.exceeded_labeled() {
+        let Some(record) = registry.get_by_id(ns_id) else {
+            continue;
+        };
+        let mut labels = LabelSet::new();
+        let _ = labels.insert("namespace", record.name.as_str());
+        let _ = labels.insert("unit", unit.as_str());
+        out.push(SeriesSnapshot {
+            name: "spacestorage_quota_exceeded_total".into(),
+            labels,
+            kind: SampleKind::Counter,
+            help: help_for("spacestorage_quota_exceeded_total"),
+            counter: Some(count),
+            gauge: None,
+            hist_bounds: None,
+            hist_counts: None,
+            hist_sum: None,
+            hist_count: None,
+        });
+    }
+    out
+}
+
+fn compat_must_not_series() -> Vec<spacestorage_observability::SeriesSnapshot> {
+    spacestorage_compat::must_not_snapshot()
+        .into_iter()
+        .map(|(protocol, verb, count)| {
+            let mut labels = spacestorage_observability::LabelSet::new();
+            let _ = labels.insert("protocol", protocol);
+            let _ = labels.insert("verb", verb);
+            spacestorage_observability::SeriesSnapshot {
+                name: "spacestorage_compat_must_not_total".into(),
+                labels,
+                kind: spacestorage_observability::SampleKind::Counter,
+                help: spacestorage_observability::help_for("spacestorage_compat_must_not_total"),
+                counter: Some(count),
+                gauge: None,
+                hist_bounds: None,
+                hist_counts: None,
+                hist_sum: None,
+                hist_count: None,
+            }
+        })
+        .collect()
+}
+
 async fn metrics(State(node): State<Arc<Node>>) -> impl IntoResponse {
-    // 008: Four Golden Signals + system/billing series via registry encoder.
-    let body = node.metrics.render_with_system(&system_snapshot(&node));
+    // 008 scrape plus 015 process-local MUST NOT counters (absolute; not re-incremented).
+    let mut extra = compat_must_not_series();
+    extra.extend(tenancy_usage_series(&node));
+    let body = node
+        .metrics
+        .render_with_system_extra(&system_snapshot(&node), &extra);
     (
         StatusCode::OK,
         [(
@@ -335,7 +460,10 @@ async fn jobs_list(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::r
         return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
     }
     let jobs = node.jobs.list();
-    with_headers(&node, Json(serde_json::json!({ "jobs": jobs })).into_response())
+    with_headers(
+        &node,
+        Json(serde_json::json!({ "jobs": jobs })).into_response(),
+    )
 }
 
 async fn jobs_create(
@@ -378,10 +506,16 @@ async fn jobs_create(
         Err(e) => return migrate_err_response(e),
     };
     let authz = migrate_authz(&headers, &node);
-    match node.jobs.start(kind, uuid::Uuid::nil(), strategy, v, &authz) {
+    match node
+        .jobs
+        .start(kind, uuid::Uuid::nil(), strategy, v, &authz)
+    {
         Ok(job) => (
             StatusCode::ACCEPTED,
-            with_headers(&node, Json(serde_json::json!({ "job": job })).into_response()),
+            with_headers(
+                &node,
+                Json(serde_json::json!({ "job": job })).into_response(),
+            ),
         )
             .into_response(),
         Err(e) => migrate_err_response(e),
@@ -400,7 +534,10 @@ async fn job_status(
         return migrate_err_response(spacestorage_migrate::MigrateError::NotFound);
     };
     match node.jobs.status(jid) {
-        Ok(job) => with_headers(&node, Json(serde_json::json!({ "job": job })).into_response()),
+        Ok(job) => with_headers(
+            &node,
+            Json(serde_json::json!({ "job": job })).into_response(),
+        ),
         Err(e) => migrate_err_response(e),
     }
 }
@@ -417,7 +554,10 @@ async fn job_cancel(
         return migrate_err_response(spacestorage_migrate::MigrateError::NotFound);
     };
     match node.jobs.cancel(jid) {
-        Ok(job) => with_headers(&node, Json(serde_json::json!({ "job": job })).into_response()),
+        Ok(job) => with_headers(
+            &node,
+            Json(serde_json::json!({ "job": job })).into_response(),
+        ),
         Err(e) => migrate_err_response(e),
     }
 }
@@ -436,7 +576,10 @@ async fn job_resume(
     match node.jobs.resume(jid) {
         Ok(job) => (
             StatusCode::ACCEPTED,
-            with_headers(&node, Json(serde_json::json!({ "job": job })).into_response()),
+            with_headers(
+                &node,
+                Json(serde_json::json!({ "job": job })).into_response(),
+            ),
         )
             .into_response(),
         Err(e) => migrate_err_response(e),
@@ -479,10 +622,16 @@ async fn kind_alias(
         Err(e) => return migrate_err_response(e),
     };
     let authz = migrate_authz(&headers, &node);
-    match node.jobs.start(kind, uuid::Uuid::nil(), strategy, v, &authz) {
+    match node
+        .jobs
+        .start(kind, uuid::Uuid::nil(), strategy, v, &authz)
+    {
         Ok(job) => (
             StatusCode::ACCEPTED,
-            with_headers(&node, Json(serde_json::json!({ "job": job })).into_response()),
+            with_headers(
+                &node,
+                Json(serde_json::json!({ "job": job })).into_response(),
+            ),
         )
             .into_response(),
         Err(e) => migrate_err_response(e),
@@ -694,11 +843,14 @@ async fn console_query(
         return slice11_required();
     }
     let Some(principal) = ui_principal(&node, &headers) else {
-        return (StatusCode::UNAUTHORIZED, Json(ErrorBody {
-            code: "unauthorized".into(),
-            message: "invalid token".into(),
-            details: serde_json::json!({}),
-        }))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "unauthorized".into(),
+                message: "invalid token".into(),
+                details: serde_json::json!({}),
+            }),
+        )
             .into_response();
     };
     match ui.console.query(&principal.console_authz(), &body) {
@@ -728,11 +880,14 @@ async fn console_config(
         return slice11_required();
     }
     let Some(principal) = ui_principal(&node, &headers) else {
-        return (StatusCode::UNAUTHORIZED, Json(ErrorBody {
-            code: "unauthorized".into(),
-            message: "invalid token".into(),
-            details: serde_json::json!({}),
-        }))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "unauthorized".into(),
+                message: "invalid token".into(),
+                details: serde_json::json!({}),
+            }),
+        )
             .into_response();
     };
     match ui.console.config(&principal.console_authz(), &body) {
@@ -762,15 +917,25 @@ async fn console_containers(
         return slice11_required();
     }
     let Some(principal) = ui_principal(&node, &headers) else {
-        return (StatusCode::UNAUTHORIZED, Json(ErrorBody {
-            code: "unauthorized".into(),
-            message: "invalid token".into(),
-            details: serde_json::json!({}),
-        }))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "unauthorized".into(),
+                message: "invalid token".into(),
+                details: serde_json::json!({}),
+            }),
+        )
             .into_response();
     };
-    match ui.console.create_container(&principal.console_authz(), &body) {
-        Ok(v) => (StatusCode::CREATED, with_headers(&node, Json(v).into_response())).into_response(),
+    match ui
+        .console
+        .create_container(&principal.console_authz(), &body)
+    {
+        Ok(v) => (
+            StatusCode::CREATED,
+            with_headers(&node, Json(v).into_response()),
+        )
+            .into_response(),
         Err(e) => {
             let status = if e.code() == "forbidden" {
                 StatusCode::FORBIDDEN
@@ -803,14 +968,20 @@ async fn ui_cluster(
         return slice11_required();
     }
     let Some(principal) = ui_principal(&node, &headers) else {
-        return (StatusCode::UNAUTHORIZED, Json(ErrorBody {
-            code: "unauthorized".into(),
-            message: "invalid token".into(),
-            details: serde_json::json!({}),
-        }))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "unauthorized".into(),
+                message: "invalid token".into(),
+                details: serde_json::json!({}),
+            }),
+        )
             .into_response();
     };
-    if matches!(principal.map_authz(), spacestorage_admin_ui::MapAuthz::Forbidden) {
+    if matches!(
+        principal.map_authz(),
+        spacestorage_admin_ui::MapAuthz::Forbidden
+    ) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let interval = q
@@ -826,20 +997,20 @@ async fn ui_cluster(
         .into_response()
 }
 
-async fn ui_console(
-    State(node): State<Arc<Node>>,
-    headers: HeaderMap,
-) -> axum::response::Response {
+async fn ui_console(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
     let ui = node.admin_ui.read().unwrap().clone();
     if !ui.slice11_enabled {
         return slice11_required();
     }
     let Some(principal) = ui_principal(&node, &headers) else {
-        return (StatusCode::UNAUTHORIZED, Json(ErrorBody {
-            code: "unauthorized".into(),
-            message: "invalid token".into(),
-            details: serde_json::json!({}),
-        }))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "unauthorized".into(),
+                message: "invalid token".into(),
+                details: serde_json::json!({}),
+            }),
+        )
             .into_response();
     };
     let az = principal.console_authz();
@@ -854,7 +1025,9 @@ async fn ui_console(
         .into_response()
 }
 
-async fn ui_asset(axum::extract::Path(name): axum::extract::Path<String>) -> axum::response::Response {
+async fn ui_asset(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> axum::response::Response {
     match name.as_str() {
         "cluster-map.js" => (
             [(header::CONTENT_TYPE, "application/javascript")],
@@ -891,7 +1064,10 @@ fn ingest_err(e: spacestorage_ingest::IngestError) -> axum::response::Response {
         .into_response()
 }
 
-fn ingest_authz(node: &Node, headers: &HeaderMap) -> Result<spacestorage_ingest::IngestAuthz, ErrorBody> {
+fn ingest_authz(
+    node: &Node,
+    headers: &HeaderMap,
+) -> Result<spacestorage_ingest::IngestAuthz, ErrorBody> {
     if let Some(p) = ui_principal(node, headers) {
         return Ok(spacestorage_ingest::IngestAuthz::from_principal(
             p.cluster_admin,
@@ -931,7 +1107,10 @@ async fn ingest_kafka_list(
         Err(e) => return (StatusCode::UNAUTHORIZED, Json(e)).into_response(),
     };
     match node.ingest.kafka.list_for(&authz) {
-        Ok(items) => with_headers(&node, Json(serde_json::json!({ "kafka": items })).into_response()),
+        Ok(items) => with_headers(
+            &node,
+            Json(serde_json::json!({ "kafka": items })).into_response(),
+        ),
         Err(e) => ingest_err(e),
     }
 }
@@ -963,7 +1142,11 @@ async fn ingest_kafka_add(
         decl.id = uuid::Uuid::now_v7();
     }
     match node.ingest.kafka.add(decl, &authz).await {
-        Ok(d) => (StatusCode::CREATED, with_headers(&node, Json(d).into_response())).into_response(),
+        Ok(d) => (
+            StatusCode::CREATED,
+            with_headers(&node, Json(d).into_response()),
+        )
+            .into_response(),
         Err(e) => ingest_err(e),
     }
 }
@@ -1284,7 +1467,8 @@ async fn composition_create(
             StatusCode::CREATED,
             with_headers(
                 &node,
-                Json(serde_json::json!({ "id": id, "namespace": ns, "name": name, "kind": kind })).into_response(),
+                Json(serde_json::json!({ "id": id, "namespace": ns, "name": name, "kind": kind }))
+                    .into_response(),
             ),
         )
             .into_response(),

@@ -16,12 +16,12 @@ pub mod otlp_encode;
 pub mod sample;
 pub mod syslog;
 
-pub use aggregation::{merge_push, AggregationFreshness, AggregationStore};
-pub use billing::{estimate_charge, estimate_total, BillingRates, ChargeEstimate, UsageSnapshot};
+pub use aggregation::{AggregationFreshness, AggregationStore, merge_push};
+pub use billing::{BillingRates, ChargeEstimate, UsageSnapshot, estimate_charge, estimate_total};
 pub use catalog::{
-    all_families, help_for, FamilyMeta, API_FAMILIES, BILLING_FAMILIES, COMM_FAMILIES,
-    DATATYPE_FAMILIES, DURATION_BUCKETS, DURABILITY_FAMILIES, JOB_FAMILIES, JOB_NAMES,
-    QUERY_FAMILIES, REPLICATION_FAMILIES, SIZE_BUCKETS, SYSTEM_FAMILIES,
+    API_FAMILIES, BILLING_FAMILIES, COMM_FAMILIES, COMPAT_FAMILIES, DATATYPE_FAMILIES,
+    DURABILITY_FAMILIES, DURATION_BUCKETS, FamilyMeta, JOB_FAMILIES, JOB_NAMES, QUERY_FAMILIES,
+    REPLICATION_FAMILIES, SIZE_BUCKETS, SYSTEM_FAMILIES, all_families, help_for,
 };
 pub use encode::{encode_prometheus, prometheus_content_type};
 pub use filter::filter_namespace;
@@ -29,15 +29,15 @@ pub use http::{
     encode_global, encode_tenant, metrics_disabled, prometheus_response, unknown_namespace,
 };
 pub use kafka::{KafkaProducer, KafkaSinkConfig, ProducedRecord};
-pub use otlp_encode::encode_otlp_metrics;
 pub use logs::{ChannelGates, LogChannel, LogEvent, LogExporter};
 pub use otel::{OtelConfig, OtelExporter};
+pub use otlp_encode::encode_otlp_metrics;
 pub use sample::{LabelSet, MetricName, Recorder, Registry, SampleKind, SeriesSnapshot};
 pub use syslog::{SyslogExporter, SyslogSinkConfig, SyslogTransport};
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -173,9 +173,20 @@ impl Metrics {
 
     /// Full scrape with live node system figures (admin-http).
     pub fn render_with_system(&self, sys: &NodeSystemSnapshot) -> String {
+        self.render_with_system_extra(sys, &[])
+    }
+
+    /// Same scrape, plus series owned outside this registry (absolute values, not incremented).
+    pub fn render_with_system_extra(
+        &self,
+        sys: &NodeSystemSnapshot,
+        extra: &[SeriesSnapshot],
+    ) -> String {
         self.publish_system(sys);
         self.aggregation.publish_to_registry(&self.registry);
-        encode_prometheus(&self.registry.snapshot())
+        let mut snap = self.registry.snapshot();
+        snap.extend_from_slice(extra);
+        encode_prometheus(&snap)
     }
 
     fn publish_uptime_only(&self) {
@@ -325,5 +336,43 @@ pub fn node_state_value(state: &str) -> f64 {
         "recovering" => 4.0,
         "failed" => 5.0,
         _ => 0.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extra_must_not_counter_is_on_the_scrape() {
+        let metrics = Metrics::new();
+        let sys = NodeSystemSnapshot {
+            uptime_seconds: 1.0,
+            node_ready: 1.0,
+            node_state: 1.0,
+            worker_threads: 1.0,
+            worker_threads_busy: 0.0,
+            buffers: Vec::new(),
+        };
+        let mut labels = LabelSet::new();
+        labels.insert("protocol", "redis").unwrap();
+        labels.insert("verb", "EVAL").unwrap();
+        let extra = [SeriesSnapshot {
+            name: "spacestorage_compat_must_not_total".into(),
+            labels,
+            kind: SampleKind::Counter,
+            help: help_for("spacestorage_compat_must_not_total"),
+            counter: Some(3),
+            gauge: None,
+            hist_bounds: None,
+            hist_counts: None,
+            hist_sum: None,
+            hist_count: None,
+        }];
+        let text = metrics.render_with_system_extra(&sys, &extra);
+        assert!(
+            text.contains("spacestorage_compat_must_not_total{protocol=\"redis\",verb=\"EVAL\"} 3")
+        );
+        assert!(help_for("spacestorage_compat_must_not_total").contains("MUST NOT"));
     }
 }

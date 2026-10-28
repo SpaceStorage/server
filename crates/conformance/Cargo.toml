@@ -10,6 +10,11 @@ publish = false
 [features]
 default = ["first-binary"]
 first-binary = []
+tenancy-quotas = [
+    "spacestorage-node/tenancy-quotas",
+    "spacestorage-query/tenancy-quotas",
+    "spacestorage-tenancy/tenancy-quotas",
+]
 # Optional 006 gates (SC-006 / SC-009 / SC-010).
 controlplane-leases = ["spacestorage-controlplane/controlplane-leases"]
 controlplane-ops = ["spacestorage-controlplane/controlplane-ops"]
@@ -42,7 +47,9 @@ complete-product = [
 ]
 [dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
+spacestorage-admin-proto = { path = "../admin-proto" }
 spacestorage-config = { path = "../config" }
+spacestorage-tenancy = { path = "../tenancy" }
 spacestorage-node = { path = "../node" }
 spacestorage-crypto = { path = "../crypto" }
 spacestorage-internode = { path = "../internode" }
@@ -54,6 +61,7 @@ uuid = { workspace = true }
 serde_json = { workspace = true }
 hex = { workspace = true }
 tempfile = { workspace = true }
+bytes = { workspace = true }
 
 [dev-dependencies]
 spacestorage-release-profile = { path = "../release-profile" }
@@ -84,3 +92,5 @@ tempfile = { workspace = true }
 uuid = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }
+sha2 = { workspace = true }
+tokio-util = { version = "0.7", features = ["rt"] }

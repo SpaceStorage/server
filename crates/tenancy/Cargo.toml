@@ -23,7 +23,9 @@ uuid = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
 spacestorage-authz = { path = "../authz" }
+spacestorage-internode = { path = "../internode" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+spacestorage-authz = { path = "../authz" }

@@ -1,8 +1,8 @@
 use crate::lifecycle::NodeState;
-use crate::{logging, Node};
+use crate::{Node, logging};
 use spacestorage_admin_proto::{ErrorBody, ReloadReport};
-use spacestorage_config::reload_class::{diff, ReloadClass};
-use spacestorage_config::{parse_validate, ConfigError, NodeConfig, ValidateOptions};
+use spacestorage_config::reload_class::{ReloadClass, diff};
+use spacestorage_config::{ConfigError, NodeConfig, ValidateOptions, parse_validate};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,11 +17,13 @@ pub async fn reload(node: &Arc<Node>) -> Result<ReloadReport, ErrorBody> {
     }
     let names: Vec<String> = node.handler_names();
     let path = node.config_path.clone();
-    let text = tokio::fs::read_to_string(&path).await.map_err(|e| ErrorBody {
-        code: "config_invalid".into(),
-        message: format!("cannot read config: {e}"),
-        details: serde_json::json!({}),
-    })?;
+    let text = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| ErrorBody {
+            code: "config_invalid".into(),
+            message: format!("cannot read config: {e}"),
+            details: serde_json::json!({}),
+        })?;
 
     // Secret/filesystem readability checks are blocking I/O — off worker (T085).
     let (incoming, _) = parse_validate_blocking(text, path, names).await?;

@@ -14,6 +14,8 @@ controlplane-ops = []
 migration-backup = []
 # Slice 11: allow UI/ingest config (otherwise first-binary rejects).
 complete-product = []
+# Slice 7: accept namespace quota blocks.
+tenancy-quotas = []
 
 [dependencies]
 serde = { workspace = true }

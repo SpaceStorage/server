@@ -2,7 +2,7 @@
 
 use crate::error::MigrateError;
 use crate::job::JobId;
-use crate::mapping::{apply_row_transform, MappingSpec};
+use crate::mapping::{MappingSpec, apply_row_transform};
 use crate::quota::QuotaView;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -54,9 +54,7 @@ impl DualWriteRegistry {
         self.live_seq
             .write()
             .insert(window.container_id, window.install_seq);
-        self.live_added_bytes
-            .write()
-            .insert(window.container_id, 0);
+        self.live_added_bytes.write().insert(window.container_id, 0);
         map.insert(window.container_id, window);
         Ok(())
     }
@@ -72,10 +70,7 @@ impl DualWriteRegistry {
         self.live_seq.write().remove(&container_id);
         self.live_added_bytes.write().remove(&container_id);
         if let Some(t) = target {
-            self.pending_target
-                .write()
-                .remove(&t)
-                .unwrap_or_default()
+            self.pending_target.write().remove(&t).unwrap_or_default()
         } else {
             HashMap::new()
         }

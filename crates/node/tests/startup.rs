@@ -1,7 +1,7 @@
 use spacestorage_config::model::{
     ClusterDecl, EntrypointDecl, NodeConfig, QueryDefaults, Transport,
 };
-use spacestorage_node::{runtime, Node};
+use spacestorage_node::{Node, runtime};
 use std::collections::BTreeMap;
 use std::time::Duration;
 use tempfile::tempdir;

@@ -183,6 +183,7 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
             tasks.push(simple(EngineKind::Copy));
         }
         LogicalRequest::TxnBegin { .. }
+        | LogicalRequest::TxnSetIsolation { .. }
         | LogicalRequest::TxnCommit
         | LogicalRequest::TxnRollback => {
             ops.push("txn".into());

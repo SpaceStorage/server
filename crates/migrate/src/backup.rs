@@ -6,8 +6,8 @@ use crate::job::{JobKind, JobRecord, Strategy};
 use crate::store::JobStore;
 use serde::{Deserialize, Serialize};
 use spacestorage_backup::{
-    scope_container, scope_namespace, ContainerSnapshotMeta, PitrTarget, RestoreRequest,
-    RestoreService, SnapshotCreateRequest, SnapshotService,
+    ContainerSnapshotMeta, PitrTarget, RestoreRequest, RestoreService, SnapshotCreateRequest,
+    SnapshotService, scope_container, scope_namespace,
 };
 use spacestorage_storage::StorageEngine;
 use std::collections::BTreeMap;
@@ -16,8 +16,13 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupScope {
-    Namespace { name: String },
-    Container { namespace: String, container: String },
+    Namespace {
+        name: String,
+    },
+    Container {
+        namespace: String,
+        container: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

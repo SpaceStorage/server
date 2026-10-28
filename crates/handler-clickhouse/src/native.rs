@@ -9,7 +9,10 @@ use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
+use spacestorage_tenancy::NamespaceControl;
+
 use crate::dispatch::{ClickHouseReply, SessionState};
+use crate::namespace_admin::try_namespace_admin_sql;
 use crate::sql::execute_sql;
 
 pub struct ClickHouseNativeHandler {
@@ -17,6 +20,8 @@ pub struct ClickHouseNativeHandler {
     pub profile: DialectProfile,
     pub namespace: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub namespace_control: Option<Arc<dyn NamespaceControl>>,
 }
 
 impl ClickHouseNativeHandler {
@@ -30,7 +35,22 @@ impl ClickHouseNativeHandler {
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
             limit_services,
+            tenancy: None,
+            namespace_control: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
+    }
+
+    pub fn with_namespace_control(
+        mut self,
+        control: Arc<dyn NamespaceControl>,
+    ) -> Self {
+        self.namespace_control = Some(control);
+        self
     }
 
     pub async fn serve<S>(&self, mut stream: S, cancel: CancellationToken)
@@ -60,20 +80,39 @@ impl ClickHouseNativeHandler {
             protocol: spacestorage_compat::ProtocolId::ClickHouse,
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            namespace_control: self.namespace_control.clone(),
+            connection_quota: None,
+            connection_charged_namespace: None,
+            principal: None,
+            registry_accepted: false,
         };
 
         // Finish Hello if incomplete, then reply.
+        let mut hello_database = None;
         loop {
-            if consume_client_hello(&mut buf) {
-                break;
-            }
-            let mut tmp = [0u8; 256];
-            match stream.read(&mut tmp).await {
-                Ok(0) | Err(_) => return,
-                Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            match consume_client_hello(&mut buf) {
+                HelloParse::Incomplete => {
+                    let mut tmp = [0u8; 256];
+                    match stream.read(&mut tmp).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                    }
+                }
+                HelloParse::Complete { database } => {
+                    hello_database = database;
+                    break;
+                }
             }
         }
         // Native Hello completes handshake; count as authenticated demo principal.
+        if let Some(db) = hello_database {
+            if let Err(err) = session.try_registry_accept_presented_database(&db) {
+                let msg = format!("auth_failed: {err}");
+                let _ = stream.write_all(msg.as_bytes()).await;
+                return;
+            }
+        }
         if session.principal_hold.is_none() {
             match session.limit_services.try_hold_principal("demo") {
                 Ok(hold) => session.principal_hold = Some(hold),
@@ -84,6 +123,7 @@ impl ClickHouseNativeHandler {
                 }
             }
         }
+        session.principal = Some("demo".into());
         if stream.write_all(&encode_server_hello()).await.is_err() {
             return;
         }
@@ -98,7 +138,13 @@ impl ClickHouseNativeHandler {
                         Ok(n) => {
                             buf.extend_from_slice(&tmp[..n]);
                             while let Some(sql) = try_take_query(&mut buf) {
-                                let reply = execute_sql(&mut session, &sql);
+                                let reply = if let Some(r) =
+                                    try_namespace_admin_sql(&mut session, &sql).await
+                                {
+                                    r
+                                } else {
+                                    execute_sql(&mut session, &sql)
+                                };
                                 if stream.write_all(&encode_query_result(&reply)).await.is_err() {
                                     return;
                                 }
@@ -159,20 +205,25 @@ fn read_string(buf: &mut BytesMut) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+enum HelloParse {
+    Incomplete,
+    Complete { database: Option<String> },
+}
+
 /// Client Hello starts with packet type 0 and a length-prefixed name.
-fn consume_client_hello(buf: &mut BytesMut) -> bool {
+fn consume_client_hello(buf: &mut BytesMut) -> HelloParse {
     let snapshot = buf.clone();
     let Some(packet) = read_var_uint(buf) else {
         *buf = snapshot;
-        return false;
+        return HelloParse::Incomplete;
     };
     if packet != 0 {
         *buf = snapshot;
-        return false;
+        return HelloParse::Incomplete;
     }
     let Some(_name) = read_string(buf) else {
         *buf = snapshot;
-        return false;
+        return HelloParse::Incomplete;
     };
     // Best-effort: consume up to 4 following version varints if fully present.
     for _ in 0..4 {
@@ -182,7 +233,17 @@ fn consume_client_hello(buf: &mut BytesMut) -> bool {
             break;
         }
     }
-    true
+    let snap = buf.clone();
+    match read_string(buf) {
+        Some(db) if !db.is_empty() => HelloParse::Complete {
+            database: Some(db),
+        },
+        Some(_) => HelloParse::Complete { database: None },
+        None => {
+            *buf = snap;
+            HelloParse::Complete { database: None }
+        }
+    }
 }
 
 fn encode_server_hello() -> Vec<u8> {
@@ -252,6 +313,51 @@ fn encode_query_result(reply: &ClickHouseReply) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn hello_succeeds_when_default_not_in_registry() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        let handler = ClickHouseNativeHandler::with_demo(Arc::clone(&cat)).with_tenancy(tenancy);
+        let (mut client, server) = tokio::io::duplex(8192);
+        let cancel = CancellationToken::new();
+        let c2 = cancel.clone();
+        tokio::spawn(async move { handler.serve(server, c2).await });
+
+        let mut hello = Vec::new();
+        write_var_uint(&mut hello, 0);
+        write_string(&mut hello, "click");
+        client.write_all(&hello).await.unwrap();
+
+        let mut resp = vec![0u8; 256];
+        let n = tokio::time::timeout(std::time::Duration::from_millis(500), client.read(&mut resp))
+            .await
+            .expect("hello timeout")
+            .unwrap();
+        assert!(n > 0);
+        assert_eq!(resp[0], 0);
+
+        for sql in ["USE acme", "CREATE TABLE t (id String)"] {
+            let mut q = Vec::new();
+            write_var_uint(&mut q, 1);
+            write_string(&mut q, sql);
+            client.write_all(&q).await.unwrap();
+            let n = tokio::time::timeout(std::time::Duration::from_millis(500), client.read(&mut resp))
+                .await
+                .expect("query timeout")
+                .unwrap();
+            assert!(n > 0, "empty reply for {sql}");
+        }
+        cancel.cancel();
+    }
 
     #[tokio::test]
     async fn hello_query_crud_smoke() {

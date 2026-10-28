@@ -1,6 +1,6 @@
 //! Axum-oriented metrics HTTP responses (admin-http / optional metrics handler).
 
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use crate::encode::{encode_prometheus, prometheus_content_type};

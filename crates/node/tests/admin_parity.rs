@@ -1,11 +1,11 @@
 //! Admin TCP / admin-http parity (FR-020) — T078.
 
-use spacestorage_admin_proto::{decode_frame, encode_frame, AdminOp};
+use spacestorage_admin_proto::{AdminOp, decode_frame, encode_frame};
 use spacestorage_config::model::{
     ClusterDecl, EntrypointDecl, NodeConfig, QueryDefaults, Transport,
 };
 use spacestorage_node::lifecycle::NodeState;
-use spacestorage_node::{runtime, Node};
+use spacestorage_node::{Node, runtime};
 use std::collections::BTreeMap;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -193,15 +193,16 @@ async fn status_config_threads_buffers_match_across_transports() {
     // /metrics first-binary exposition (016 G1 / T034)
     let mut stream = TcpStream::connect(("127.0.0.1", http_port)).await.unwrap();
     stream
-        .write_all(
-            b"GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-        )
+        .write_all(b"GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.unwrap();
     let text = String::from_utf8_lossy(&buf);
-    assert!(text.contains("HTTP/1.1 200"), "metrics must be scrapeable: {text}");
+    assert!(
+        text.contains("HTTP/1.1 200"),
+        "metrics must be scrapeable: {text}"
+    );
     assert!(
         text.contains("spacestorage_process_uptime_seconds"),
         "metrics body: {text}"

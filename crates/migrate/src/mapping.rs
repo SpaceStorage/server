@@ -2,9 +2,7 @@
 
 use crate::error::MigrateError;
 use serde::{Deserialize, Serialize};
-use spacestorage_query::{
-    CancelToken, LogicalRequest, PlannerEngine, QueryOptions, SharedCatalog,
-};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, SharedCatalog};
 use spacestorage_types::{ContainerCatalog, L3Model, StorageModeChoice};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -203,9 +201,12 @@ pub fn execute_mapping_query(
     q: &MappingQuery,
     source_rows: &HashMap<Vec<u8>, Vec<u8>>,
 ) -> Result<HashMap<Vec<u8>, Vec<u8>>, MigrateError> {
-    let src = q.sources.first().ok_or_else(|| MigrateError::MappingSourceMissing {
-        name: "sources".into(),
-    })?;
+    let src = q
+        .sources
+        .first()
+        .ok_or_else(|| MigrateError::MappingSourceMissing {
+            name: "sources".into(),
+        })?;
     let dst = q
         .destinations
         .first()
@@ -218,7 +219,9 @@ pub fn execute_mapping_query(
 
     let catalog: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
     {
-        let mut cat = catalog.write().map_err(|e| MigrateError::Io(e.to_string()))?;
+        let mut cat = catalog
+            .write()
+            .map_err(|e| MigrateError::Io(e.to_string()))?;
         let sid = cat
             .create(
                 &src.namespace,
@@ -273,8 +276,16 @@ pub fn execute_mapping_query(
     let to_cols = &dst.columns;
     let mut inserts = Vec::new();
     for row in &scanned.rows {
-        let key = row.first().and_then(|c| c.as_ref()).cloned().unwrap_or_default();
-        let value = row.get(1).and_then(|c| c.as_ref()).cloned().unwrap_or_default();
+        let key = row
+            .first()
+            .and_then(|c| c.as_ref())
+            .cloned()
+            .unwrap_or_default();
+        let value = row
+            .get(1)
+            .and_then(|c| c.as_ref())
+            .cloned()
+            .unwrap_or_default();
         let projected = project_row_bytes(from_cols, to_cols, value.as_bytes());
         inserts.push(LogicalRequest::Object {
             container: dst.container.clone(),
@@ -295,7 +306,9 @@ pub fn execute_mapping_query(
             .map_err(|e| MigrateError::Io(e.to_string()))?;
     }
 
-    let cat = catalog.read().map_err(|e| MigrateError::Io(e.to_string()))?;
+    let cat = catalog
+        .read()
+        .map_err(|e| MigrateError::Io(e.to_string()))?;
     let dest_id = cat
         .describe(&dst.namespace, &dst.container)
         .map_err(|_| MigrateError::NotFound)?

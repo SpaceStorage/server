@@ -1,3 +1,4 @@
+mod admin_client;
 mod args;
 mod exit;
 mod http_client;
@@ -313,6 +314,66 @@ fn main() -> ExitCode {
             println!("POST {endpoint}/v1/admin op=raft_status group={group}");
             ExitCode::from(exit::OK)
         }
+        args::Command::Namespaces { endpoint, output } => admin_client::run_admin_op(
+            &endpoint,
+            spacestorage_admin_proto::AdminOp::NamespaceList,
+            Some(&output),
+        ),
+        args::Command::Namespace { action, endpoint } => {
+            let (op, output) = match action {
+                args::NamespaceAction::Create { name } => (
+                    spacestorage_admin_proto::AdminOp::NamespaceCreate { name },
+                    None,
+                ),
+                args::NamespaceAction::Rename { name, new_name } => (
+                    spacestorage_admin_proto::AdminOp::NamespaceRename { name, new_name },
+                    None,
+                ),
+                args::NamespaceAction::Delete { name, cascade } => (
+                    spacestorage_admin_proto::AdminOp::NamespaceDelete { name, cascade },
+                    None,
+                ),
+                args::NamespaceAction::Describe { name, output } => (
+                    spacestorage_admin_proto::AdminOp::NamespaceDescribe { name },
+                    Some(output),
+                ),
+            };
+            admin_client::run_admin_op(&endpoint, op, output.as_deref())
+        }
+        args::Command::Quotas { action, endpoint } => {
+            let args::QuotasAction::Set {
+                name,
+                bytes,
+                objects,
+                connections,
+                ops_per_sec,
+            } = action;
+            let mut quotas = Vec::new();
+            for (unit, limit) in [
+                ("bytes", bytes),
+                ("objects", objects),
+                ("connections", connections),
+                ("ops_per_sec", ops_per_sec),
+            ] {
+                if let Some(limit) = limit {
+                    quotas.push(spacestorage_admin_proto::QuotaInput {
+                        unit: unit.into(),
+                        limit,
+                        datatype: None,
+                    });
+                }
+            }
+            admin_client::run_admin_op(
+                &endpoint,
+                spacestorage_admin_proto::AdminOp::QuotaReplace { name, quotas },
+                None,
+            )
+        }
+        args::Command::Roles { endpoint } => admin_client::run_admin_op(
+            &endpoint,
+            spacestorage_admin_proto::AdminOp::RoleList,
+            None,
+        ),
     }
 }
 

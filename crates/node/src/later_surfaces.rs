@@ -5,7 +5,7 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use spacestorage_observability::{estimate_charge, BillingRates, ChargeEstimate, UsageSnapshot};
+use spacestorage_observability::{BillingRates, ChargeEstimate, UsageSnapshot, estimate_charge};
 use spacestorage_storage::{EraseRecord, EraseRequest, LegalHold, LegalHoldStore};
 use spacestorage_types::{
     CdcCatalog, CdcEvent, CompositionCatalog, CompositionKind, CompositionMember, L0Catalog,
@@ -60,31 +60,24 @@ impl LaterSurfaces {
     }
 
     pub fn release_hold(&self, id: Uuid) -> Result<(), String> {
-        self.legal.lock().release_hold(id).map_err(|e| e.to_string())
+        self.legal
+            .lock()
+            .release_hold(id)
+            .map_err(|e| e.to_string())
     }
 
     pub fn erase(&self, req: EraseRequest) -> Result<EraseRecord, String> {
         self.legal.lock().erase(req).map_err(|e| e.to_string())
     }
 
-    pub fn create_cdc(
-        &self,
-        namespace: &str,
-        name: &str,
-        source: &str,
-    ) -> Result<Uuid, String> {
+    pub fn create_cdc(&self, namespace: &str, name: &str, source: &str) -> Result<Uuid, String> {
         self.cdc
             .lock()
             .create(namespace, name, source)
             .map_err(|e| e.to_string())
     }
 
-    pub fn publish_cdc(
-        &self,
-        namespace: &str,
-        name: &str,
-        event: CdcEvent,
-    ) -> Result<u64, String> {
+    pub fn publish_cdc(&self, namespace: &str, name: &str, event: CdcEvent) -> Result<u64, String> {
         Ok(self
             .cdc
             .lock()

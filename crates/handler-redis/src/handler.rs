@@ -19,6 +19,7 @@ pub struct RedisHandler {
     pub namespace: String,
     pub default_container: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 }
 
 impl RedisHandler {
@@ -26,7 +27,10 @@ impl RedisHandler {
         Self::with_limits(catalog, LimitServices::built_in())
     }
 
-    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
+    pub fn with_limits(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+    ) -> Self {
         Self {
             catalog,
             expected_user: "demo".into(),
@@ -34,7 +38,13 @@ impl RedisHandler {
             namespace: "demo".into(),
             default_container: "redis".into(),
             limit_services,
+            tenancy: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
     }
 
     pub async fn serve<S>(&self, mut stream: S, cancel: CancellationToken)
@@ -67,6 +77,9 @@ impl RedisHandler {
             expected_user: self.expected_user.clone(),
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            connection_quota: None,
+            principal: None,
         };
 
         let mut buf = BytesMut::from(peeked.as_slice());

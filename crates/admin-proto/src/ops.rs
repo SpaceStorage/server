@@ -19,6 +19,24 @@ pub enum AdminOp {
     },
     /// 006: leadership leases in a namespace.
     Leases { namespace: Uuid },
+    NamespaceList,
+    NamespaceCreate { name: String },
+    NamespaceRename { name: String, new_name: String },
+    NamespaceDelete {
+        name: String,
+        #[serde(default)]
+        cascade: bool,
+    },
+    NamespaceDescribe { name: String },
+    QuotaReplace {
+        name: String,
+        quotas: Vec<QuotaInput>,
+    },
+    RoleList,
+    RoleBindingList {
+        #[serde(default)]
+        namespace: Option<String>,
+    },
     /// Slice-7 voter migrate (else Slice7Required).
     VoterReplace {
         group: String,
@@ -33,4 +51,12 @@ pub enum AdminOp {
         group: String,
         remove: Vec<Uuid>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaInput {
+    pub unit: String,
+    pub limit: u64,
+    #[serde(default)]
+    pub datatype: Option<String>,
 }

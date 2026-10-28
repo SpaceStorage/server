@@ -3,7 +3,7 @@
 use crate::handler::ClientStream;
 use async_trait::async_trait;
 use spacestorage_internode::{
-    decode_frame, encode_frame, registry, FabricRuntime, CURRENT_VERSION,
+    CURRENT_VERSION, FabricRuntime, decode_frame, encode_frame, registry,
 };
 use spacestorage_membership::{JoinRequest, MembershipService};
 use spacestorage_replication::DurableAccept;
@@ -17,6 +17,7 @@ use super::Handler;
 pub struct InternodeHandler {
     pub fabric: Arc<FabricRuntime>,
     pub membership: Arc<tokio::sync::RwLock<Option<Arc<MembershipService>>>>,
+    pub tenancy: Arc<spacestorage_tenancy::Tenancy>,
 }
 
 pub struct ReplicationHandler {
@@ -45,6 +46,7 @@ impl Handler for InternodeHandler {
             &self.fabric,
             Some(Arc::clone(&self.membership)),
             None,
+            Some(Arc::clone(&self.tenancy)),
         )
         .await;
     }
@@ -71,6 +73,7 @@ impl Handler for ReplicationHandler {
             &self.fabric,
             None,
             Some(Arc::clone(&self.durable)),
+            None,
         )
         .await;
     }
@@ -82,6 +85,7 @@ async fn serve_framed(
     fabric: &FabricRuntime,
     membership: Option<Arc<tokio::sync::RwLock<Option<Arc<MembershipService>>>>>,
     durable: Option<Arc<DurableAccept>>,
+    tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 ) {
     // First frame MUST be auth: msg_type 0 with secret bytes as payload.
     let mut buf = Vec::with_capacity(4096);
@@ -122,6 +126,7 @@ async fn serve_framed(
                                 handle_control(
                                     fabric,
                                     membership.as_ref(),
+                                    tenancy.as_deref(),
                                     &mut stream,
                                     frame.msg_type,
                                     &frame.payload,
@@ -146,10 +151,23 @@ async fn serve_framed(
 async fn handle_control(
     fabric: &FabricRuntime,
     membership: Option<&Arc<tokio::sync::RwLock<Option<Arc<MembershipService>>>>>,
+    tenancy: Option<&spacestorage_tenancy::Tenancy>,
     stream: &mut ClientStream,
     msg_type: u16,
     payload: &[u8],
 ) {
+    if msg_type == registry::MSG_QUOTA_DELTA {
+        if let Some(tenancy) = tenancy {
+            if let Ok(delta) = serde_json::from_slice::<spacestorage_internode::QuotaDelta>(payload)
+            {
+                let _ = tenancy.usage.apply_delta(&delta);
+            }
+        }
+        let _ = stream
+            .write_all(&encode_frame(registry::MSG_ACK, br#"{"ok":true}"#))
+            .await;
+        return;
+    }
     if msg_type == registry::MSG_HEARTBEAT {
         if let Ok(peer) = std::str::from_utf8(payload) {
             fabric.fd.note_heartbeat(peer.trim());
@@ -164,10 +182,8 @@ async fn handle_control(
             Ok(bytes) => bytes,
             Err(e) => {
                 debug!(error = %e, "join request failed");
-                serde_json::to_vec(&spacestorage_membership::JoinAck::Refused {
-                    code: e,
-                })
-                .unwrap_or_else(|_| br#"{"status":"refused","code":"internal"}"#.to_vec())
+                serde_json::to_vec(&spacestorage_membership::JoinAck::Refused { code: e })
+                    .unwrap_or_else(|_| br#"{"status":"refused","code":"internal"}"#.to_vec())
             }
         };
         let _ = stream
@@ -186,7 +202,10 @@ async fn handle_control(
                 }
                 Err(e) => {
                     debug!(error = %e, "raft peer rpc failed");
-                    let err = format!(r#"{{"ok":false,"error":{}}}"#, serde_json::to_string(&e).unwrap_or_else(|_| "\"error\"".into()));
+                    let err = format!(
+                        r#"{{"ok":false,"error":{}}}"#,
+                        serde_json::to_string(&e).unwrap_or_else(|_| "\"error\"".into())
+                    );
                     let _ = stream
                         .write_all(&encode_frame(registry::MSG_ACK, err.as_bytes()))
                         .await;

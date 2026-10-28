@@ -28,8 +28,7 @@ impl UserStore {
         secret: impl Into<String>,
         ns: impl Into<String>,
     ) -> Self {
-        self.users
-            .insert(login.into(), (secret.into(), ns.into()));
+        self.users.insert(login.into(), (secret.into(), ns.into()));
         self
     }
 
@@ -39,6 +38,51 @@ impl UserStore {
 
     pub fn get(&self, login: &str) -> Option<&(String, String)> {
         self.users.get(login)
+    }
+
+    pub fn namespace_of(&self, login: &str) -> Option<&str> {
+        self.users.get(login).map(|(_, ns)| ns.as_str())
+    }
+}
+
+/// After SCRAM succeeds. `28000` is `replication` on a tenant protocol; `42501` is an unbound non-admin.
+pub fn refuse_tenant_login(
+    login: &str,
+    bound_namespace: Option<&str>,
+) -> Result<(), (String, String)> {
+    match spacestorage_tenancy::admit_tenant_login(login, bound_namespace) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let code = if matches!(
+                err,
+                spacestorage_tenancy::TenancyError::ReplicationNotTenant
+            ) {
+                "28000"
+            } else {
+                "42501"
+            };
+            Err((code.to_string(), err.to_string()))
+        }
+    }
+}
+
+/// A namespace-bound principal may open only that PostgreSQL database.
+/// Cluster `admin` is the only first-binary cross-namespace exception.
+pub fn refuse_database_open(
+    login: &str,
+    bound_namespace: Option<&str>,
+    requested_database: &str,
+) -> Result<(), (String, String)> {
+    refuse_tenant_login(login, bound_namespace)?;
+    if login == "admin" || bound_namespace == Some(requested_database) {
+        Ok(())
+    } else {
+        Err((
+            "42501".into(),
+            format!(
+                "AccessDenied{{verb=bind, datatype=database, namespace={requested_database}}}"
+            ),
+        ))
     }
 }
 
@@ -52,7 +96,10 @@ pub struct ScramExchange {
     pub auth_message_prefix: String,
 }
 
-pub fn begin_scram(store: &UserStore, client_first: &str) -> Result<(ScramExchange, String), String> {
+pub fn begin_scram(
+    store: &UserStore,
+    client_first: &str,
+) -> Result<(ScramExchange, String), String> {
     // client-first-message: n,,n=<user>,r=<nonce>
     let bare = client_first
         .strip_prefix("n,,")
@@ -79,11 +126,7 @@ pub fn begin_scram(store: &UserStore, client_first: &str) -> Result<(ScramExchan
     rand::thread_rng().fill_bytes(&mut salt);
     let mut server_suffix = [0u8; 18];
     rand::thread_rng().fill_bytes(&mut server_suffix);
-    let server_nonce = format!(
-        "{}{}",
-        client_nonce,
-        base64_encode(&server_suffix)
-    );
+    let server_nonce = format!("{}{}", client_nonce, base64_encode(&server_suffix));
 
     let mut salted = [0u8; 32];
     pbkdf2_hmac::<Sha256>(secret.as_bytes(), &salt, ITERATIONS, &mut salted);
@@ -123,7 +166,10 @@ pub fn finish_scram(exch: &ScramExchange, client_final: &str) -> Result<String, 
         return Err("nonce mismatch".into());
     }
     let client_final_without_proof = format!("c={channel},r={nonce}");
-    let auth_message = format!("{},{}", exch.auth_message_prefix, client_final_without_proof);
+    let auth_message = format!(
+        "{},{}",
+        exch.auth_message_prefix, client_final_without_proof
+    );
 
     let client_key = hmac_sha256(&exch.salted_password, b"Client Key");
     let stored_key = Sha256::digest(&client_key);
@@ -223,3 +269,40 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, ()> {
 
 /// Shared handle for auth.
 pub type SharedUsers = Arc<UserStore>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replication_login_is_not_a_tenant() {
+        let (code, msg) = refuse_tenant_login("replication", Some("demo")).unwrap_err();
+        assert_eq!(code, "28000");
+        assert!(msg.contains("ReplicationNotTenant"), "{msg}");
+    }
+
+    #[test]
+    fn bound_demo_and_admin_are_admitted() {
+        assert!(refuse_tenant_login("demo", Some("demo")).is_ok());
+        assert!(refuse_tenant_login("admin", None).is_ok());
+    }
+
+    #[test]
+    fn unbound_login_is_permission_denied() {
+        let (code, msg) = refuse_tenant_login("reader", None).unwrap_err();
+        assert_eq!(code, "42501");
+        assert!(msg.contains("AccessDenied"), "{msg}");
+    }
+
+    #[test]
+    fn bound_principal_cannot_open_sibling_but_admin_can() {
+        assert!(refuse_database_open("demo", Some("acme"), "acme").is_ok());
+        assert_eq!(
+            refuse_database_open("demo", Some("acme"), "other")
+                .unwrap_err()
+                .0,
+            "42501"
+        );
+        assert!(refuse_database_open("admin", None, "other").is_ok());
+    }
+}

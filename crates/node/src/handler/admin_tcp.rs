@@ -1,10 +1,10 @@
-use crate::admin::auth::check_bearer;
-use crate::admin::AdminService;
-use crate::handler::ClientStream;
 use crate::Node;
+use crate::admin::AdminService;
+use crate::admin::auth::check_bearer;
+use crate::handler::ClientStream;
 use async_trait::async_trait;
 use bytes::BytesMut;
-use spacestorage_admin_proto::{decode_frame, encode_frame, AdminOp, ErrorBody};
+use spacestorage_admin_proto::{AdminOp, ErrorBody, decode_frame, encode_frame};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -59,9 +59,7 @@ impl Handler for AdminTcpHandler {
             .unwrap_or("");
         let cfg = self.node.config.load();
         let expected = match cfg.admin_token_file.as_ref() {
-            Some(p) => tokio::fs::read_to_string(p)
-                .await
-                .unwrap_or_default(),
+            Some(p) => tokio::fs::read_to_string(p).await.unwrap_or_default(),
             None => String::new(),
         };
         if !check_bearer(token, expected.trim()) {

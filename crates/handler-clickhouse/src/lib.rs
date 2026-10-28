@@ -3,6 +3,7 @@
 mod cityhash102;
 mod dispatch;
 mod http;
+mod namespace_admin;
 mod native;
 mod sql;
 

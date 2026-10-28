@@ -817,6 +817,7 @@ mod tests {
             keys: KeysDecl {
                 master_key_file: Some(master_path.into()),
                 create_master_if_absent: create_if_absent,
+                external_kms: None,
             },
             query_defaults: QueryDefaults::default(),
             labels: BTreeMap::new(),
@@ -829,6 +830,7 @@ mod tests {
             log_syslog: None,
             jobs: crate::model::JobsDecl::default(),
             kafka_ingests: Vec::new(),
+            namespaces: Vec::new(),
         }
     }
 

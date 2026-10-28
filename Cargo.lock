@@ -2051,10 +2051,13 @@ dependencies = [
 name = "spacestorage-conformance"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "hex",
  "openraft",
  "parking_lot",
  "serde_json",
+ "sha2",
+ "spacestorage-admin-proto",
  "spacestorage-admin-ui",
  "spacestorage-authz",
  "spacestorage-backup",
@@ -2081,9 +2084,11 @@ dependencies = [
  "spacestorage-query",
  "spacestorage-release-profile",
  "spacestorage-storage",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "tempfile",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 
@@ -2104,6 +2109,7 @@ dependencies = [
  "spacestorage-observability",
  "spacestorage-placement",
  "spacestorage-storage",
+ "spacestorage-tenancy",
  "tempfile",
  "thiserror",
  "tokio",
@@ -2137,10 +2143,13 @@ dependencies = [
 name = "spacestorage-handler-cassandra"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
+ "spacestorage-authz",
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -2153,9 +2162,11 @@ name = "spacestorage-handler-clickhouse"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "spacestorage-authz",
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -2173,6 +2184,7 @@ dependencies = [
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -2184,6 +2196,7 @@ dependencies = [
 name = "spacestorage-handler-postgresql"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "hmac",
  "pbkdf2",
@@ -2193,6 +2206,7 @@ dependencies = [
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -2209,6 +2223,7 @@ dependencies = [
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -2227,6 +2242,7 @@ dependencies = [
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "subtle",
  "thiserror",
@@ -2244,6 +2260,7 @@ dependencies = [
  "spacestorage-compat",
  "spacestorage-protocol-core",
  "spacestorage-query",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "thiserror",
  "tokio",
@@ -2287,6 +2304,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2377,6 +2395,7 @@ dependencies = [
  "spacestorage-release-profile",
  "spacestorage-replication",
  "spacestorage-storage",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "subtle",
  "tempfile",
@@ -2443,8 +2462,10 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "spacestorage-authz",
  "spacestorage-compat",
  "spacestorage-placement",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "tempfile",
  "thiserror",
@@ -2510,6 +2531,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spacestorage-authz",
+ "spacestorage-internode",
  "tempfile",
  "thiserror",
  "tokio",
@@ -2522,6 +2544,8 @@ name = "spacestorage-types"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "spacestorage-compat",
  "thiserror",
  "tokio",
  "tracing",

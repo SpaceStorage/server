@@ -50,6 +50,7 @@ pub fn l0_descriptor(name: &str) -> Option<TypeDescriptor> {
             multi_active: false,
             schema_required: matches!(name, "kd_tree" | "hnsw" | "scann"),
             snapshot_capable: false,
+            introduced_in: crate::descriptor::ProductVersion::FIRST_BINARY,
         })
     } else if is_l0_not_creatable(name) {
         Some(TypeDescriptor {
@@ -64,6 +65,7 @@ pub fn l0_descriptor(name: &str) -> Option<TypeDescriptor> {
             multi_active: false,
             schema_required: false,
             snapshot_capable: false,
+            introduced_in: crate::descriptor::ProductVersion::FIRST_BINARY,
         })
     } else {
         None

@@ -4,25 +4,17 @@ use crate::error::{Result, TenancyError};
 
 pub fn validate_namespace_name(name: &str) -> Result<()> {
     if name.is_empty() || name.len() > 63 {
-        return Err(TenancyError::NamespaceNameInvalid {
-            name: name.into(),
-        });
+        return Err(TenancyError::NamespaceNameInvalid { name: name.into() });
     }
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
-        return Err(TenancyError::NamespaceNameInvalid {
-            name: name.into(),
-        });
+        return Err(TenancyError::NamespaceNameInvalid { name: name.into() });
     };
     if !first.is_ascii_alphabetic() {
-        return Err(TenancyError::NamespaceNameInvalid {
-            name: name.into(),
-        });
+        return Err(TenancyError::NamespaceNameInvalid { name: name.into() });
     }
     if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(TenancyError::NamespaceNameInvalid {
-            name: name.into(),
-        });
+        return Err(TenancyError::NamespaceNameInvalid { name: name.into() });
     }
     Ok(())
 }

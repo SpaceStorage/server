@@ -125,7 +125,8 @@ mod tests {
             log_kafka: None,
             log_syslog: None,
             jobs: crate::model::JobsDecl::default(),
-        kafka_ingests: Vec::new(),
+            kafka_ingests: Vec::new(),
+            namespaces: Vec::new(),
         }
     }
 

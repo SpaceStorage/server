@@ -9,13 +9,14 @@ pub mod kafka_runtime;
 pub mod later_surfaces;
 pub mod lifecycle;
 pub mod logging;
+pub mod namespace_catalog;
 pub mod reload;
 pub mod runtime;
 pub mod stats;
 
 use crate::buffer::BufferRegistry;
 use crate::effective::EffectiveStore;
-use crate::handler::{admin_http, admin_tcp, echo, fabric, postgresql, redis, HandlerRegistry};
+use crate::handler::{HandlerRegistry, admin_http, admin_tcp, echo, fabric, postgresql, redis};
 use crate::later_surfaces::LaterSurfaces;
 use crate::lifecycle::{NodeState, NodeStateMachine};
 use crate::stats::Stats;
@@ -51,7 +52,10 @@ pub struct Node {
     /// Cluster membership (011); `None` when no cluster bootstrap/join/name configured.
     pub membership: Arc<tokio::sync::RwLock<Option<Arc<MembershipService>>>>,
     /// Raft control plane (006); `None` until membership starts with internodes.
-    pub controlplane: Arc<tokio::sync::RwLock<Option<Arc<spacestorage_controlplane::ControlPlane>>>>,
+    pub controlplane:
+        Arc<tokio::sync::RwLock<Option<Arc<spacestorage_controlplane::ControlPlane>>>>,
+    /// Coordinator-local quota usage and cluster-applied namespace cache (`007`).
+    pub tenancy: Arc<spacestorage_tenancy::Tenancy>,
     /// Local `004` replica describe when RaftClusterStore is not selected yet (T098/T099).
     /// When controlplane is live, prefer `cluster_snapshot().replica_describe`.
     pub placement_describe: Arc<RwLock<spacestorage_placement::DescribeSnapshot>>,
@@ -128,12 +132,9 @@ impl Node {
                     .join("data")
                     .join("replication")
             });
-        let fabric_cfg = spacestorage_internode::FabricConfig::require_always_on(
-            true,
-            true,
-            domain,
-        )
-        .expect("internode+replication required");
+        let fabric_cfg =
+            spacestorage_internode::FabricConfig::require_always_on(true, true, domain)
+                .expect("internode+replication required");
         // Empty until membership bootstrap/restore injects the join secret (T073).
         let fabric_rt = Arc::new(spacestorage_internode::FabricRuntime::new(
             fabric_cfg,
@@ -208,6 +209,7 @@ impl Node {
             key_authority: tokio::sync::RwLock::new(None),
             membership: Arc::new(tokio::sync::RwLock::new(None)),
             controlplane: Arc::new(tokio::sync::RwLock::new(None)),
+            tenancy: Arc::new(spacestorage_tenancy::Tenancy::new()),
             placement_describe: Arc::new(RwLock::new(
                 spacestorage_placement::DescribeSnapshot::default(),
             )),
@@ -244,6 +246,7 @@ impl Node {
             reg.register(Arc::new(fabric::InternodeHandler {
                 fabric: Arc::clone(&fabric_rt),
                 membership: Arc::clone(&node.membership),
+                tenancy: Arc::clone(&node.tenancy),
             }))
             .unwrap();
             reg.register(Arc::new(fabric::ReplicationHandler {
@@ -263,7 +266,7 @@ impl Node {
             };
             // 002 first-binary: real async protocol handlers (replace byte-sink stubs).
             reg.register(Arc::new(
-                postgresql::PostgresqlPortHandler::with_release_limits(
+                postgresql::PostgresqlPortHandler::with_namespace_control(
                     Arc::clone(&node.catalog),
                     if cfg!(feature = "complete-product") {
                         "complete-product"
@@ -273,53 +276,65 @@ impl Node {
                         "first-binary"
                     },
                     limit_services.clone(),
+                    Arc::clone(&node.controlplane),
+                    Arc::clone(&node.tenancy),
                 ),
             ))
             .unwrap();
-            reg.register(Arc::new(redis::RedisPortHandler::with_limits(
+            reg.register(Arc::new(redis::RedisPortHandler::with_tenancy(
                 Arc::clone(&node.catalog),
                 limit_services.clone(),
+                Arc::clone(&node.tenancy),
             )))
             .unwrap();
             #[cfg(feature = "handlers-complete")]
             {
                 reg.register(Arc::new(
-                    crate::handler::cassandra::CassandraPortHandler::with_limits(
+                    crate::handler::cassandra::CassandraPortHandler::with_namespace_control(
                         Arc::clone(&node.catalog),
                         limit_services.clone(),
+                        Arc::clone(&node.controlplane),
+                        Arc::clone(&node.tenancy),
                     ),
                 ))
                 .unwrap();
                 reg.register(Arc::new(
-                    crate::handler::elasticsearch::ElasticsearchPortHandler::with_limits(
+                    crate::handler::elasticsearch::ElasticsearchPortHandler::with_tenancy(
                         Arc::clone(&node.catalog),
                         limit_services.clone(),
+                        Arc::clone(&node.tenancy),
                     ),
                 ))
                 .unwrap();
                 reg.register(Arc::new(
-                    crate::handler::clickhouse::ClickHousePortHandler::with_limits(
+                    crate::handler::clickhouse::ClickHousePortHandler::with_namespace_control(
                         Arc::clone(&node.catalog),
                         limit_services.clone(),
+                        Arc::clone(&node.controlplane),
+                        Arc::clone(&node.tenancy),
                     ),
                 ))
                 .unwrap();
                 reg.register(Arc::new(
-                    crate::handler::clickhouse::ClickHouseHttpPortHandler::with_limits(
+                    crate::handler::clickhouse::ClickHouseHttpPortHandler::with_namespace_control(
                         Arc::clone(&node.catalog),
                         limit_services.clone(),
+                        Arc::clone(&node.controlplane),
+                        Arc::clone(&node.tenancy),
                     ),
                 ))
                 .unwrap();
-                reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_limits(
+                reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_tenancy(
                     Arc::clone(&node.catalog),
                     limit_services.clone(),
+                    Arc::clone(&node.tenancy),
                 )))
                 .unwrap();
                 reg.register(Arc::new(
-                    crate::handler::webdav::WebDavPortHandler::with_limits(
+                    crate::handler::webdav::WebDavPortHandler::with_tenancy(
                         Arc::clone(&node.catalog),
                         limit_services.clone(),
+                        Arc::clone(&node.tenancy),
                     ),
                 ))
                 .unwrap();
@@ -363,7 +378,7 @@ impl Node {
         }
 
         // 006 T061/T070: open RaftClusterStore + restore plan before ready / 013 content.
-        if let Err(e) = lifecycle::start_controlplane(&self).await {
+        if let Err(e) = lifecycle::start_controlplane(Arc::clone(&self)).await {
             tracing::error!(error = %e, "controlplane start failed");
             self.state.set(lifecycle::NodeState::Failed);
             return Err(e);
@@ -482,11 +497,8 @@ impl Node {
             self.stats.mark_drain_timed_out();
             lifecycle::force_abort(&self);
             // Brief grace for handlers to notice force_cancel.
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                self.tasks.wait(),
-            )
-            .await;
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(1), self.tasks.wait()).await;
         }
         // Drain period over — stop all accept loops (including admin) so the process can exit.
         self.cancel.cancel();

@@ -1,5 +1,7 @@
 //! Type level / kind / descriptor (003 foundational subset).
 
+pub use spacestorage_compat::ProductVersion;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     L0,
@@ -41,6 +43,8 @@ pub struct TypeDescriptor {
     /// FR-006 / 015: SNAPSHOT isolation allowed when true.
     /// Relational Table + Document Store default true; K/V Store and new types false.
     pub snapshot_capable: bool,
+    /// Product major that introduced this type (015 R13). Default 1 for first-binary types.
+    pub introduced_in: ProductVersion,
 }
 
 impl TypeDescriptor {
@@ -54,6 +58,7 @@ impl TypeDescriptor {
             multi_active: false,
             schema_required,
             snapshot_capable,
+            introduced_in: ProductVersion::FIRST_BINARY,
         }
     }
 }

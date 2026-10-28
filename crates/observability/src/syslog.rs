@@ -1,7 +1,7 @@
 //! RFC 5424 syslog UDP/TCP (octet-counted on TCP) for outbound logs.
 
-use crate::logs::{LogChannel, LogEvent};
 use crate::ObservabilityError;
+use crate::logs::{LogChannel, LogEvent};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
@@ -45,8 +45,8 @@ impl SyslogExporter {
         // facility local0 = 16; severity from channel
         let sev = match event.channel {
             LogChannel::Default if event.severity == "err" => 3, // err
-            LogChannel::Default => 6,                          // info
-            LogChannel::SlowQuery | LogChannel::Audit => 5,    // notice
+            LogChannel::Default => 6,                            // info
+            LogChannel::SlowQuery | LogChannel::Audit => 5,      // notice
         };
         let pri = 16 * 8 + sev;
         let ns = event.namespace.as_deref().unwrap_or("-");

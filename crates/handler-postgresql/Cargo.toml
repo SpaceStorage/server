@@ -13,6 +13,7 @@ query-distributed = ["spacestorage-query/query-distributed"]
 
 [dependencies]
 spacestorage-compat = { path = "../compat" }
+spacestorage-tenancy = { path = "../tenancy" }
 spacestorage-types = { path = "../types" }
 spacestorage-protocol-core = { path = "../protocol-core" }
 spacestorage-query = { path = "../query" }
@@ -27,6 +28,7 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 pbkdf2 = { workspace = true }
 rand = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }

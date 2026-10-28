@@ -557,10 +557,18 @@ impl ControlPlane {
         };
         let created_ns = match &op {
             ClusterOp::CreateNamespace { id, .. } => Some(*id),
+            ClusterOp::Tenancy {
+                tenancy_op: spacestorage_tenancy::TenancyOp::NamespaceCreate { .. },
+                assigned_id,
+            } => *assigned_id,
             _ => None,
         };
         let deleted_ns = match &op {
             ClusterOp::DeleteNamespace { id } => Some(*id),
+            ClusterOp::Tenancy {
+                tenancy_op: spacestorage_tenancy::TenancyOp::NamespaceDelete { id, .. },
+                ..
+            } => Some(*id),
             _ => None,
         };
         let maybe_vs = {
@@ -608,6 +616,71 @@ impl ControlPlane {
             self.metrics_aggs.lock().remove(&id);
         }
         Ok(index)
+    }
+
+    /// Append a typed `007` operation to the cluster group. The applied maps are
+    /// changed only after `append_cluster` has committed on a voter majority.
+    pub async fn append_tenancy(
+        &self,
+        op: spacestorage_tenancy::TenancyOp,
+    ) -> Result<u64> {
+        let assigned_id = match &op {
+            spacestorage_tenancy::TenancyOp::NamespaceCreate { name } => {
+                spacestorage_tenancy::name::validate_namespace_name(name)
+                    .map_err(|error| ControlPlaneError::Msg(error.to_string()))?;
+                if self.tenancy_namespace_by_name(name).is_some() {
+                    return Err(ControlPlaneError::Msg(format!(
+                        "NamespaceExists{{name={name}}}"
+                    )));
+                }
+                Some(Uuid::now_v7())
+            }
+            spacestorage_tenancy::TenancyOp::NamespaceRename { id, new_name } => {
+                spacestorage_tenancy::name::validate_namespace_name(new_name)
+                    .map_err(|error| ControlPlaneError::Msg(error.to_string()))?;
+                if self.tenancy_namespace_by_name(new_name).is_some() {
+                    return Err(ControlPlaneError::Msg(format!(
+                        "NamespaceExists{{name={new_name}}}"
+                    )));
+                }
+                if !self.apply.lock().cluster.tenancy_namespaces.contains_key(id) {
+                    return Err(ControlPlaneError::Msg(format!(
+                        "NamespaceNotFound{{name={id}}}"
+                    )));
+                }
+                None
+            }
+            _ => None,
+        };
+        self.append_cluster(ClusterOp::Tenancy {
+            tenancy_op: op,
+            assigned_id,
+        })
+            .await
+    }
+
+    /// Cluster-applied tenancy read; does not contact a namespace group.
+    pub fn tenancy_namespace_by_name(
+        &self,
+        name: &str,
+    ) -> Option<spacestorage_tenancy::NamespaceRecord> {
+        self.apply
+            .lock()
+            .cluster
+            .tenancy_namespaces
+            .values()
+            .find(|record| record.name == name)
+            .cloned()
+    }
+
+    pub fn tenancy_namespaces(&self) -> Vec<spacestorage_tenancy::NamespaceRecord> {
+        self.apply
+            .lock()
+            .cluster
+            .tenancy_namespaces
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Start `GroupId::Namespace` in `namespace_groups` (T062).

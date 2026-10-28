@@ -261,8 +261,9 @@ fn classify_webdav(profile: DialectProfile, v: &str) -> ClassifyOutcome {
         return ClassifyOutcome::MustNot(generic_must_not(ProtocolId::WebDav, v));
     }
     match v {
-        "PROPFIND" | "GET" | "PUT" | "DELETE" | "MKCOL" | "MOVE" | "COPY" | "HEAD"
-        | "OPTIONS" => ClassifyOutcome::Must,
+        "PROPFIND" | "GET" | "PUT" | "DELETE" | "MKCOL" | "MOVE" | "COPY" => {
+            ClassifyOutcome::Must
+        }
         "LOCK" | "UNLOCK" | "CALDAV" | "CARDDAV" => {
             ClassifyOutcome::MustNot(generic_must_not(ProtocolId::WebDav, v))
         }
@@ -406,6 +407,26 @@ mod tests {
             ),
             VerbClass::Must
         );
+    }
+
+    #[test]
+    fn webdav_head_options_must_not() {
+        let p = DialectProfile::HandlersComplete;
+        for verb in ["HEAD", "OPTIONS"] {
+            assert!(
+                matches!(
+                    classify_outcome(p, ProtocolId::WebDav, verb),
+                    ClassifyOutcome::MustNot(_)
+                ),
+                "{verb}"
+            );
+        }
+        for verb in ["GET", "PROPFIND", "PUT", "DELETE", "MKCOL", "MOVE", "COPY"] {
+            assert_eq!(
+                classify_outcome(p, ProtocolId::WebDav, verb),
+                ClassifyOutcome::Must
+            );
+        }
     }
 
     #[test]

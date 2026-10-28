@@ -4,10 +4,10 @@ use spacestorage_config::model::{
     ClusterDecl, EntrypointDecl, NodeConfig, QueryDefaults, Transport,
 };
 use spacestorage_node::lifecycle::NodeState;
-use spacestorage_node::{runtime, Node};
+use spacestorage_node::{Node, runtime};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -109,9 +109,7 @@ async fn inflight_completes_within_drain_timeout() {
     let done = Arc::new(AtomicBool::new(false));
     let done2 = done.clone();
     let echo_task = tokio::spawn(async move {
-        let mut s = TcpStream::connect(("127.0.0.1", echo_port))
-            .await
-            .unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", echo_port)).await.unwrap();
         s.write_all(b"ping").await.unwrap();
         let mut buf = [0u8; 4];
         s.read_exact(&mut buf).await.unwrap();
@@ -165,9 +163,7 @@ async fn drain_timeout_records_timed_out() {
     });
     wait_ready(&node).await;
 
-    let mut hold = TcpStream::connect(("127.0.0.1", echo_port))
-        .await
-        .unwrap();
+    let mut hold = TcpStream::connect(("127.0.0.1", echo_port)).await.unwrap();
     // Prove the accept loop handed the socket to the echo handler (avoid backlog race).
     hold.write_all(b"x").await.unwrap();
     let mut one = [0u8; 1];
@@ -289,8 +285,7 @@ async fn admin_reachable_while_draining() {
     // New tenant accepts refused.
     let refused = TcpStream::connect(("127.0.0.1", echo_port)).await;
     if let Ok(mut s) = refused {
-        let n = tokio::time::timeout(Duration::from_millis(300), s.read(&mut [0u8; 1]))
-            .await;
+        let n = tokio::time::timeout(Duration::from_millis(300), s.read(&mut [0u8; 1])).await;
         // Dropped accept: EOF / timeout / error — not a lasting echo session.
         assert!(
             matches!(n, Ok(Ok(0)) | Ok(Err(_)) | Err(_)),
@@ -332,7 +327,10 @@ async fn admin_reachable_while_draining() {
         text.contains("invalid_state") || text.contains("409"),
         "reload while draining: {text}"
     );
-    assert!(text.contains("draining"), "reload error names state: {text}");
+    assert!(
+        text.contains("draining"),
+        "reload error names state: {text}"
+    );
 
     drop(hold);
     spacestorage_node::lifecycle::force_abort(&node);

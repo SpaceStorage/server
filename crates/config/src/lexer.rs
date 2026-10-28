@@ -79,7 +79,9 @@ impl<'a> Lexer<'a> {
             }
             '"' => self.lex_string(line, col),
             _ if c.is_ascii_digit() => self.lex_dotted_or_number(line, col),
-            _ if c.is_ascii_alphabetic() || c == '_' || c == '/' => self.lex_ident_or_path(line, col),
+            _ if c.is_ascii_alphabetic() || matches!(c, '_' | '/' | '-') => {
+                self.lex_ident_or_path(line, col)
+            }
             _ => Err((line, col, format!("unexpected character {c:?}"))),
         }
     }

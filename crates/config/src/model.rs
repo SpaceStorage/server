@@ -34,6 +34,9 @@ pub struct NodeConfig {
     pub jobs: JobsDecl,
     /// Bootstrap Kafka ingest declarations (`ingest kafka NAME { }`) — 009.
     pub kafka_ingests: Vec<KafkaIngestDecl>,
+    /// Bootstrap namespace declarations (`007`); quota blocks are slice-7 gated.
+    #[serde(default)]
+    pub namespaces: Vec<NamespaceDecl>,
 }
 
 impl NodeConfig {
@@ -126,6 +129,15 @@ pub struct ClusterDecl {
     pub raft: RaftDecl,
     /// Slice-7: exclude controller voters as tenant replica targets (default off).
     pub controller_exclusive_data: bool,
+    /// Create-if-absent by name after the cluster group is ready.
+    pub starter_namespace: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NamespaceDecl {
+    pub name: String,
+    /// Presence is retained even in the first-binary profile so validation can reject it.
+    pub quota_declared: bool,
 }
 
 /// Query admission knobs (`query { }`) — policy defaults from compat; owned by 005.

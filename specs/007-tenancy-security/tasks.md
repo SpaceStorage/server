@@ -270,3 +270,116 @@ Task: "EncryptionDeclaration validate/redact in crates/tenancy/src/encryption.rs
 - Key material MUST NEVER appear in describe/config/logs from this feature (FR-011)
 - Quota usage is AP/best-effort; caps are CP on cluster Raft (R4/R5)
 - Commit after each task or logical group; stop at checkpoints to validate independently
+
+---
+
+## Phase 7: Convergence
+
+Library seam for the security predicates the unchecked conformance files would have locked. Admin, CLI, protocol, and cluster-log callers are still absent, so those tasks stay open below. Earlier `[ ]` rows are unchanged.
+
+- [X] T051 Gate namespace create/rename/delete, `QuotaReplace`, `RolePut`, and `PolicyReplace` on `CLUSTER_ADMIN` via `require_cluster_admin` in `crates/tenancy`; `NAMESPACE_ADMIN` and `CONFIGURE` return `NotClusterAdmin` (FR-014 / T012)
+- [X] T052 Refuse `replication` on a tenant protocol with `ReplicationNotTenant`, and refuse an unbound non-admin, in `crates/tenancy/src/roles.rs` (`authorize_tenant_protocol`). A bound principal with an empty verb set may pass this check and still authorizes nothing in `policy::evaluate` (T034 library seam / T037 library half)
+- [X] T053 Refuse `private_metrics on` / `private_logs on` with `ObservabilityRequired` in `NamespaceRecord::set_private_telemetry` (`crates/tenancy/src/registry.rs`); describe of `EncryptionDeclaration` carries `key_ref` and no key bytes (T042 / T046 validate, SC-007 library half)
+
+- [ ] T054 Wire `TenancyOp` commit on cluster-voter majority in `crates/controlplane/` so list/get read applied state only (T011)
+- [ ] T055 Validate `quota-negative.conf` → `QuotaNegative` and `quotas-on-first-binary.conf` → `Slice7Required` in `crates/config` (T016), and `cluster { starter_namespace }` create-if-absent in `crates/config/` + `crates/node/` (T022)
+- [ ] T056 Expose namespace, quota, and role admin ops plus CLI `spacestorage namespaces|namespace|quotas|roles` in `crates/admin-proto/` and `crates/spacestorage/`, including encryption describe with zero key bytes (T023, T031, T039, T045)
+- [ ] T057 Map PostgreSQL `CREATE/DROP/ALTER DATABASE` in `crates/handler-postgresql/` and call `authorize_tenant_protocol` from the PostgreSQL and Redis tenant paths (T024, T037 handler half)
+- [ ] T058 Add internodes `QuotaDelta` in `crates/internode/` and call `tenancy::admit` before `Scheduled` in `crates/exec/` plus the connections unit on session connect in `crates/node/` (T027, T030)
+- [ ] T059 Persist `RolePut` / bindings in the cluster log from `crates/tenancy/src/roles.rs` and attach encryption fields on the container definition in `crates/catalog/` or `crates/types/` (T036, T044)
+- [ ] T060 Add node conformance `tenancy_namespaces.rs`, `tenancy_quotas.rs`, `tenancy_roles.rs`, `tenancy_policies.rs`, and `tenancy_encryption.rs` once T054–T059 exist (T015, T017, T033, T034, T041). Fill-to-cap `QuotaExceeded` already rejects in `QuotaUsage::admit` and must be driven through that harness, including sibling namespace, RF not multiplying usage, and no wait on the cluster primary
+- [ ] T061 Run `specs/007-tenancy-security/quickstart.md` and align the plan status note (T049, T050)
+
+## Phase 8: Convergence
+
+PostgreSQL and Redis now call `admit_tenant_login` after the password check. The rest of Phase 7 stays open; this phase is the live remainder.
+
+- [X] T062 Call `admit_tenant_login` after PostgreSQL SCRAM success (`crates/handler-postgresql/src/serve.rs`, `28000` / `42501`) and after Redis `AUTH` (`crates/handler-redis/src/commands.rs`). `demo` bound to a namespace still authenticates. `replication` and an empty namespace do not (T037 handler half)
+
+- [X] T063 Wire `TenancyOp` commit on cluster-voter majority in `crates/controlplane/` so list/get read applied state only (T054 / T011)
+- [X] T064 Validate `quota-negative.conf` → `QuotaNegative` and `quotas-on-first-binary.conf` → `Slice7Required` in `crates/config`, and `cluster { starter_namespace }` create-if-absent in `crates/config/` + `crates/node/` (T055 / T016 / T022)
+- [X] T065 Expose namespace, quota, and role admin ops plus CLI `spacestorage namespaces|namespace|quotas|roles` in `crates/admin-proto/` and `crates/spacestorage/`, including encryption describe with zero key bytes (T056 / T023 / T031 / T039 / T045)
+- [X] T066 Map PostgreSQL `CREATE/DROP/ALTER DATABASE` and session database bind onto registry ops in `crates/handler-postgresql/` (T057 remainder / T024). Cross-namespace open by a bound principal is refused; `admin` may use another name
+- [X] T067 Add internodes `QuotaDelta` in `crates/internode/` and call `tenancy::admit` before `Scheduled` in `crates/exec/` plus the connections unit on session connect in `crates/node/` (T058 / T027 / T030)
+- [X] T068 Persist `RolePut` / bindings in the cluster log from `crates/tenancy/src/roles.rs` and attach encryption fields on the container definition in `crates/catalog/` or `crates/types/` (T059 / T036 / T044)
+- [X] T069 Add node conformance `tenancy_namespaces.rs`, `tenancy_quotas.rs`, `tenancy_roles.rs`, `tenancy_policies.rs`, and `tenancy_encryption.rs` once T063–T068 exist (T060). Fill-to-cap `QuotaExceeded` is driven through that harness, including sibling namespace, RF not multiplying usage, and no wait on the cluster primary
+- [X] T070 Run `specs/007-tenancy-security/quickstart.md` and align the plan status note (T061 / T049 / T050)
+
+## Phase 9: Convergence
+
+Admin TCP ops, cluster-log `TenancyOp`, and library predicates from Phase 8 are in place. These items are still unmet in the current code.
+
+- [X] T071 Make `spacestorage namespaces`, `namespace create|rename|delete|describe`, `quotas set`, and `roles` perform the admin call and return real results and exit codes (4 for `NotClusterAdmin`, `CascadeRequired`, and `QuotaExceeded`) per SC-001 and contracts/admin-cli.md (quickstart.md §1–§6) (partial)
+- [X] T072 Reject `contracts/fixtures/invalid/encryption-key-inline.conf` from `spacestorage validate` with exit 2 `KeyMaterialForbidden` (the `container` block is currently `unknown_directive`) per FR-011 and quickstart.md §0 (partial)
+- [X] T073 Refuse a memory-mode container whose encryption scope is `drives` with `EncryptionScopeInvalid` on container attach (`ContainerCatalog::create_from_definition` stores the declaration unchecked) per US3/AC2 (partial)
+- [X] T074 Apply byte and object quotas only to the matching datatype, and to every type only when `datatype` is unset, so a different type does not consume a per-type quota per US1/AC8 and FR-002 (partial)
+- [X] T075 Evaluate role verbs and access policies on the write path so a READ-only custom role cannot write and a per-type write deny is honored per US2/AC4, US2/AC6, SC-005, and FR-004 (partial)
+- [X] T076 Admit `ops_per_sec` with a 1-second token bucket per plan R6 and contracts/quotas.md (contradicts)
+- [X] T077 Publish and apply internodes `QuotaDelta` so a later consuming request on another coordinator is rejected once usage is at the cap, without waiting on the cluster primary, per US1/AC11 and plan R4 (partial)
+- [X] T078 Seed quota usage from catalog logical size and reconcile it so data already stored still counts toward the cap after restart per plan R4 and SC-003 (partial)
+- [X] T079 Decrement quota usage when the data path fails after a successful admit per contracts/admission.md (partial)
+- [X] T080 Reject `private_metrics on` and `private_logs on` at config validate with `ObservabilityRequired` per plan R11 and contracts/config-directives.md (partial)
+- [X] T081 Increment `spacestorage_namespace_usage_bytes`, `spacestorage_namespace_usage_objects`, `spacestorage_namespace_connections`, and `spacestorage_quota_exceeded_total` from the usage ledger per FR-009 and contracts/metrics.md (partial)
+
+## Phase 10: Convergence
+
+Phase 9 library and PostgreSQL paths are in place. These items are still unmet in the current code.
+
+- [X] T082 Run role-verb evaluation, access-policy checks, and quota admit — including the `connections` unit on authenticated session bind — on Redis and the other tenant protocols in contracts/protocol-mapping.md, passing the authenticated principal into the query engine the way PostgreSQL does, per FR-003, US1/AC6, US2/AC4, SC-005, and contracts/admission.md (partial)
+- [X] T083 Publish internodes `QuotaDelta` to every other coordinator's internodes address, including from a bootstrap node whose `cluster.seeds` list is empty, so a later consuming request on another coordinator is rejected once usage is at the cap, without waiting on the cluster primary, per US1/AC11 and plan R4 (partial)
+- [X] T084 Subject UI console queries and container creates to the same role, access-policy, and quota admission as other clients, per FR-012 (partial)
+- [X] T085 Emit `spacestorage_namespace_connections` and `spacestorage_quota_exceeded_total` labeled by `namespace` and `unit` from the usage ledger (the connections series is currently renamed, and quota rejects are one aggregate `*` series) per FR-009, plan R15, and contracts/metrics.md (partial)
+
+## Phase 11: Convergence
+
+Phase 10 protocol admission, quota fanout, UI admission, and metric names are in place. These items are still unmet in the current code.
+
+- [X] T086 Commit every consuming unit of one request together in `crates/tenancy/src/admit.rs`: if a later unit returns `QuotaExceeded`, roll back earlier increments from that request and any positive `QuotaDelta` already published for them, so a rejected request does not leave local or peer usage higher, per FR-003 (partial)
+- [X] T087 Publish a negative internodes `QuotaDelta` from `admit::release` on data-path failure and on connection close, and reconcile bytes and objects from catalog logical size on a repeating cadence (not only at control-plane start). Connection usage is not in the catalog seed and must travel as a delta, per plan R4 and R7 (partial)
+- [X] T088 Refuse Cassandra `USE` and `CREATE KEYSPACE` that point a bound principal at another namespace. `USE` of a different keyspace is `AccessDenied` unless the principal is `admin`. `CREATE KEYSPACE` is `NamespaceCreate` and requires `CLUSTER_ADMIN`. Later statements run only in a name that exists in the cluster registry, per SC-004 and contracts/protocol-mapping.md (contradicts)
+
+## Phase 12: Convergence
+
+Phase 11 multi-unit rollback, negative release deltas, connection-close release, and the repeating catalog reconcile are in place. Cassandra `USE` refuses a cross-namespace bind. These items are still unmet in the current code.
+
+- [X] T089 Commit Cassandra `CREATE KEYSPACE` as `TenancyOp::NamespaceCreate` on cluster-voter majority through the same `append_tenancy` path as PostgreSQL (namespace Raft start included), not `NamespaceRegistry::create`. Keep `CLUSTER_ADMIN` required. `USE` and later CQL run only in a name present in that cluster-applied registry (`NamespaceNotFound` otherwise). A bound principal's `USE` of another namespace stays `AccessDenied` unless `admin`, per FR-006, plan R2, data-model §9, and contracts/protocol-mapping.md (contradicts)
+- [X] T090 Map ClickHouse `CREATE DATABASE` to `TenancyOp::NamespaceCreate` and `RENAME DATABASE` to `TenancyOp::NamespaceRename` on that same cluster-voter commit path (`CLUSTER_ADMIN` only). Do not treat `CREATE DATABASE` as `CREATE TABLE`, per contracts/protocol-mapping.md (missing)
+- [X] T091 On the periodic catalog reconcile, set bytes and objects for every registry namespace to the catalog logical sum, including 0 when that namespace or datatype has no containers, and drop stale per-type counters. Leave `connections` as internodes deltas only, per plan R4 (partial)
+- [X] T092 Do not admit `bytes` or `objects` for a delete (`LogicalRequest::Mutate`). A delete at the object cap must not return `QuotaExceeded`; object and byte usage must be able to fall to the catalog logical size, per contracts/admission.md (contradicts)
+
+## Phase 13: Convergence
+
+Phase 12 commits Cassandra `CREATE KEYSPACE` and ClickHouse `CREATE DATABASE` / `RENAME DATABASE` through `append_tenancy`, zeros empty namespaces on the periodic reconcile, and does not admit bytes or objects on delete. This item is still unmet in the current code.
+
+- [X] T093 When tenancy is attached, refuse Cassandra data CQL and ClickHouse statements other than `CREATE DATABASE` / `RENAME DATABASE` unless the session keyspace or database was accepted against the cluster-applied registry (`NamespaceNotFound`). `USE` already checks before it changes the keyspace; `SELECT`, `INSERT`, `UPDATE`, `DELETE`, and `CREATE TABLE` still run in the handler default `demo` with no registry check, and ClickHouse hello never checks. Do not re-check the name on every later statement after a successful bind (in-flight sessions stay bound across rename). per contracts/protocol-mapping.md (partial)
+
+## Phase 14: Convergence
+
+Phase 13 refuses Cassandra data CQL and ClickHouse non-DDL until the session name has been accepted once, and leaves `CREATE KEYSPACE` / `CREATE DATABASE` / `RENAME DATABASE` on the admin path. The handshake still rejects the connection when the handler default `demo` is not in the registry, so those statements never run against starter `acme`.
+
+- [X] T094 When tenancy is attached, do not fail Cassandra authentication or the ClickHouse native/HTTP handshake because the handler default `demo` is absent from the cluster-applied registry. Leave `registry_accepted` false so data CQL and non-DDL SQL still return `NamespaceNotFound`, and accept a name once when the client presents it (`USE`, or a `STARTUP`/hello keyspace or database that is registered). `CREATE KEYSPACE`, `CREATE DATABASE`, and `RENAME DATABASE` stay on the admin path and must remain reachable in that case. Do not re-check after a successful accept. Without tenancy, behavior unchanged. per contracts/protocol-mapping.md and cluster-registry.md (partial)
+
+## Phase 15: Convergence
+
+Phase 14 leaves the Cassandra and ClickHouse handshake up when `demo` is absent, and accepts a presented keyspace or database once. ClickHouse still takes the `connections` hold against the handler default before that accept, so a cap on the accepted database does not reject the session.
+
+- [X] T095 When tenancy is attached, charge the ClickHouse `connections` quota to the registry namespace that was accepted, not the handler default. Native hello and HTTP `database=` call `bind_namespace_session` on `session.namespace` (`demo`) before `try_registry_accept_presented_database`, and `USE` in `crates/handler-clickhouse/src/sql.rs` never calls `admit_connection`. If `demo` is absent the handshake stays up with no hold while data then runs in the accepted database; if `demo` is present the hold is charged to `demo`. Take one hold for the accepted name (hello, HTTP `database=`, or `USE`). If no registered name is accepted, do not fail the handshake because `demo` is missing, and leave data statements on `NamespaceNotFound`. Cassandra `STARTUP` already accepts before auth. Without tenancy, unchanged. per US1/AC6, FR-003, and plan R7 (partial)
+
+## Phase 16: Convergence
+
+Phase 15 moves a successful ClickHouse `connections` hold onto the accepted database and leaves the handshake up when `demo` is missing. The hold is still taken on the handler default before that accept, and a failed move drops it.
+
+- [X] T096 When tenancy is attached, keep the ClickHouse `connections` hold only on a registry namespace this session has accepted. Native hello (`crates/handler-clickhouse/src/native.rs`) and HTTP (`crates/handler-clickhouse/src/http.rs`) still call `try_bind_handler_default_connection` before `try_registry_accept_presented_database`: a `QuotaExceeded` on handler default `demo` refuses the session before a different presented database is charged, and if no name is accepted a hold remains on `demo` while data statements return `NamespaceNotFound`. `USE` in `crates/handler-clickhouse/src/sql.rs` sets `registry_accepted` and `reconcile_connection_quota_for_namespace` (`dispatch.rs`) drops the previous hold before the new `admit_connection` succeeds, so a `QuotaExceeded` on the new name leaves the session accepted with no hold and later statements are not rejected. Charge hello, HTTP `database=`, and `USE` to the accepted name (one hold; release the previous only after the new admit succeeds). If no registered name is accepted, leave the handshake up and take no hold. A `QuotaExceeded` on the namespace actually being accepted may still refuse the session. Without tenancy, unchanged. per US1/AC6, FR-003, SC-003, and plan R7 (partial)
+
+## Phase 17: Convergence
+
+`crates/handler-clickhouse/Cargo.toml` depends on `spacestorage-tenancy` with `features = ["tenancy-quotas"]` unconditionally. Cargo unifies that feature into every build that links the crate. `cargo test -p spacestorage-conformance --features first-binary` therefore compiles `role_put` and `admit` with slice-7 enforcement: `custom_role_put_without_slice7_is_refused` returns `Ok(Role)` instead of `Slice7Required`, and a connection quota on a namespace record is enforced. `spacestoraged --features first-binary` does not link ClickHouse and stays unlimited. The same line also turns enforcement on for `spacestoraged --features handlers-complete` without the node's `tenancy-quotas` feature. ClickHouse hello / HTTP `database=` / `USE` hold ordering from T096 is in place.
+
+- [X] T097 Do not enable `spacestorage-tenancy/tenancy-quotas` from the normal dependency in `crates/handler-clickhouse/Cargo.toml`. A first-binary build, including `cargo test -p spacestorage-conformance --features first-binary`, must compile tenancy without that feature so custom `role_put` returns `Slice7Required` and `admit` / `admit_connection` do not enforce caps. Slice 7 still enables the feature through `spacestorage-node` / conformance `tenancy-quotas`. ClickHouse unit tests that set a connection quota may turn the feature on only as a dev-dependency of `handler-clickhouse`. per FR-013, FR-005, and plan R16 (contradicts)
+
+## Phase 18: Convergence
+
+T097 is in place: the normal `handler-clickhouse` dependency does not enable `tenancy-quotas`, and `cargo tree -p spacestorage-conformance --features first-binary -e features` shows zero `tenancy-quotas` edges. These items are still unmet in the current code.
+
+- [X] T098 Charge `bytes` and `objects` for a PostgreSQL `INSERT` or `UPDATE` that `lower_sql` returns as `AdHocSql`. In `crates/query/src/engine.rs`, `request_usage` yields `(0, 0)` for that variant, so `admit` skips those units even when usage is already at the cap (`Bytes if bytes > 0`, `Objects if objects > 0`). Redis, Cassandra, ClickHouse, and S3 puts already go through `LogicalRequest::Object` and do count. Use the statement payload for bytes and one object per inserted row. Leave `DELETE` and reads at zero bytes and objects (`ops_per_sec` unchanged). A consuming insert that arrives at or above the cap must return `QuotaExceeded` naming the quota, the limit, and current usage. per FR-003, US1/AC5, US1/AC6, SC-003, and contracts/admission.md (partial)
+- [X] T099 Refuse PostgreSQL `DROP DATABASE` when the namespace still has containers and cascade was not requested. `ControlPlaneNamespaces::drop_namespace` in `crates/node/src/handler/controlplane_namespaces.rs` always commits `TenancyOp::NamespaceDelete { cascade: false }` and never inspects the catalog. `tenancy_namespace_delete` in `crates/node/src/admin/mod.rs` returns `CascadeRequired` in that case. The protocol delete must return `CascadeRequired` the same way and must not remove the registry row. per the spec delete edge case, FR-013, and contracts/cluster-registry.md (contradicts)

@@ -1,8 +1,8 @@
 pub mod auth;
 
+use crate::Node;
 use crate::lifecycle::{self, NodeState};
 use crate::reload;
-use crate::Node;
 use spacestorage_admin_proto::{
     AdminOp, EffectiveConfig, EntrypointStatus, ErrorBody, SettingReport, Status, StopResult,
     ThreadsReport,
@@ -15,10 +15,7 @@ use std::sync::Arc;
 pub struct AdminService;
 
 impl AdminService {
-    pub async fn execute(
-        node: &Arc<Node>,
-        op: AdminOp,
-    ) -> Result<serde_json::Value, ErrorBody> {
+    pub async fn execute(node: &Arc<Node>, op: AdminOp) -> Result<serde_json::Value, ErrorBody> {
         match op {
             AdminOp::Status => Ok(serde_json::to_value(status(node)).unwrap()),
             AdminOp::Config => Ok(serde_json::to_value(config(node)).unwrap()),
@@ -63,6 +60,22 @@ impl AdminService {
             AdminOp::Controllers => controlplane_controllers(node).await,
             AdminOp::RaftStatus { group } => controlplane_raft_status(node, group).await,
             AdminOp::Leases { namespace } => controlplane_leases(node, namespace).await,
+            AdminOp::NamespaceList => tenancy_namespace_list(node).await,
+            AdminOp::NamespaceCreate { name } => tenancy_namespace_create(node, name).await,
+            AdminOp::NamespaceRename { name, new_name } => {
+                tenancy_namespace_rename(node, name, new_name).await
+            }
+            AdminOp::NamespaceDelete { name, cascade } => {
+                tenancy_namespace_delete(node, name, cascade).await
+            }
+            AdminOp::NamespaceDescribe { name } => tenancy_namespace_describe(node, name).await,
+            AdminOp::QuotaReplace { name, quotas } => {
+                tenancy_quota_replace(node, name, quotas).await
+            }
+            AdminOp::RoleList => tenancy_role_list(node).await,
+            AdminOp::RoleBindingList { namespace } => {
+                tenancy_binding_list(node, namespace).await
+            }
             AdminOp::VoterReplace { group, from, to } => {
                 controlplane_voter_op(
                     node,
@@ -107,6 +120,202 @@ impl AdminService {
             }
         }
     }
+}
+
+async fn tenancy_namespace_list(node: &Node) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    Ok(serde_json::json!({ "namespaces": cp.tenancy_namespaces() }))
+}
+
+async fn tenancy_namespace_create(
+    node: &Node,
+    name: String,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceCreate {
+        name: name.clone(),
+    })
+    .await
+    .map_err(cp_err)?;
+    sync_tenancy_cache(node, &cp);
+    serde_json::to_value(cp.tenancy_namespace_by_name(&name).expect("applied after commit"))
+        .map_err(|error| ErrorBody {
+            code: "serialization".into(),
+            message: error.to_string(),
+            details: serde_json::json!({}),
+        })
+}
+
+async fn tenancy_namespace_rename(
+    node: &Node,
+    name: String,
+    new_name: String,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
+        code: "NamespaceNotFound".into(),
+        message: format!("NamespaceNotFound{{name={name}}}"),
+        details: serde_json::json!({ "name": name }),
+    })?;
+    cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceRename {
+        id: record.id,
+        new_name: new_name.clone(),
+    })
+    .await
+    .map_err(cp_err)?;
+    sync_tenancy_cache(node, &cp);
+    Ok(serde_json::to_value(
+        cp.tenancy_namespace_by_name(&new_name)
+            .expect("applied after commit"),
+    )
+    .unwrap())
+}
+
+async fn tenancy_namespace_delete(
+    node: &Node,
+    name: String,
+    cascade: bool,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
+        code: "NamespaceNotFound".into(),
+        message: format!("NamespaceNotFound{{name={name}}}"),
+        details: serde_json::json!({ "name": name }),
+    })?;
+    if let Some(message) =
+        crate::namespace_catalog::namespace_delete_cascade_required(&name, cascade, &node.catalog)
+    {
+        let containers = crate::namespace_catalog::container_ids_for_namespace(
+            &node.catalog,
+            &name,
+        );
+        return Err(ErrorBody {
+            code: "CascadeRequired".into(),
+            message,
+            details: serde_json::json!({ "containers": containers }),
+        });
+    }
+    cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceDelete {
+        id: record.id,
+        cascade,
+    })
+    .await
+    .map_err(cp_err)?;
+    sync_tenancy_cache(node, &cp);
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+async fn tenancy_namespace_describe(
+    node: &Node,
+    name: String,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
+        code: "NamespaceNotFound".into(),
+        message: format!("NamespaceNotFound{{name={name}}}"),
+        details: serde_json::json!({ "name": name }),
+    })?;
+    let containers: Vec<_> = node
+        .catalog
+        .read()
+        .unwrap()
+        .list()
+        .filter(|container| container.namespace.as_str() == name)
+        .map(|container| {
+            serde_json::json!({
+                "id": container.id,
+                "name": container.name.as_str(),
+                "type": container.model.machine_name(),
+                "encryption": container.encryption,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "namespace": record, "containers": containers }))
+}
+
+async fn tenancy_quota_replace(
+    node: &Node,
+    name: String,
+    quotas: Vec<spacestorage_admin_proto::QuotaInput>,
+) -> Result<serde_json::Value, ErrorBody> {
+    if !cfg!(feature = "tenancy-quotas") {
+        return Err(ErrorBody {
+            code: "Slice7Required".into(),
+            message: "QuotaReplace requires tenancy-quotas (slice 7)".into(),
+            details: serde_json::json!({}),
+        });
+    }
+    let cp = require_cp(node).await?;
+    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
+        code: "NamespaceNotFound".into(),
+        message: format!("NamespaceNotFound{{name={name}}}"),
+        details: serde_json::json!({}),
+    })?;
+    let quotas = quotas
+        .into_iter()
+        .map(|quota| {
+            Ok(spacestorage_tenancy::QuotaSpec {
+                unit: spacestorage_tenancy::QuotaUnit::parse(&quota.unit)
+                    .map_err(tenancy_err)?,
+                limit: quota.limit,
+                datatype: quota.datatype,
+            })
+        })
+        .collect::<Result<Vec<_>, ErrorBody>>()?;
+    cp.append_tenancy(spacestorage_tenancy::TenancyOp::QuotaReplace {
+        id: record.id,
+        quotas,
+    })
+    .await
+    .map_err(cp_err)?;
+    sync_tenancy_cache(node, &cp);
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+async fn tenancy_role_list(node: &Node) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let snapshot = cp.cluster_snapshot();
+    Ok(serde_json::json!({ "roles": snapshot.tenancy_roles.values().collect::<Vec<_>>() }))
+}
+
+async fn tenancy_binding_list(
+    node: &Node,
+    namespace: Option<String>,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let snapshot = cp.cluster_snapshot();
+    let namespace_id = namespace
+        .as_deref()
+        .and_then(|name| cp.tenancy_namespace_by_name(name))
+        .map(|record| record.id);
+    let bindings: Vec<_> = snapshot
+        .tenancy_bindings
+        .values()
+        .filter(|binding| namespace.is_none() || binding.namespace_id == namespace_id)
+        .collect();
+    Ok(serde_json::json!({ "bindings": bindings }))
+}
+
+fn tenancy_err(error: spacestorage_tenancy::TenancyError) -> ErrorBody {
+    ErrorBody {
+        code: match &error {
+            spacestorage_tenancy::TenancyError::QuotaUnitUnknown { .. } => "QuotaUnitUnknown",
+            spacestorage_tenancy::TenancyError::QuotaNegative => "QuotaNegative",
+            _ => "tenancy_error",
+        }
+        .into(),
+        message: error.to_string(),
+        details: serde_json::json!({}),
+    }
+}
+
+fn sync_tenancy_cache(node: &Node, cp: &spacestorage_controlplane::ControlPlane) {
+    node.tenancy
+        .registry
+        .lock()
+        .replace_applied(cp.tenancy_namespaces());
+    let snapshot = cp.cluster_snapshot();
+    *node.tenancy.roles.lock() = snapshot.tenancy_roles.clone();
 }
 
 async fn require_cp(

@@ -24,6 +24,9 @@ pub struct SessionState {
     pub profile: DialectProfile,
     pub limit_services: LimitServices,
     pub principal_hold: Option<PrincipalHold>,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub connection_quota: Option<spacestorage_tenancy::ConnectionQuotaHold>,
+    pub principal: Option<String>,
 }
 
 impl SessionState {
@@ -34,12 +37,28 @@ impl SessionState {
             profile: DialectProfile::HandlersComplete,
             limit_services: LimitServices::built_in(),
             principal_hold: None,
+            tenancy: None,
+            connection_quota: None,
+            principal: None,
         }
     }
 
     fn engine(&self) -> PlannerEngine {
         let distributed = matches!(self.profile, DialectProfile::CompleteProduct);
-        PlannerEngine::with_distributed(Arc::clone(&self.catalog), distributed)
+        let mut engine =
+            PlannerEngine::with_distributed(Arc::clone(&self.catalog), distributed);
+        if let Some(t) = &self.tenancy {
+            engine = engine.with_tenancy(Arc::clone(t));
+        }
+        engine
+    }
+
+    fn exec_opts(&self) -> QueryOptions {
+        let mut options = QueryOptions::default();
+        if let Some(login) = self.principal.as_deref() {
+            options.principal = Some(login.to_string());
+        }
+        options
     }
 
     fn exec(&self, req: LogicalRequest) -> Result<QueryResult, EsReply> {
@@ -49,7 +68,7 @@ impl SessionState {
                 "es",
                 "elasticsearch",
                 req,
-                QueryOptions::default(),
+                self.exec_opts(),
                 CancelToken::new(),
             )
             .map_err(|e| error_reply(500, "server_error", &e.to_string()))

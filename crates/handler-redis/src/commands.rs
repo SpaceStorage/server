@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use spacestorage_compat::{
-    classify_outcome, ClassifyOutcome, DialectProfile, LimitServices, PrincipalHold, ProtocolId,
+    ClassifyOutcome, DialectProfile, LimitServices, PrincipalHold, ProtocolId, classify_outcome,
 };
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
 use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
@@ -93,6 +93,9 @@ pub struct SessionState {
     pub limit_services: LimitServices,
     /// Held while this connection is authenticated for a principal.
     pub principal_hold: Option<PrincipalHold>,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub connection_quota: Option<spacestorage_tenancy::ConnectionQuotaHold>,
+    pub principal: Option<String>,
 }
 
 impl SessionState {
@@ -108,6 +111,9 @@ impl SessionState {
             expected_user: "demo".into(),
             limit_services: LimitServices::built_in(),
             principal_hold: None,
+            tenancy: None,
+            connection_quota: None,
+            principal: None,
         }
     }
 
@@ -169,13 +175,21 @@ impl SessionState {
     }
 
     fn planner_exec(&self, req: LogicalRequest) -> Result<QueryResult, RedisReply> {
-        PlannerEngine::new(Arc::clone(&self.catalog))
+        let mut engine = PlannerEngine::new(Arc::clone(&self.catalog));
+        if let Some(t) = &self.tenancy {
+            engine = engine.with_tenancy(Arc::clone(t));
+        }
+        let mut options = QueryOptions::default();
+        if let Some(login) = self.principal.as_deref() {
+            options.principal = Some(login.to_string());
+        }
+        engine
             .execute_blocking(
                 &self.namespace,
                 "redis",
                 "redis",
                 req,
-                QueryOptions::default(),
+                options,
                 CancelToken::new(),
             )
             .map_err(|e| RedisReply::Error(format!("ERR {e}")))
@@ -206,6 +220,16 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 _ => return RedisReply::Error("ERR wrong number of arguments for 'auth'".into()),
             };
             if user == session.expected_user && pass == session.expected_secret {
+                if session.connection_quota.is_none() {
+                    match spacestorage_tenancy::bind_namespace_session(
+                        session.tenancy.as_ref(),
+                        user,
+                        session.namespace.as_str(),
+                    ) {
+                        Ok(hold) => session.connection_quota = hold,
+                        Err(err) => return RedisReply::Error(format!("ERR {err}")),
+                    }
+                }
                 // FR-011: count authenticated session per principal; reject without waiting.
                 if session.principal_hold.is_none() {
                     match session.limit_services.try_hold_principal(user) {
@@ -215,6 +239,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                         }
                     }
                 }
+                session.principal = Some(user.to_string());
                 session.authenticated = true;
                 session.password_ok = true;
                 RedisReply::Ok
@@ -500,6 +525,29 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn auth_refuses_replication_and_unbound_login() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut replication = SessionState::demo(Arc::clone(&cat));
+        replication.expected_user = "replication".into();
+        replication.expected_secret = "secret".into();
+        match dispatch(&mut replication, "AUTH", &["replication", "secret"]) {
+            RedisReply::Error(e) => assert!(e.contains("ReplicationNotTenant"), "{e}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(!replication.authenticated);
+
+        let mut unbound = SessionState::demo(cat);
+        unbound.expected_user = "reader".into();
+        unbound.expected_secret = "secret".into();
+        unbound.namespace.clear();
+        match dispatch(&mut unbound, "AUTH", &["reader", "secret"]) {
+            RedisReply::Error(e) => assert!(e.contains("AccessDenied"), "{e}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(!unbound.authenticated);
     }
 
     #[test]

@@ -125,7 +125,12 @@ pub struct JobRecord {
 }
 
 impl JobRecord {
-    pub fn new(kind: JobKind, principal_id: Uuid, strategy: Strategy, body: serde_json::Value) -> Self {
+    pub fn new(
+        kind: JobKind,
+        principal_id: Uuid,
+        strategy: Strategy,
+        body: serde_json::Value,
+    ) -> Self {
         Self {
             id: Uuid::now_v7(),
             kind,

@@ -2,8 +2,8 @@
 
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::ObservabilityError;
@@ -122,7 +122,7 @@ pub enum SampleKind {
 pub struct HistogramState {
     pub bounds: &'static [f64],
     pub counts: Vec<AtomicU64>,
-    pub sum: AtomicU64,   // bits of f64
+    pub sum: AtomicU64, // bits of f64
     pub count: AtomicU64,
 }
 
@@ -331,40 +331,37 @@ impl Registry {
         g.series
             .values()
             .map(|s| {
-                let (counter, gauge, hist_bounds, hist_counts, hist_sum, hist_count) = match &s.value
-                {
-                    SampleValue::Counter(c) => (
-                        Some(c.load(Ordering::Relaxed)),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    ),
-                    SampleValue::Gauge(g) => (
-                        None,
-                        Some(f64::from_bits(g.load(Ordering::Relaxed) as u64)),
-                        None,
-                        None,
-                        None,
-                        None,
-                    ),
-                    SampleValue::Histogram(h) => {
-                        let counts: Vec<u64> = h
-                            .counts
-                            .iter()
-                            .map(|c| c.load(Ordering::Relaxed))
-                            .collect();
-                        (
+                let (counter, gauge, hist_bounds, hist_counts, hist_sum, hist_count) =
+                    match &s.value {
+                        SampleValue::Counter(c) => (
+                            Some(c.load(Ordering::Relaxed)),
                             None,
                             None,
-                            Some(h.bounds),
-                            Some(counts),
-                            Some(f64::from_bits(h.sum.load(Ordering::Relaxed))),
-                            Some(h.count.load(Ordering::Relaxed)),
-                        )
-                    }
-                };
+                            None,
+                            None,
+                            None,
+                        ),
+                        SampleValue::Gauge(g) => (
+                            None,
+                            Some(f64::from_bits(g.load(Ordering::Relaxed) as u64)),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ),
+                        SampleValue::Histogram(h) => {
+                            let counts: Vec<u64> =
+                                h.counts.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+                            (
+                                None,
+                                None,
+                                Some(h.bounds),
+                                Some(counts),
+                                Some(f64::from_bits(h.sum.load(Ordering::Relaxed))),
+                                Some(h.count.load(Ordering::Relaxed)),
+                            )
+                        }
+                    };
                 SeriesSnapshot {
                     name: s.name.as_str().to_string(),
                     labels: s.labels.clone(),

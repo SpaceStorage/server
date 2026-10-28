@@ -130,3 +130,7 @@ crates/
 ## Constitution Check (post-design)
 
 Re-evaluated after Phase 1: registry/quotas/bindings stay on the cluster log; schemas stay in namespace Raft; quota admit is coordinator-local; encryption is a `03` field with key references only; private export is a stored flag whose implementation is `08`; UIs get the same `14` verbs. **Gate result: PASS.**
+
+## Status (Phase 8 convergence)
+
+First-binary namespace registry, admin ops, PostgreSQL mapping, connection quota on session connect, and cluster-log `TenancyOp` commit are implemented; `crates/conformance/tests/tenancy_*.rs` covers namespaces, roles, policies, encryption describe, and slice-7 quotas (`--features tenancy-quotas`). Quickstart §0 validate paths for `QuotaNegative` and `Slice7Required` pass via `spacestorage validate`. Interactive CLI steps that need a live remote admin HTTP client remain manual; conformance + unit tests substitute for the executable quickstart gates in CI.

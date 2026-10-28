@@ -38,6 +38,7 @@ pub fn l4_descriptor(name: &str) -> Option<TypeDescriptor> {
         multi_active: false,
         schema_required: false,
         snapshot_capable: false,
+        introduced_in: crate::descriptor::ProductVersion::FIRST_BINARY,
     })
 }
 

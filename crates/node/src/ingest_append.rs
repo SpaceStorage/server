@@ -1,7 +1,7 @@
 //! Ingest append via shared `005` catalog put (application=spacestorage-ingest).
 //! Durable wait uses existing catalog durable_put hooks (013 blocking pool / WAL fsync).
 
-use spacestorage_ingest::{AppendAck, LogRecord, APPLICATION_INGEST};
+use spacestorage_ingest::{APPLICATION_INGEST, AppendAck, LogRecord};
 use spacestorage_query::ensure_container;
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};

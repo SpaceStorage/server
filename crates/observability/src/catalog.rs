@@ -130,16 +130,8 @@ pub const SYSTEM_FAMILIES: &[FamilyMeta] = &[
         Counter,
         "Buffer capacity limit hits."
     ),
-    fam!(
-        "spacestorage_cache_hits_total",
-        Counter,
-        "Cache hits."
-    ),
-    fam!(
-        "spacestorage_cache_misses_total",
-        Counter,
-        "Cache misses."
-    ),
+    fam!("spacestorage_cache_hits_total", Counter, "Cache hits."),
+    fam!("spacestorage_cache_misses_total", Counter, "Cache misses."),
     fam!(
         "spacestorage_cache_evictions_total",
         Counter,
@@ -190,16 +182,8 @@ pub const SYSTEM_FAMILIES: &[FamilyMeta] = &[
         Histogram,
         "DNS resolution duration."
     ),
-    fam!(
-        "spacestorage_dns_requests_total",
-        Counter,
-        "DNS requests."
-    ),
-    fam!(
-        "spacestorage_dns_errors_total",
-        Counter,
-        "DNS errors."
-    ),
+    fam!("spacestorage_dns_requests_total", Counter, "DNS requests."),
+    fam!("spacestorage_dns_errors_total", Counter, "DNS errors."),
     fam!(
         "spacestorage_raft_leader_elections_total",
         Counter,
@@ -265,22 +249,14 @@ pub const QUERY_FAMILIES: &[FamilyMeta] = &[
         "Query bytes written."
     ),
     fam!("spacestorage_query_total", Counter, "Query totals."),
-    fam!(
-        "spacestorage_query_errors_total",
-        Counter,
-        "Query errors."
-    ),
+    fam!("spacestorage_query_errors_total", Counter, "Query errors."),
     fam!(
         "spacestorage_query_rows_returned_total",
         Counter,
         "Rows/documents/values returned."
     ),
     fam!("spacestorage_query_hits_total", Counter, "Query hits."),
-    fam!(
-        "spacestorage_query_misses_total",
-        Counter,
-        "Query misses."
-    ),
+    fam!("spacestorage_query_misses_total", Counter, "Query misses."),
     fam!(
         "spacestorage_query_lookup_probes_total",
         Counter,
@@ -431,6 +407,13 @@ pub const REPLICATION_FAMILIES: &[FamilyMeta] = &[
     ),
 ];
 
+/// Compatibility ceiling (`015`): process-local counters published on scrape.
+pub const COMPAT_FAMILIES: &[FamilyMeta] = &[fam!(
+    "spacestorage_compat_must_not_total",
+    Counter,
+    "MUST NOT verb refused by the compatibility matrix."
+)];
+
 /// API (FR-010).
 pub const API_FAMILIES: &[FamilyMeta] = &[
     fam!(
@@ -526,17 +509,9 @@ pub const JOB_FAMILIES: &[FamilyMeta] = &[
 
 /// Datatype LSM/HNSW (FR-013) — frozen names.
 pub const DATATYPE_FAMILIES: &[FamilyMeta] = &[
-    fam!(
-        "db_lsm_memtable_size_bytes",
-        Gauge,
-        "LSM memtable size."
-    ),
+    fam!("db_lsm_memtable_size_bytes", Gauge, "LSM memtable size."),
     fam!("db_lsm_sstable_count", Gauge, "LSM SSTable count."),
-    fam!(
-        "db_lsm_compaction_total",
-        Counter,
-        "LSM compactions."
-    ),
+    fam!("db_lsm_compaction_total", Counter, "LSM compactions."),
     fam!(
         "db_lsm_compaction_duration_seconds",
         Histogram,
@@ -632,6 +607,7 @@ pub fn all_families() -> Vec<&'static FamilyMeta> {
         .chain(QUERY_FAMILIES.iter())
         .chain(COMM_FAMILIES.iter())
         .chain(REPLICATION_FAMILIES.iter())
+        .chain(COMPAT_FAMILIES.iter())
         .chain(API_FAMILIES.iter())
         .chain(JOB_FAMILIES.iter())
         .chain(DATATYPE_FAMILIES.iter())

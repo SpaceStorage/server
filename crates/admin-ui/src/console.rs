@@ -12,6 +12,8 @@ pub const MAX_PAGE_ROWS: usize = 1000;
 
 #[derive(Debug, Clone, Default)]
 pub struct ConsoleAuthz {
+    /// Authenticated principal id for tenancy admission (`007`).
+    pub principal: String,
     pub cluster_admin: bool,
     pub namespace_admin: Vec<String>,
     pub write_containers: Vec<String>,

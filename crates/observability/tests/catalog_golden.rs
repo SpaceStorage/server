@@ -1,20 +1,44 @@
 //! Catalog golden: required HELP/TYPE names from contracts/catalog.md.
 
 use spacestorage_observability::{
-    all_families, SampleKind, DATATYPE_FAMILIES, DURABILITY_FAMILIES, JOB_FAMILIES, JOB_NAMES,
-    QUERY_FAMILIES, REPLICATION_FAMILIES, SYSTEM_FAMILIES, API_FAMILIES, BILLING_FAMILIES,
-    COMM_FAMILIES,
+    API_FAMILIES, BILLING_FAMILIES, COMM_FAMILIES, DATATYPE_FAMILIES, DURABILITY_FAMILIES,
+    JOB_FAMILIES, JOB_NAMES, QUERY_FAMILIES, REPLICATION_FAMILIES, SYSTEM_FAMILIES, SampleKind,
+    all_families,
 };
 
 #[test]
 fn catalog_has_four_golden_signal_families() {
     // Latency / traffic / errors / saturation covered by query+api+comm+system.
-    assert!(QUERY_FAMILIES.iter().any(|f| f.name == "spacestorage_query_duration_seconds"));
-    assert!(QUERY_FAMILIES.iter().any(|f| f.name == "spacestorage_query_total"));
-    assert!(QUERY_FAMILIES.iter().any(|f| f.name == "spacestorage_query_errors_total"));
-    assert!(SYSTEM_FAMILIES.iter().any(|f| f.name == "spacestorage_buffer_usage_ratio"));
-    assert!(API_FAMILIES.iter().any(|f| f.name == "spacestorage_api_request_duration_seconds"));
-    assert!(COMM_FAMILIES.iter().any(|f| f.name == "spacestorage_comm_query_total"));
+    assert!(
+        QUERY_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_query_duration_seconds")
+    );
+    assert!(
+        QUERY_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_query_total")
+    );
+    assert!(
+        QUERY_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_query_errors_total")
+    );
+    assert!(
+        SYSTEM_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_buffer_usage_ratio")
+    );
+    assert!(
+        API_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_api_request_duration_seconds")
+    );
+    assert!(
+        COMM_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_comm_query_total")
+    );
 }
 
 #[test]
@@ -71,10 +95,16 @@ fn billing_series_present() {
 #[test]
 fn job_names_cover_fr012() {
     assert_eq!(JOB_NAMES.len(), 15);
-    assert!(JOB_FAMILIES.iter().any(|f| f.name == "spacestorage_job_duration_seconds"));
-    assert!(REPLICATION_FAMILIES
-        .iter()
-        .any(|f| f.name == "spacestorage_replication_lag_seconds"));
+    assert!(
+        JOB_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_job_duration_seconds")
+    );
+    assert!(
+        REPLICATION_FAMILIES
+            .iter()
+            .any(|f| f.name == "spacestorage_replication_lag_seconds")
+    );
 }
 
 #[test]

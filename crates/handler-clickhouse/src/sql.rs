@@ -19,8 +19,54 @@ pub fn execute_sql(session: &mut SessionState, sql: &str) -> ClickHouseReply {
         };
     }
     let upper = sql.to_ascii_uppercase();
+    if upper.starts_with("USE ") {
+        let db = sql
+            .split_whitespace()
+            .nth(1)
+            .map(|s| {
+                s.trim_matches(|c| c == '`' || c == '"')
+                    .trim_end_matches(';')
+                    .to_string()
+            })
+            .unwrap_or_default();
+        if db.is_empty() {
+            return ClickHouseReply::Error {
+                code: "62".into(),
+                message: "missing database name".into(),
+            };
+        }
+        if session.tenancy.is_some() {
+            if let Err(err) = session.try_use_registry_namespace(&db) {
+                return ClickHouseReply::Error {
+                    code: if matches!(
+                        err,
+                        spacestorage_tenancy::TenancyError::NamespaceNotFound { .. }
+                    ) {
+                        "81".into()
+                    } else {
+                        "241".into()
+                    },
+                    message: err.to_string(),
+                };
+            }
+            return ClickHouseReply::Ok;
+        }
+        session.namespace = db;
+        return ClickHouseReply::Ok;
+    }
+    if !upper.starts_with("CREATE DATABASE") && !upper.starts_with("RENAME DATABASE") {
+        if let Some(reply) = session.refuse_data_without_registry_accept() {
+            return reply;
+        }
+    }
     if upper.contains("DICTIONARY") {
         return dispatch(session, "DICTIONARY", &[]);
+    }
+    if upper.contains("MATERIALIZED VIEW") {
+        return dispatch(session, "MATERIALIZED_VIEW", &[]);
+    }
+    if upper.contains("REPLICATED") {
+        return dispatch(session, "REPLICATION", &[]);
     }
     if upper.contains("GROUP BY") {
         let parts: Vec<&str> = sql.split_whitespace().collect();
@@ -44,6 +90,12 @@ pub fn execute_sql(session: &mut SessionState, sql: &str) -> ClickHouseReply {
         return dispatch(session, "GROUP_BY", &[table, group_col, group_col]);
     }
     if upper.starts_with("CREATE") {
+        if upper.starts_with("CREATE DATABASE") {
+            return ClickHouseReply::Error {
+                code: "server_error".into(),
+                message: "CREATE DATABASE requires namespace control path".into(),
+            };
+        }
         let parts: Vec<&str> = sql.split_whitespace().collect();
         // CREATE TABLE name …
         let table = parts
@@ -111,6 +163,122 @@ mod tests {
     use super::*;
     use spacestorage_types::ContainerCatalog;
     use std::sync::{Arc, RwLock};
+
+    #[test]
+    fn use_accepts_registered_database() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+        use std::sync::Arc;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "acme")
+            .unwrap();
+        let mut s = SessionState {
+            catalog: Arc::clone(&cat),
+            namespace: "demo".into(),
+            profile: spacestorage_compat::DialectProfile::HandlersComplete,
+            protocol: spacestorage_compat::ProtocolId::ClickHouse,
+            limit_services: spacestorage_compat::LimitServices::built_in(),
+            principal_hold: None,
+            tenancy: Some(tenancy),
+            namespace_control: None,
+            connection_quota: None,
+            connection_charged_namespace: None,
+            principal: Some("demo".into()),
+            registry_accepted: false,
+        };
+        match execute_sql(&mut s, "SELECT 1") {
+            ClickHouseReply::Error { message, .. } => {
+                assert!(message.contains("NamespaceNotFound"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(execute_sql(&mut s, "USE acme"), ClickHouseReply::Ok));
+        assert!(s.registry_accepted);
+        assert!(matches!(
+            execute_sql(&mut s, "CREATE TABLE t (id String)"),
+            ClickHouseReply::Ok
+        ));
+    }
+
+    #[test]
+    fn create_database_not_treated_as_create_table() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo_native(cat);
+        match execute_sql(&mut s, "CREATE DATABASE acme") {
+            ClickHouseReply::Error { message, .. } => {
+                assert!(message.contains("namespace control"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_allowed_after_registry_accept() {
+        use spacestorage_authz::Verb;
+        use spacestorage_tenancy::Tenancy;
+        use std::sync::Arc;
+
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let tenancy = Arc::new(Tenancy::new());
+        tenancy
+            .registry
+            .lock()
+            .create(Verb::CLUSTER_ADMIN.bits(), "demo")
+            .unwrap();
+        let mut s = SessionState {
+            catalog: Arc::clone(&cat),
+            namespace: "demo".into(),
+            profile: spacestorage_compat::DialectProfile::HandlersComplete,
+            protocol: spacestorage_compat::ProtocolId::ClickHouse,
+            limit_services: spacestorage_compat::LimitServices::built_in(),
+            principal_hold: None,
+            tenancy: Some(tenancy),
+            namespace_control: None,
+            connection_quota: None,
+            connection_charged_namespace: None,
+            principal: Some("demo".into()),
+            registry_accepted: true,
+        };
+        assert!(matches!(
+            execute_sql(&mut s, "CREATE TABLE t (id String, v String)"),
+            ClickHouseReply::Ok
+        ));
+    }
+
+    #[test]
+    fn materialized_view_and_replicated_must_not() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo_native(cat);
+        match execute_sql(
+            &mut s,
+            "CREATE MATERIALIZED VIEW mv ENGINE = MergeTree() AS SELECT 1",
+        ) {
+            ClickHouseReply::Error { message, .. } => {
+                assert!(
+                    message.contains("compat_must_not") || message.contains("CompatMustNot"),
+                    "{message}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        match execute_sql(
+            &mut s,
+            "CREATE TABLE r (id String) ENGINE = ReplicatedMergeTree('/clickhouse/tables/r', '1') ORDER BY id",
+        ) {
+            ClickHouseReply::Error { message, .. } => {
+                assert!(
+                    message.contains("compat_must_not") || message.contains("CompatMustNot"),
+                    "{message}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
 
     #[test]
     fn create_insert_select() {

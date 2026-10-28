@@ -172,6 +172,60 @@ pub enum Command {
         #[arg(long, default_value = "http://127.0.0.1:8080")]
         endpoint: String,
     },
+    /// List namespaces from cluster-applied tenancy state.
+    Namespaces {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+        #[arg(long, default_value = "table")]
+        output: String,
+    },
+    Namespace {
+        #[command(subcommand)]
+        action: NamespaceAction,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    Quotas {
+        #[command(subcommand)]
+        action: QuotasAction,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+    Roles {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum NamespaceAction {
+    Create { name: String },
+    Rename { name: String, new_name: String },
+    Delete {
+        name: String,
+        #[arg(long)]
+        cascade: bool,
+    },
+    Describe {
+        name: String,
+        #[arg(long, default_value = "table")]
+        output: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum QuotasAction {
+    Set {
+        name: String,
+        #[arg(long)]
+        bytes: Option<u64>,
+        #[arg(long)]
+        objects: Option<u64>,
+        #[arg(long)]
+        connections: Option<u64>,
+        #[arg(long = "ops-per-sec")]
+        ops_per_sec: Option<u64>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

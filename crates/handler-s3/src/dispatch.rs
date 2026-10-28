@@ -26,6 +26,9 @@ pub struct SessionState {
     pub multipart: HashMap<String, (String, String, Vec<Vec<u8>>)>,
     pub limit_services: LimitServices,
     pub principal_hold: Option<PrincipalHold>,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
+    pub connection_quota: Option<spacestorage_tenancy::ConnectionQuotaHold>,
+    pub principal: Option<String>,
 }
 
 impl SessionState {
@@ -37,11 +40,26 @@ impl SessionState {
             multipart: HashMap::new(),
             limit_services: LimitServices::built_in(),
             principal_hold: None,
+            tenancy: None,
+            connection_quota: None,
+            principal: None,
         }
     }
 
     fn engine(&self) -> PlannerEngine {
-        PlannerEngine::new(Arc::clone(&self.catalog))
+        let mut engine = PlannerEngine::new(Arc::clone(&self.catalog));
+        if let Some(t) = &self.tenancy {
+            engine = engine.with_tenancy(Arc::clone(t));
+        }
+        engine
+    }
+
+    fn exec_opts(&self) -> QueryOptions {
+        let mut options = QueryOptions::default();
+        if let Some(login) = self.principal.as_deref() {
+            options.principal = Some(login.to_string());
+        }
+        options
     }
 
     fn exec(&self, req: LogicalRequest) -> Result<QueryResult, S3Reply> {
@@ -51,7 +69,7 @@ impl SessionState {
                 "s3",
                 "s3",
                 req,
-                QueryOptions::default(),
+                self.exec_opts(),
                 CancelToken::new(),
             )
             .map_err(|e| S3Reply::Error {
@@ -75,6 +93,17 @@ fn refuse(verb: &str, err: CompatError) -> S3Reply {
         code: err.code().into(),
         message: err.to_string(),
     }
+}
+
+/// HTTP router MustNot short-circuit (before IR) for verbs outside the classified MUST set.
+pub fn compat_must_not_reply(verb: &str) -> S3Reply {
+    refuse(
+        verb,
+        CompatError::CompatMustNot {
+            protocol: ProtocolId::S3.as_str().into(),
+            verb: verb.into(),
+        },
+    )
 }
 
 pub fn put_object_bytes(
@@ -291,6 +320,16 @@ mod tests {
         }
         match dispatch(&mut s, "CREATEMULTIPARTUPLOAD", &["b", "m"]) {
             S3Reply::Xml(x) => assert!(x.contains("UploadId")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_bucket_must_not() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(cat);
+        match dispatch(&mut s, "DELETEBUCKET", &["b"]) {
+            S3Reply::Error { code, .. } => assert_eq!(code, "compat_must_not"),
             other => panic!("{other:?}"),
         }
     }

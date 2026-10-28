@@ -9,7 +9,7 @@ mod serve;
 mod sql;
 mod wire;
 
-pub use auth::UserStore;
+pub use auth::{UserStore, refuse_database_open};
 pub use serve::{exec_sql_sync, serve};
 pub use sql::{ExecError, ExecResult, SharedCatalog, execute_sql};
 pub use wire::FEATURE_NOT_SUPPORTED;
@@ -21,6 +21,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::sync::CancellationToken;
 
+pub use spacestorage_tenancy::{NamespaceControl, PermissiveNamespaceControl};
+
 /// Node-facing PostgreSQL handler (async serve only — Constitution II).
 pub struct PostgresqlHandler {
     pub catalog: SharedCatalog,
@@ -28,6 +30,8 @@ pub struct PostgresqlHandler {
     /// Release dialect (`016` / `015`). Wire classify uses this, not a hard-coded first-binary profile.
     pub profile: DialectProfile,
     pub limit_services: LimitServices,
+    pub namespace_control: Arc<dyn NamespaceControl>,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 }
 
 impl PostgresqlHandler {
@@ -54,7 +58,19 @@ impl PostgresqlHandler {
             users,
             profile,
             limit_services,
+            namespace_control: Arc::new(PermissiveNamespaceControl::default()),
+            tenancy: None,
         }
+    }
+
+    pub fn with_namespace_control(mut self, control: Arc<dyn NamespaceControl>) -> Self {
+        self.namespace_control = control;
+        self
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
     }
 
     /// `release` is `first-binary`, `handlers-complete`, or `complete-product`.
@@ -91,6 +107,8 @@ impl PostgresqlHandler {
             self.profile,
             Arc::clone(&self.users),
             self.limit_services.clone(),
+            Arc::clone(&self.namespace_control),
+            self.tenancy.clone(),
         )
         .await;
     }

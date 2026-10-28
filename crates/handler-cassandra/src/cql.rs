@@ -7,9 +7,26 @@ pub fn classify_cql(cql: &str) -> Option<(String, Vec<String>)> {
     if upper.is_empty() {
         return None;
     }
+    if (upper.starts_with("UPDATE")
+        || upper.starts_with("INSERT")
+        || upper.starts_with("DELETE"))
+        && upper.contains(" IF ")
+    {
+        return Some(("LWT".into(), vec![]));
+    }
     if upper.starts_with("CREATE TABLE") {
+        if with_clause_enables_cdc(&upper) {
+            return Some(("CDC".into(), vec![]));
+        }
         let table = ident_after(trimmed, "CREATE TABLE")?;
         return Some(("CREATE".into(), vec!["TABLE".into(), table]));
+    }
+    if upper.starts_with("ALTER TABLE") {
+        if with_clause_enables_cdc(&upper) {
+            return Some(("CDC".into(), vec![]));
+        }
+        let table = ident_after(trimmed, "ALTER TABLE")?;
+        return Some(("ALTER".into(), vec![table]));
     }
     if upper.starts_with("CREATE KEYSPACE") {
         let ks = ident_after(trimmed, "CREATE KEYSPACE")?;
@@ -29,6 +46,17 @@ pub fn classify_cql(cql: &str) -> Option<(String, Vec<String>)> {
             vec![table, key, val],
         ));
     }
+    if upper.starts_with("UPDATE ") {
+        let table = first_ident(trimmed["UPDATE".len()..].trim_start())?;
+        let key = extract_where_id(cql).unwrap_or_default();
+        let val = extract_set_assignment(cql).unwrap_or_default();
+        return Some(("UPDATE".into(), vec![table, key, val]));
+    }
+    if upper.starts_with("DELETE FROM ") {
+        let table = ident_after(trimmed, "DELETE FROM")?;
+        let key = extract_where_id(cql).unwrap_or_default();
+        return Some(("DELETE".into(), vec![table, key]));
+    }
     if upper.starts_with("SELECT") {
         let table = find_from_table(trimmed, &upper)?;
         if let Some(id) = extract_where_id(cql) {
@@ -41,6 +69,26 @@ pub fn classify_cql(cql: &str) -> Option<(String, Vec<String>)> {
         return Some(("USE".into(), vec![ks]));
     }
     None
+}
+
+fn with_clause_enables_cdc(upper: &str) -> bool {
+    let Some(idx) = upper.find("WITH") else {
+        return false;
+    };
+    upper[idx..]
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|w| w == "CDC")
+}
+
+fn extract_set_assignment(cql: &str) -> Option<String> {
+    let upper = cql.to_ascii_uppercase();
+    let set_pos = upper.find(" SET ")?;
+    let after_set = &cql[set_pos + 5..];
+    let after_set_upper = &upper[set_pos + 5..];
+    let where_pos = after_set_upper.find(" WHERE ")?;
+    let assign = after_set[..where_pos].trim();
+    let eq = assign.find('=')?;
+    parse_literal(assign[eq + 1..].trim())
 }
 
 fn ident_after(original: &str, prefix: &str) -> Option<String> {
@@ -134,6 +182,36 @@ mod tests {
         assert_eq!(a[1], "t");
         let (v, _) = classify_cql("DROP TABLE t").unwrap();
         assert_eq!(v, "DROP");
+    }
+
+    #[test]
+    fn maps_update_delete_alter() {
+        let (v, a) =
+            classify_cql("UPDATE t SET v = 'b' WHERE id = '1'").unwrap();
+        assert_eq!(v, "UPDATE");
+        assert_eq!(a[0], "t");
+        assert_eq!(a[1], "1");
+        assert_eq!(a[2], "b");
+        let (v, a) = classify_cql("DELETE FROM t WHERE id = '1'").unwrap();
+        assert_eq!(v, "DELETE");
+        assert_eq!(a[0], "t");
+        assert_eq!(a[1], "1");
+        let (v, _) = classify_cql("DELETE FROM t WHERE id = '1' IF EXISTS").unwrap();
+        assert_eq!(v, "LWT");
+        let (v, _) =
+            classify_cql("DELETE FROM t WHERE id = '1' IF col = 'x'").unwrap();
+        assert_eq!(v, "LWT");
+        let (v, _) = classify_cql("ALTER TABLE t ADD c text").unwrap();
+        assert_eq!(v, "ALTER");
+    }
+
+    #[test]
+    fn cdc_in_with_is_must_not_verb() {
+        let (v, _) = classify_cql(
+            "CREATE TABLE t (id text PRIMARY KEY) WITH cdc = true",
+        )
+        .unwrap();
+        assert_eq!(v, "CDC");
     }
 
     #[test]

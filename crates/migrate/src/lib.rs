@@ -14,28 +14,28 @@ pub mod transform;
 pub use authz::AuthzContext;
 pub use backup::{BackupOrchestrator, BackupScope, BackupSpec, PitrPosition, RestoreSpec};
 pub use dual_write::{
-    apply_mapped, incomplete_name, CutoverGates, DualWriteRegistry, DualWriteRewrite,
-    DualWriteWindow,
+    CutoverGates, DualWriteRegistry, DualWriteRewrite, DualWriteWindow, apply_mapped,
+    incomplete_name,
 };
 pub use error::MigrateError;
 pub use job::{JobId, JobKind, JobProgress, JobRecord, JobStatus, Strategy};
 pub use mapping::{
-    apply_row_transform, catalog_default, execute_mapping_query, lower_to_logical_request,
-    lower_to_logical_request_json, resolve_mapping, CatalogMapping, MappingQuery, MappingSource,
-    MappingSpec,
+    CatalogMapping, MappingQuery, MappingSource, MappingSpec, apply_row_transform, catalog_default,
+    execute_mapping_query, lower_to_logical_request, lower_to_logical_request_json,
+    resolve_mapping,
 };
 pub use migrate::{
-    erase_with_legal, ContainerRef, MigratePolicy, MigrateRunner, MigrationSpec, PlacementCheck,
+    ContainerRef, MigratePolicy, MigrateRunner, MigrationSpec, PlacementCheck, erase_with_legal,
 };
 pub use quota::{
-    admit_dest_bytes, measure_row_bytes, recheck_dest_bytes, refresh_quota_view, QuotaView,
+    QuotaView, admit_dest_bytes, measure_row_bytes, recheck_dest_bytes, refresh_quota_view,
 };
 pub use store::{JobPersistHook, JobStore};
 pub use transform::{RewriteKind, TransformRunner, TransformSpec};
 
 use parking_lot::Mutex;
 use serde_json::Value;
-use spacestorage_observability::{help_for, LabelSet};
+use spacestorage_observability::{LabelSet, help_for};
 use spacestorage_tenancy::Tenancy;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -123,13 +123,13 @@ impl JobService {
         }
         match kind {
             JobKind::DataMigration => {
-                let spec: MigrationSpec =
-                    serde_json::from_value(body.clone()).map_err(|e| MigrateError::Io(e.to_string()))?;
+                let spec: MigrationSpec = serde_json::from_value(body.clone())
+                    .map_err(|e| MigrateError::Io(e.to_string()))?;
                 spec.validate(authz)?;
             }
             JobKind::DataTransformation => {
-                let spec: TransformSpec =
-                    serde_json::from_value(body.clone()).map_err(|e| MigrateError::Io(e.to_string()))?;
+                let spec: TransformSpec = serde_json::from_value(body.clone())
+                    .map_err(|e| MigrateError::Io(e.to_string()))?;
                 spec.validate(authz)?;
             }
             JobKind::DataBackup | JobKind::DataRestore => {
@@ -218,7 +218,11 @@ impl JobService {
     }
 
     /// Pause a running job after dual-write target failure (status stays `running`).
-    pub fn pause_with_error(&self, id: JobId, err: &MigrateError) -> Result<JobRecord, MigrateError> {
+    pub fn pause_with_error(
+        &self,
+        id: JobId,
+        err: &MigrateError,
+    ) -> Result<JobRecord, MigrateError> {
         self.store.update(id, |j| {
             if j.status == JobStatus::Running {
                 j.set_paused(true);

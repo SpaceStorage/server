@@ -13,7 +13,9 @@ use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
-use crate::dispatch::{dispatch, put_object_bytes, upload_part_bytes, S3Reply, SessionState};
+use crate::dispatch::{
+    compat_must_not_reply, dispatch, put_object_bytes, upload_part_bytes, S3Reply, SessionState,
+};
 use crate::sigv4::{payload_hash_from_headers, verify_sigv4, SigV4Error, SigV4Request};
 
 pub struct S3Handler {
@@ -21,6 +23,7 @@ pub struct S3Handler {
     pub profile: DialectProfile,
     pub namespace: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 }
 
 impl S3Handler {
@@ -34,7 +37,13 @@ impl S3Handler {
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
             limit_services,
+            tenancy: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
     }
 
     pub async fn serve<S>(&self, mut stream: S, cancel: CancellationToken)
@@ -57,6 +66,9 @@ impl S3Handler {
             multipart: Default::default(),
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            connection_quota: None,
+            principal: None,
         };
 
         let mut buf = BytesMut::from(peeked.as_slice());
@@ -260,6 +272,21 @@ fn handle_http(session: &mut SessionState, req: &ParsedHttpRequest) -> S3Reply {
         Ok(p) => p,
         Err((code, message)) => return S3Reply::Error { code, message },
     };
+    if session.connection_quota.is_none() {
+        match spacestorage_tenancy::bind_namespace_session(
+            session.tenancy.as_ref(),
+            &principal,
+            session.namespace.as_str(),
+        ) {
+            Ok(hold) => session.connection_quota = hold,
+            Err(err) => {
+                return S3Reply::Error {
+                    code: "AccessDenied".into(),
+                    message: err.to_string(),
+                };
+            }
+        }
+    }
     if session.principal_hold.is_none() {
         match session.limit_services.try_hold_principal(&principal) {
             Ok(hold) => session.principal_hold = Some(hold),
@@ -271,12 +298,33 @@ fn handle_http(session: &mut SessionState, req: &ParsedHttpRequest) -> S3Reply {
             }
         }
     }
+    session.principal = Some(principal);
 
     let (bucket, key) = split_bucket_key(&req.path);
     let query = req.query.as_deref().map(parse_query).unwrap_or_default();
 
     let method = req.method.to_ascii_uppercase();
     match method.as_str() {
+        "PUT" if key.is_none() && query.contains_key("versioning") => {
+            let b = bucket.as_deref().unwrap_or("bucket");
+            dispatch(session, "VERSIONING", &[b])
+        }
+        "GET" if key.is_none() && query.contains_key("versioning") => {
+            let b = bucket.as_deref().unwrap_or("bucket");
+            dispatch(session, "VERSIONING", &[b])
+        }
+        "GET" | "PUT" if query.contains_key("acl") => {
+            let b = bucket.as_deref().unwrap_or("bucket");
+            dispatch(session, "ACL", &[b])
+        }
+        "GET" | "PUT" if key.is_none() && query.contains_key("object-lock") => {
+            let b = bucket.as_deref().unwrap_or("bucket");
+            dispatch(session, "OBJECTLOCK", &[b])
+        }
+        "GET" | "PUT" if key.is_none() && query.contains_key("replication") => {
+            let b = bucket.as_deref().unwrap_or("bucket");
+            dispatch(session, "REPLICATION", &[b])
+        }
         "PUT" if key.is_none() => {
             let b = bucket.as_deref().unwrap_or("bucket");
             dispatch(session, "CREATEBUCKET", &[b])
@@ -295,14 +343,22 @@ fn handle_http(session: &mut SessionState, req: &ParsedHttpRequest) -> S3Reply {
             let prefix = query.get("prefix").map(String::as_str).unwrap_or("");
             dispatch(session, "LISTOBJECTSV2", &[b, prefix])
         }
+        "GET" if bucket.is_none() => dispatch(session, "LISTBUCKETS", &[]),
+        "GET" if key.is_none() && bucket.is_some() => compat_must_not_reply("GETOBJECT"),
+        "GET" if query.contains_key("uploadId") => compat_must_not_reply("LISTPARTS"),
         "GET" => {
             let b = bucket.as_deref().unwrap_or("bucket");
-            let k = key.as_deref().unwrap_or("key");
+            let k = key.as_deref().expect("object key");
             dispatch(session, "GETOBJECT", &[b, k])
         }
+        "DELETE" if key.is_none() => {
+            let b = bucket.as_deref().unwrap_or("bucket");
+            dispatch(session, "DELETEBUCKET", &[b])
+        }
+        "DELETE" if query.contains_key("uploadId") => compat_must_not_reply("ABORTMULTIPARTUPLOAD"),
         "DELETE" => {
             let b = bucket.as_deref().unwrap_or("bucket");
-            let k = key.as_deref().unwrap_or("key");
+            let k = key.as_deref().expect("object key");
             dispatch(session, "DELETEOBJECT", &[b, k])
         }
         "POST" if query.contains_key("uploads") => {
@@ -446,6 +502,7 @@ mod tests {
                             profile: handler.profile,
                             namespace: handler.namespace.clone(),
                             limit_services: handler.limit_services.clone(),
+                            tenancy: handler.tenancy.clone(),
                         };
                         let c = cancel.child_token();
                         tokio::spawn(async move { h.serve(sock, c).await });
@@ -511,6 +568,56 @@ mod tests {
         let n = stream.read(&mut resp).await.unwrap();
         assert!(String::from_utf8_lossy(&resp[..n]).contains("200 OK"));
         cancel.cancel();
+    }
+
+    async fn demo_get(path_and_query: &str) -> String {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let handler = S3Handler::with_demo(Arc::clone(&cat));
+        let cancel = CancellationToken::new();
+        let addr = spawn_s3_listener(handler, cancel.clone()).await;
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let req = format!(
+            "GET {path_and_query} HTTP/1.1\r\nHost: localhost\r\nx-spacestorage-demo-auth: demo\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut resp = vec![0u8; 4096];
+        let n = stream.read(&mut resp).await.unwrap();
+        cancel.cancel();
+        String::from_utf8_lossy(&resp[..n]).into_owned()
+    }
+
+    async fn demo_delete(path_and_query: &str) -> String {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let handler = S3Handler::with_demo(Arc::clone(&cat));
+        let cancel = CancellationToken::new();
+        let addr = spawn_s3_listener(handler, cancel.clone()).await;
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let req = format!(
+            "DELETE {path_and_query} HTTP/1.1\r\nHost: localhost\r\nx-spacestorage-demo-auth: demo\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut resp = vec![0u8; 4096];
+        let n = stream.read(&mut resp).await.unwrap();
+        cancel.cancel();
+        String::from_utf8_lossy(&resp[..n]).into_owned()
+    }
+
+    #[tokio::test]
+    async fn keyless_get_not_list_v2_is_compat_must_not() {
+        let text = demo_get("/mybucket").await;
+        assert!(text.contains("501"), "{text}");
+        assert!(text.contains("compat_must_not"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn list_parts_and_abort_multipart_are_compat_must_not() {
+        let list_parts = demo_get("/b/k?uploadId=up-1").await;
+        assert!(list_parts.contains("501"), "{list_parts}");
+        assert!(list_parts.contains("compat_must_not"), "{list_parts}");
+
+        let abort = demo_delete("/b/k?uploadId=up-1").await;
+        assert!(abort.contains("501"), "{abort}");
+        assert!(abort.contains("compat_must_not"), "{abort}");
     }
 
     #[tokio::test]

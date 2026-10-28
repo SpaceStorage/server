@@ -46,7 +46,15 @@ mod tests {
         let filtered = filter_namespace(&series, "acme");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].labels.get("namespace"), Some("acme"));
-        assert!(filtered.iter().all(|s| s.labels.get("namespace") == Some("acme")));
-        assert!(filtered.iter().all(|s| s.labels.get("namespace") != Some("other")));
+        assert!(
+            filtered
+                .iter()
+                .all(|s| s.labels.get("namespace") == Some("acme"))
+        );
+        assert!(
+            filtered
+                .iter()
+                .all(|s| s.labels.get("namespace") != Some("other"))
+        );
     }
 }

@@ -101,6 +101,10 @@ pub enum LogicalRequest {
     TxnBegin {
         isolation: IsolationLevel,
     },
+    /// `SET TRANSACTION ISOLATION LEVEL …` on an open transaction (015 FR-006).
+    TxnSetIsolation {
+        isolation: IsolationLevel,
+    },
     TxnCommit,
     TxnRollback,
     SubscribeWait {

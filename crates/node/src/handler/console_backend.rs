@@ -1,14 +1,14 @@
 //! Console → shared `005` planner + `001`/`006`/`007` admin config surfaces (009 T050/T060).
 
 use crate::Node;
+use serde_json::{Value, json};
 use spacestorage_admin_ui::{
-    ConsoleAuthz, ConsoleBackend, ConsoleCreateContainer, ConsoleConfigRequest, ConsoleError,
-    ConsoleQueryRequest, APPLICATION_UI, MAX_PAGE_BYTES, MAX_PAGE_ROWS,
+    APPLICATION_UI, ConsoleAuthz, ConsoleBackend, ConsoleConfigRequest, ConsoleCreateContainer,
+    ConsoleError, ConsoleQueryRequest, MAX_PAGE_BYTES, MAX_PAGE_ROWS,
 };
 use spacestorage_query::{
-    ensure_container, object_scan, CancelToken, LogicalRequest, PlannerEngine, QueryOptions,
+    CancelToken, LogicalRequest, PlannerEngine,
 };
-use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,6 +32,15 @@ impl CatalogConsoleBackend {
             Arc::clone(&self.node.catalog),
             cfg!(feature = "complete-product"),
         )
+        .with_tenancy(Arc::clone(&self.node.tenancy))
+    }
+
+    fn query_options(&self, authz: &ConsoleAuthz) -> spacestorage_query::QueryOptions {
+        let mut options = spacestorage_query::QueryOptions::default();
+        if !authz.principal.is_empty() {
+            options.principal = Some(authz.principal.clone());
+        }
+        options
     }
 
     fn model_for_type(type_name: &str) -> &'static str {
@@ -98,7 +107,7 @@ impl CatalogConsoleBackend {
                         _ => {
                             return Err(ConsoleError::Invalid(
                                 "admin.token_file must be string or null".into(),
-                            ))
+                            ));
                         }
                     };
                     next.admin_token_file = path;
@@ -165,7 +174,7 @@ impl CatalogConsoleBackend {
 impl ConsoleBackend for CatalogConsoleBackend {
     fn query(
         &self,
-        _authz: &ConsoleAuthz,
+        authz: &ConsoleAuthz,
         req: &ConsoleQueryRequest,
     ) -> Result<Value, ConsoleError> {
         let ns = req.namespace.as_deref().unwrap_or("");
@@ -182,12 +191,23 @@ impl ConsoleBackend for CatalogConsoleBackend {
                     LogicalRequest::AdHocSql {
                         sql: sql.to_string(),
                     },
-                    QueryOptions::default(),
+                    self.query_options(authz),
                     CancelToken::new(),
                 )
                 .map_err(|e| ConsoleError::Invalid(e.to_string()))?
         } else {
-            object_scan(&self.node.catalog, ns, container, None)
+            engine
+                .execute_blocking(
+                    ns,
+                    APPLICATION_UI,
+                    APPLICATION_UI,
+                    LogicalRequest::Scan {
+                        container: container.to_string(),
+                        filter: None,
+                    },
+                    self.query_options(authz),
+                    CancelToken::new(),
+                )
                 .map_err(|e| ConsoleError::Invalid(e.to_string()))?
         };
         let mut rows: Vec<Value> = result
@@ -235,7 +255,11 @@ impl ConsoleBackend for CatalogConsoleBackend {
                     return Err(ConsoleError::Forbidden);
                 }
                 let applied = if req.settings.is_null()
-                    || req.settings.as_object().map(|o| o.is_empty()).unwrap_or(false)
+                    || req
+                        .settings
+                        .as_object()
+                        .map(|o| o.is_empty())
+                        .unwrap_or(false)
                 {
                     Vec::new()
                 } else {
@@ -257,7 +281,11 @@ impl ConsoleBackend for CatalogConsoleBackend {
                     return Err(ConsoleError::Forbidden);
                 }
                 let applied = if req.settings.is_null()
-                    || req.settings.as_object().map(|o| o.is_empty()).unwrap_or(false)
+                    || req
+                        .settings
+                        .as_object()
+                        .map(|o| o.is_empty())
+                        .unwrap_or(false)
                 {
                     Vec::new()
                 } else {
@@ -277,17 +305,30 @@ impl ConsoleBackend for CatalogConsoleBackend {
                     "settings": stored,
                 }))
             }
-            _ => Err(ConsoleError::Invalid("scope must be cluster|namespace".into())),
+            _ => Err(ConsoleError::Invalid(
+                "scope must be cluster|namespace".into(),
+            )),
         }
     }
 
     fn create_container(
         &self,
-        _authz: &ConsoleAuthz,
+        authz: &ConsoleAuthz,
         req: &ConsoleCreateContainer,
     ) -> Result<Value, ConsoleError> {
         let model = Self::model_for_type(&req.type_name);
-        ensure_container(&self.node.catalog, &req.namespace, &req.name, model)
+        self.engine()
+            .execute_blocking(
+                &req.namespace,
+                APPLICATION_UI,
+                APPLICATION_UI,
+                LogicalRequest::TypeOp {
+                    container: req.name.clone(),
+                    op: format!("ensure_{model}"),
+                },
+                self.query_options(authz),
+                CancelToken::new(),
+            )
             .map_err(|e| ConsoleError::Invalid(e.to_string()))?;
         Ok(json!({
             "namespace": req.namespace,

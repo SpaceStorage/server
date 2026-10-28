@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }
+spacestorage-tenancy = { path = "../tenancy" }
 spacestorage-protocol-core = { path = "../protocol-core" }
 spacestorage-query = { path = "../query" }
 tokio = { workspace = true }

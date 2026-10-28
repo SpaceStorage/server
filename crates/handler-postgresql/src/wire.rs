@@ -20,10 +20,15 @@ pub enum WireError {
 
 #[derive(Debug, Clone)]
 pub enum FrontendMessage {
-    Startup { params: Vec<(String, String)> },
+    Startup {
+        params: Vec<(String, String)>,
+    },
     SslRequest,
     GssRequest,
-    CancelRequest { pid: i32, key: i32 },
+    CancelRequest {
+        pid: i32,
+        key: i32,
+    },
     PasswordMsg(Vec<u8>),
     Query(String),
     Parse {
@@ -36,10 +41,19 @@ pub enum FrontendMessage {
         statement: String,
         params: Vec<Option<Vec<u8>>>,
     },
-    Describe { typ: u8, name: String },
-    Execute { portal: String, max_rows: i32 },
+    Describe {
+        typ: u8,
+        name: String,
+    },
+    Execute {
+        portal: String,
+        max_rows: i32,
+    },
     Sync,
-    Close { typ: u8, name: String },
+    Close {
+        typ: u8,
+        name: String,
+    },
     Flush,
     Terminate,
     Other(u8),

@@ -5,9 +5,11 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use spacestorage_compat::LimitServices;
 use spacestorage_handler_clickhouse::{ClickHouseHttpHandler, ClickHouseNativeHandler};
+use spacestorage_tenancy::NamespaceControl;
 use spacestorage_types::ContainerCatalog;
 use tokio_util::sync::CancellationToken;
 
+use crate::handler::controlplane_namespaces::ControlPlaneNamespaces;
 use crate::handler::{ClientStream, Handler};
 
 pub struct ClickHousePortHandler {
@@ -25,6 +27,37 @@ impl ClickHousePortHandler {
     ) -> Self {
         Self {
             inner: ClickHouseNativeHandler::with_limits(catalog, limit_services),
+        }
+    }
+
+    pub fn with_tenancy(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+    ) -> Self {
+        Self {
+            inner: ClickHouseNativeHandler::with_limits(catalog, limit_services)
+                .with_tenancy(tenancy),
+        }
+    }
+
+    pub fn with_namespace_control(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        controlplane: Arc<
+            tokio::sync::RwLock<Option<Arc<spacestorage_controlplane::ControlPlane>>>,
+        >,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+    ) -> Self {
+        let control: Arc<dyn NamespaceControl> = Arc::new(ControlPlaneNamespaces {
+            controlplane,
+            tenancy: Arc::clone(&tenancy),
+            catalog: Arc::clone(&catalog),
+        });
+        Self {
+            inner: ClickHouseNativeHandler::with_limits(catalog, limit_services)
+                .with_tenancy(tenancy)
+                .with_namespace_control(control),
         }
     }
 }
@@ -63,6 +96,36 @@ impl ClickHouseHttpPortHandler {
     ) -> Self {
         Self {
             inner: ClickHouseHttpHandler::with_limits(catalog, limit_services),
+        }
+    }
+
+    pub fn with_tenancy(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+    ) -> Self {
+        Self {
+            inner: ClickHouseHttpHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
+        }
+    }
+
+    pub fn with_namespace_control(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        controlplane: Arc<
+            tokio::sync::RwLock<Option<Arc<spacestorage_controlplane::ControlPlane>>>,
+        >,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+    ) -> Self {
+        let control: Arc<dyn NamespaceControl> = Arc::new(ControlPlaneNamespaces {
+            controlplane,
+            tenancy: Arc::clone(&tenancy),
+            catalog: Arc::clone(&catalog),
+        });
+        Self {
+            inner: ClickHouseHttpHandler::with_limits(catalog, limit_services)
+                .with_tenancy(tenancy)
+                .with_namespace_control(control),
         }
     }
 }

@@ -91,6 +91,7 @@ impl UiPrincipal {
 
     pub fn console_authz(&self) -> ConsoleAuthz {
         ConsoleAuthz {
+            principal: self.id.clone(),
             cluster_admin: self.cluster_admin,
             namespace_admin: self.namespace_admin.clone(),
             write_containers: self.write_containers.clone(),

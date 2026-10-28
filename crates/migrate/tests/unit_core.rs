@@ -1,9 +1,9 @@
 //! Fixture + dual-write + first-binary stub unit tests (010).
 
 use spacestorage_migrate::{
-    apply_mapped, incomplete_name, resolve_mapping, stub_service, AuthzContext, CutoverGates,
-    DualWriteRegistry, DualWriteWindow, JobKind, JobService, MappingQuery, MappingSource,
-    MigrateError, QuotaView, Strategy,
+    AuthzContext, CutoverGates, DualWriteRegistry, DualWriteWindow, JobKind, JobService,
+    MappingQuery, MappingSource, MigrateError, QuotaView, Strategy, apply_mapped, incomplete_name,
+    resolve_mapping, stub_service,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -88,7 +88,10 @@ fn dual_write_sequence_and_cutover() {
         b"v2".to_vec(),
         &mut dest
     ));
-    assert_eq!(dest.get(b"k".as_slice()).map(|v| v.as_slice()), Some(b"v".as_slice()));
+    assert_eq!(
+        dest.get(b"k".as_slice()).map(|v| v.as_slice()),
+        Some(b"v".as_slice())
+    );
 
     let gates = CutoverGates {
         last_applied_source_seq: 5,
@@ -129,7 +132,7 @@ fn mapping_catalog_vs_query() {
 
 #[test]
 fn transform_rewrite_changes_bytes_not_identity() {
-    use spacestorage_migrate::{apply_row_transform, catalog_default, MappingSpec};
+    use spacestorage_migrate::{MappingSpec, apply_row_transform, catalog_default};
     let mapping = MappingSpec::Catalog(catalog_default("kv_store", "kv_store").unwrap());
     let (k, v) = apply_row_transform("re_encode", &mapping, b"k", b"v");
     assert_eq!(k, b"k");
@@ -155,17 +158,14 @@ fn dual_write_intercept_buffers_target() {
     })
     .unwrap();
     let seq = reg
-        .intercept_source_write(
-            src,
-            b"k",
-            b"v",
-            |_tid, _k, _v| Ok(()),
-            |_jid, _e| {},
-        )
+        .intercept_source_write(src, b"k", b"v", |_tid, _k, _v| Ok(()), |_jid, _e| {})
         .unwrap();
     assert!(seq.is_some());
     let pending = reg.pending_for(tgt);
-    assert_eq!(pending.get(b"k".as_slice()).map(|v| v.as_slice()), Some(b"v".as_slice()));
+    assert_eq!(
+        pending.get(b"k".as_slice()).map(|v| v.as_slice()),
+        Some(b"v".as_slice())
+    );
     assert_eq!(reg.grown_source_bytes(src, 10), 12); // baseline 10 + len(k)+len(v)
 }
 
@@ -202,7 +202,7 @@ fn dual_write_target_fail_pauses_and_does_not_ack() {
 
 #[test]
 fn dual_write_rewrite_maps_interceptor_puts() {
-    use spacestorage_migrate::{catalog_default, DualWriteRewrite, MappingSpec};
+    use spacestorage_migrate::{DualWriteRewrite, MappingSpec, catalog_default};
     let reg = DualWriteRegistry::new();
     let src = Uuid::now_v7();
     let tgt = Uuid::now_v7();
@@ -235,7 +235,10 @@ fn dual_write_rewrite_maps_interceptor_puts() {
     assert_eq!(ak, b"k");
     assert!(av.starts_with(b"re_encode/v1|"));
     let pending = reg.pending_for(tgt);
-    assert_eq!(pending.get(b"k".as_slice()).map(|v| v.as_slice()), Some(av.as_slice()));
+    assert_eq!(
+        pending.get(b"k".as_slice()).map(|v| v.as_slice()),
+        Some(av.as_slice())
+    );
 }
 
 #[test]
@@ -289,15 +292,19 @@ fn pending_drain_includes_puts_after_first_take() {
     }
     let leftover = reg.unregister(src);
     got.extend(leftover);
-    assert_eq!(got.get(b"k1".as_slice()).map(|v| v.as_slice()), Some(b"v1".as_slice()));
-    assert_eq!(got.get(b"k2".as_slice()).map(|v| v.as_slice()), Some(b"v2".as_slice()));
+    assert_eq!(
+        got.get(b"k1".as_slice()).map(|v| v.as_slice()),
+        Some(b"v1".as_slice())
+    );
+    assert_eq!(
+        got.get(b"k2".as_slice()).map(|v| v.as_slice()),
+        Some(b"v2".as_slice())
+    );
 }
 
 #[test]
 fn transform_swap_keeps_source_rows_and_publishes_target() {
-    use spacestorage_migrate::{
-        ContainerRef, JobStatus, RewriteKind, Strategy, TransformSpec,
-    };
+    use spacestorage_migrate::{ContainerRef, JobStatus, RewriteKind, Strategy, TransformSpec};
     use spacestorage_storage::{ContentStore, StorageMode};
 
     let svc = JobService::new(true);
@@ -358,7 +365,10 @@ fn transform_swap_keeps_source_rows_and_publishes_target() {
     assert!(swapped.is_some());
     assert_ne!(swapped, Some(source_id));
     // Source content left intact when retain_source (not wiped by stale snapshot publish).
-    assert_eq!(content.get(source_id, b"a").as_deref(), Some(b"1".as_slice()));
+    assert_eq!(
+        content.get(source_id, b"a").as_deref(),
+        Some(b"1".as_slice())
+    );
     let tid = swapped.unwrap();
     let exported = content.export_durable(tid);
     assert!(exported.values().any(|v| v.starts_with(b"re_encode/v1|")));
@@ -420,7 +430,9 @@ fn plan_replicas_refuses_unsatisfiable_anti_affinity() {
 
 #[test]
 fn mapping_query_executes_via_005_logical_request() {
-    use spacestorage_migrate::{execute_mapping_query, lower_to_logical_request, MappingQuery, MappingSource};
+    use spacestorage_migrate::{
+        MappingQuery, MappingSource, execute_mapping_query, lower_to_logical_request,
+    };
     use spacestorage_query::LogicalRequest;
 
     let q = MappingQuery {
@@ -443,7 +455,10 @@ fn mapping_query_executes_via_005_logical_request() {
     let mut rows = HashMap::new();
     rows.insert(b"k1".to_vec(), b"v1".to_vec());
     let out = execute_mapping_query(&q, &rows).unwrap();
-    assert_eq!(out.get(b"k1".as_slice()).map(|v| v.as_slice()), Some(b"v1".as_slice()));
+    assert_eq!(
+        out.get(b"k1".as_slice()).map(|v| v.as_slice()),
+        Some(b"v1".as_slice())
+    );
 }
 
 #[test]

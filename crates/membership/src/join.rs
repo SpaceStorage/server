@@ -238,6 +238,13 @@ fn admit_member(
     req: &JoinRequest,
     events: &mut Vec<MembershipEvent>,
 ) -> Result<JoinAck> {
+    let mut labels = req.labels.clone();
+    if !req.internodes_address.is_empty() {
+        labels.insert(
+            "internodes_address".into(),
+            req.internodes_address.clone(),
+        );
+    }
     let member = MemberRecord {
         node_id: req.node_id,
         node_name: req.node_name.clone(),
@@ -245,7 +252,7 @@ fn admit_member(
         incarnation: 1,
         quorum_domain: req.quorum_domain.clone(),
         voter: false,
-        labels: req.labels.clone(),
+        labels,
     };
     view.pending.remove(&req.node_id);
     view.members.insert(req.node_id, member);

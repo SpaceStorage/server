@@ -27,6 +27,16 @@ impl RedisPortHandler {
             inner: RedisHandler::with_limits(catalog, limit_services),
         }
     }
+
+    pub fn with_tenancy(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+    ) -> Self {
+        Self {
+            inner: RedisHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
+        }
+    }
 }
 
 #[async_trait]

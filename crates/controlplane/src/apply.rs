@@ -37,7 +37,25 @@ impl ApplyEngine {
                     self.namespaces
                         .insert(*id, NamespaceState::new(*id, ns_vs));
                 }
+                if let ClusterOp::Tenancy {
+                    tenancy_op: spacestorage_tenancy::TenancyOp::NamespaceCreate { .. },
+                    assigned_id: Some(id),
+                } = &op
+                {
+                    let vs = self.cluster.voter_set.clone();
+                    let mut ns_vs = vs;
+                    ns_vs.group = GroupId::Namespace(*id);
+                    self.namespaces
+                        .insert(*id, NamespaceState::new(*id, ns_vs));
+                }
                 if let ClusterOp::DeleteNamespace { id } = &op {
+                    self.namespaces.remove(id);
+                }
+                if let ClusterOp::Tenancy {
+                    tenancy_op: spacestorage_tenancy::TenancyOp::NamespaceDelete { id, .. },
+                    ..
+                } = &op
+                {
                     self.namespaces.remove(id);
                 }
                 self.cluster.apply(op, rec.hlc.clone());

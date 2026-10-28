@@ -31,6 +31,7 @@ spacestorage-membership = { path = "../membership" }
 spacestorage-observability = { path = "../observability" }
 spacestorage-placement = { path = "../placement" }
 spacestorage-storage = { path = "../storage" }
+spacestorage-tenancy = { path = "../tenancy" }
 # Edition-2024 openraft (needs rustc ≥ 1.88). Pulls validit / quorum-set transitively.
 openraft = { version = "=0.10.0-alpha.35", default-features = false, features = ["serde", "tokio-rt", "type-alias"] }
 

@@ -19,6 +19,7 @@ pub struct ElasticsearchHandler {
     pub profile: DialectProfile,
     pub namespace: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 }
 
 impl ElasticsearchHandler {
@@ -32,7 +33,13 @@ impl ElasticsearchHandler {
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
             limit_services,
+            tenancy: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
     }
 
     pub async fn serve<S>(&self, stream: S, cancel: CancellationToken)
@@ -61,6 +68,9 @@ impl ElasticsearchHandler {
             profile: self.profile,
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            connection_quota: None,
+            principal: None,
         };
 
         loop {
@@ -70,29 +80,52 @@ impl ElasticsearchHandler {
                     match read {
                         Ok(Some(req)) => {
                             let reply = match authenticate(&req.headers) {
-                                Ok((user, ns)) => {
+                                Ok((user, ns)) => 'es_auth: {
+                                    session.namespace = ns;
+                                    if session.connection_quota.is_none() {
+                                        match spacestorage_tenancy::bind_namespace_session(
+                                            session.tenancy.as_ref(),
+                                            &user,
+                                            session.namespace.as_str(),
+                                        ) {
+                                            Ok(hold) => session.connection_quota = hold,
+                                            Err(err) => {
+                                                break 'es_auth EsReply::Error {
+                                                    status: 403,
+                                                    body: serde_json::json!({
+                                                        "error": {
+                                                            "type": "security_exception",
+                                                            "reason": err.to_string()
+                                                        },
+                                                        "status": 403
+                                                    }),
+                                                };
+                                            }
+                                        }
+                                    }
                                     if session.principal_hold.is_none() {
                                         match session.limit_services.try_hold_principal(&user) {
                                             Ok(hold) => {
                                                 session.principal_hold = Some(hold);
-                                                session.namespace = ns;
-                                                router::route(&mut session, &req)
+                                                session.principal = Some(user.clone());
                                             }
-                                            Err(e) => EsReply::Error {
-                                                status: 429,
-                                                body: serde_json::json!({
-                                                    "error": {
-                                                        "type": "limit_exceeded",
-                                                        "reason": e.to_string()
-                                                    },
-                                                    "status": 429
-                                                }),
-                                            },
+                                            Err(e) => {
+                                                break 'es_auth EsReply::Error {
+                                                    status: 429,
+                                                    body: serde_json::json!({
+                                                        "error": {
+                                                            "type": "limit_exceeded",
+                                                            "reason": e.to_string()
+                                                        },
+                                                        "status": 429
+                                                    }),
+                                                };
+                                            }
                                         }
-                                    } else {
-                                        session.namespace = ns;
-                                        router::route(&mut session, &req)
+                                    } else if session.principal.is_none() {
+                                        session.principal = Some(user.clone());
                                     }
+                                    router::route(&mut session, &req)
                                 }
                                 Err(r) => r,
                             };

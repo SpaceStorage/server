@@ -2,8 +2,8 @@ use crate::ast::{Arg, Document, Item};
 use crate::error::{ConfigError, ErrorCode};
 use crate::model::{
     ClusterDecl, DriveDecl, EntrypointDecl, JobsDecl, KafkaIngestDecl, KeysDecl, LogKafkaDecl,
-    LogSyslogDecl, MetricsDecl, NodeConfig, QueryDecl, QueryDefaults, StorageDecl, SyslogIngestDecl,
-    TlsDecl, Transport,
+    LogSyslogDecl, MetricsDecl, NamespaceDecl, NodeConfig, QueryDecl, QueryDefaults, StorageDecl,
+    SyslogIngestDecl, TlsDecl, Transport,
 };
 use spacestorage_compat::{EffectiveLimits, Limits};
 use std::collections::BTreeMap;
@@ -39,6 +39,7 @@ pub fn resolve(
         log_syslog: None,
         jobs: JobsDecl::default(),
         kafka_ingests: Vec::new(),
+        namespaces: Vec::new(),
     };
 
     for item in &doc.items {
@@ -464,6 +465,10 @@ pub fn resolve(
                                             .unwrap_or(true);
                                         cfg.cluster.controller_exclusive_data = on;
                                     }
+                                    "starter_namespace" => {
+                                        cfg.cluster.starter_namespace =
+                                            d.args.first().map(|a| a.as_str());
+                                    }
                                     _ => {}
                                 }
                             }
@@ -871,8 +876,93 @@ pub fn resolve(
                         }
                     }
                 }
+                "namespace" => {
+                    let name = b.args.first().map(|a| a.as_str()).unwrap_or_default();
+                    let mut quota_declared = false;
+                    for item in &b.items {
+                        if let Item::Directive(d) = item {
+                            if matches!(d.name.as_str(), "private_metrics" | "private_logs") {
+                                if d.args.first().is_some_and(|a| a.as_str() == "on") {
+                                    errors.push(ConfigError::new(
+                                        file,
+                                        d.line,
+                                        d.col,
+                                        format!("namespace.{name}.{}", d.name),
+                                        ErrorCode::ObservabilityRequired,
+                                        "ObservabilityRequired",
+                                    ));
+                                }
+                            }
+                        }
+                        if let Item::Block(inner) = item {
+                            if inner.name == "quota" {
+                                quota_declared = true;
+                                for quota in &inner.items {
+                                    if let Item::Directive(d) = quota {
+                                        if d.args.iter().any(|arg| arg.as_str().starts_with('-')) {
+                                            errors.push(ConfigError::new(
+                                                file,
+                                                d.line,
+                                                d.col,
+                                                format!("namespace.{name}.quota.{}", d.name),
+                                                ErrorCode::QuotaNegative,
+                                                "QuotaNegative",
+                                            ));
+                                        }
+                                    }
+                                }
+                                #[cfg(not(feature = "tenancy-quotas"))]
+                                if !inner.items.iter().any(|item| {
+                                    matches!(item, Item::Directive(d) if d.args.iter().any(|arg| arg.as_str().starts_with('-')))
+                                }) {
+                                    errors.push(ConfigError::new(
+                                        file,
+                                        inner.line,
+                                        inner.col,
+                                        format!("namespace.{name}.quota"),
+                                        ErrorCode::Slice7Required,
+                                        "quota block requires tenancy-quotas (slice 7)",
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    cfg.namespaces.push(NamespaceDecl {
+                        name,
+                        quota_declared,
+                    });
+                }
+                "container" => {
+                    let cname = b.args.first().map(|a| a.as_str()).unwrap_or_default();
+                    for item in &b.items {
+                        if let Item::Block(inner) = item {
+                            if inner.name != "encryption" {
+                                continue;
+                            }
+                            for enc_item in &inner.items {
+                                if let Item::Directive(d) = enc_item {
+                                    if d.name == "key" {
+                                        if let Some(key) = d.args.first() {
+                                            let key = key.as_str();
+                                            if !key.is_empty() {
+                                                errors.push(ConfigError::new(
+                                                    file,
+                                                    d.line,
+                                                    d.col,
+                                                    format!("container.{cname}.encryption.key"),
+                                                    ErrorCode::KeyMaterialForbidden,
+                                                    "KeyMaterialForbidden",
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // reserved foreign blocks accepted for first-binary fixtures / later features
-                "labels" | "memory" | "namespace" | "replication" | "types" => {}
+                "labels" | "memory" | "replication" | "types" => {}
                 "ingest" => {
                     // `ingest kafka NAME { … }` — block name is ingest, first arg may be "kafka"
                     let kind = b.args.first().map(|a| a.as_str()).unwrap_or_default();

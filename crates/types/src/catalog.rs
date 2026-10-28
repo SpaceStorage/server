@@ -1,7 +1,8 @@
 //! Container / type catalogs with CRUD for first-binary L3 models.
 
 use crate::definition::{ContainerDefinition, StorageModeChoice};
-use crate::descriptor::TypeDescriptor;
+use crate::descriptor::{ProductVersion, TypeDescriptor};
+use spacestorage_compat::refuse_type_too_new;
 use crate::error::TypeError;
 use crate::ident::{new_container_id, ContainerId, ContainerName, NamespaceName};
 use crate::schema::ContainerSchema;
@@ -76,12 +77,19 @@ impl TypeCatalog {
     pub fn describe(&self, name: &str) -> Result<&TypeDescriptor, TypeError> {
         self.resolve(name).ok_or(TypeError::UnknownType)
     }
+
+    /// Register or replace a descriptor (admin / tests).
+    pub fn register_descriptor(&mut self, descriptor: TypeDescriptor) {
+        self.types.insert(descriptor.name.clone(), descriptor);
+    }
 }
 
 pub type Catalog = ContainerCatalog;
 
 pub struct ContainerCatalog {
     pub types: TypeCatalog,
+    /// Local cluster product version for rolling-upgrade refuse (015).
+    product_version: ProductVersion,
     containers: HashMap<(String, String), Container>,
     /// In-memory row store for CRUD smoke (canonical blob path readiness).
     rows: HashMap<ContainerId, HashMap<String, Vec<u8>>>,
@@ -119,12 +127,21 @@ impl ContainerCatalog {
     pub fn new() -> Self {
         Self {
             types: TypeCatalog::first_binary(),
+            product_version: ProductVersion::FIRST_BINARY,
             containers: HashMap::new(),
             rows: HashMap::new(),
             durable_put: None,
             durable_create: None,
             write_interceptor: None,
         }
+    }
+
+    pub fn product_version(&self) -> ProductVersion {
+        self.product_version
+    }
+
+    pub fn set_product_version(&mut self, version: ProductVersion) {
+        self.product_version = version;
     }
 
     pub fn set_durable_hooks(
@@ -155,6 +172,7 @@ impl ContainerCatalog {
             mode,
             multi_active,
             schema: schema.clone(),
+            encryption: None,
         };
         self.create_from_definition(namespace, name, &def)
     }
@@ -165,7 +183,23 @@ impl ContainerCatalog {
         name: impl Into<String>,
         def: &ContainerDefinition,
     ) -> Result<ContainerId, TypeError> {
+        if matches!(def.mode, StorageModeChoice::Memory) {
+            if let Some(enc) = &def.encryption {
+                if matches!(enc.scope, crate::definition::EncryptionScope::Drives) {
+                    return Err(TypeError::Msg(
+                        "EncryptionScopeInvalid{mode=memory, scope=drives}".into(),
+                    ));
+                }
+            }
+        }
         let model = validate_definition(&self.types, def)?;
+        let descriptor = self.types.describe(&def.type_name)?;
+        refuse_type_too_new(
+            self.product_version,
+            &descriptor.name,
+            descriptor.introduced_in,
+        )
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
         let ns = namespace.into();
         let n = name.into();
         let key = (ns.clone(), n.clone());
@@ -181,6 +215,7 @@ impl ContainerCatalog {
             multi_active: false,
             schema: def.schema.clone(),
             mode: def.mode,
+            encryption: def.encryption.clone(),
         };
         self.rows.insert(id, HashMap::new());
         self.containers.insert(key, c);
@@ -216,6 +251,7 @@ impl ContainerCatalog {
             multi_active: false,
             schema,
             mode,
+            encryption: None,
         };
         self.rows.entry(id).or_default();
         self.containers.insert(key, c);
@@ -460,6 +496,19 @@ impl ContainerCatalog {
         Ok((next, out))
     }
 
+    /// Logical byte/object counts for quota seeding (RF does not multiply).
+    pub fn logical_usage(&self, id: ContainerId) -> (u64, u64) {
+        self.rows
+            .get(&id)
+            .map(|rows| {
+                (
+                    rows.values().map(|v| v.len() as u64).sum(),
+                    rows.len() as u64,
+                )
+            })
+            .unwrap_or((0, 0))
+    }
+
     pub fn list(&self) -> impl Iterator<Item = &Container> {
         self.containers.values()
     }
@@ -519,9 +568,54 @@ mod tests {
     }
 
     #[test]
+    fn encryption_reference_is_attached_and_described_without_key_bytes() {
+        let mut catalog = ContainerCatalog::new();
+        let definition = ContainerDefinition {
+            type_name: "kv_store".into(),
+            mode: StorageModeChoice::Persistent,
+            multi_active: false,
+            schema: None,
+            encryption: Some(crate::definition::EncryptionDeclaration {
+                algorithm: crate::definition::EncryptionAlgorithm::Aes256Gcm,
+                key_ref: "vault://tenant/acme/data".into(),
+                scope: crate::definition::EncryptionScope::Drives,
+            }),
+        };
+        catalog
+            .create_from_definition("acme", "items", &definition)
+            .unwrap();
+        let described = catalog.describe("acme", "items").unwrap();
+        let json = serde_json::to_value(described.encryption.as_ref().unwrap()).unwrap();
+        assert_eq!(json["key_ref"], "vault://tenant/acme/data");
+        assert!(!json.to_string().contains("key_bytes"));
+        assert!(!json.to_string().contains("material"));
+    }
+
+    #[test]
+    fn memory_mode_refuses_encryption_scope_drives() {
+        let mut catalog = ContainerCatalog::new();
+        let definition = ContainerDefinition {
+            type_name: "kv_store".into(),
+            mode: StorageModeChoice::Memory,
+            multi_active: false,
+            schema: None,
+            encryption: Some(crate::definition::EncryptionDeclaration {
+                algorithm: crate::definition::EncryptionAlgorithm::Aes256Gcm,
+                key_ref: "vault://tenant/acme/data".into(),
+                scope: crate::definition::EncryptionScope::Drives,
+            }),
+        };
+        let err = catalog
+            .create_from_definition("acme", "items", &definition)
+            .unwrap_err();
+        assert!(err.to_string().contains("EncryptionScopeInvalid"));
+    }
+
+    #[test]
     fn create_refuses_unregistered_type_name() {
         let mut c = ContainerCatalog {
             types: TypeCatalog::empty(),
+            product_version: ProductVersion::FIRST_BINARY,
             containers: HashMap::new(),
             rows: HashMap::new(),
             durable_put: None,
@@ -533,6 +627,7 @@ mod tests {
             mode: StorageModeChoice::Persistent,
             multi_active: false,
             schema: None,
+            encryption: None,
         };
         assert!(matches!(
             c.create_from_definition("default", "x", &def),
@@ -585,6 +680,51 @@ mod tests {
         assert_eq!(d.schema.as_ref().unwrap().fields.len(), 2);
         assert_eq!(d.mode, StorageModeChoice::Memory);
         assert_eq!(d.model, L3Model::RelationalTable);
+    }
+
+    #[test]
+    fn type_too_new_refused_on_create() {
+        let mut c = ContainerCatalog::new();
+        let mut desc = TypeDescriptor::l3_model("relational_table", "Relational Table", true);
+        desc.introduced_in = ProductVersion(2);
+        c.types.register_descriptor(desc);
+        let schema = ContainerSchema {
+            fields: vec![Field {
+                name: "id".into(),
+                domain: ValueDomain::Utf8,
+                nullable: false,
+            }],
+        };
+        let err = c
+            .create(
+                "ns",
+                "t",
+                L3Model::RelationalTable,
+                false,
+                Some(schema.clone()),
+                StorageModeChoice::Memory,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("type_too_new")
+                && err.contains("relational_table")
+                && err.contains("local:1"),
+            "{err}"
+        );
+        c.types
+            .register_descriptor(TypeDescriptor::l3_model("relational_table", "Relational Table", true));
+        assert!(
+            c.create(
+                "ns",
+                "rt",
+                L3Model::RelationalTable,
+                false,
+                Some(schema),
+                StorageModeChoice::Memory,
+            )
+            .is_ok()
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use spacestorage_admin_proto::{BufferRange, BufferReport};
-use spacestorage_config::{buffer_spec, NodeConfig, BUILTIN_BUFFERS};
+use spacestorage_config::{BUILTIN_BUFFERS, NodeConfig, buffer_spec};
 use spacestorage_ingest::{BufferGate, SharedBufferGate};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -1,7 +1,7 @@
 //! Quota checks at start and cutover (010 R11 / FR-011) via `07` tenancy admit.
 
 use crate::error::MigrateError;
-use spacestorage_tenancy::{admit, NamespaceRecord, QuotaSpec, QuotaUnit, QuotaUsage, Tenancy};
+use spacestorage_tenancy::{NamespaceRecord, QuotaSpec, QuotaUnit, QuotaUsage, Tenancy, admit};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -31,7 +31,11 @@ impl QuotaView {
     }
 
     pub fn from_record(usage: &QuotaUsage, ns: &NamespaceRecord) -> Self {
-        let Some(spec) = ns.quotas.iter().find(|q| matches!(q.unit, QuotaUnit::Bytes)) else {
+        let Some(spec) = ns
+            .quotas
+            .iter()
+            .find(|q| matches!(q.unit, QuotaUnit::Bytes))
+        else {
             return Self::default();
         };
         Self {
@@ -43,9 +47,7 @@ impl QuotaView {
 
 /// Logical size of a row map (key+value lengths).
 pub fn measure_row_bytes(rows: &HashMap<Vec<u8>, Vec<u8>>) -> u64 {
-    rows.iter()
-        .map(|(k, v)| (k.len() + v.len()) as u64)
-        .sum()
+    rows.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum()
 }
 
 /// Prefer a live `07` usage read when the namespace has a bytes quota; otherwise keep
@@ -73,7 +75,10 @@ pub fn admit_dest_bytes(
         if let Some(ns) = reg.get_by_name(namespace) {
             ns.clone()
         } else {
-            reg.create(namespace).map_err(|e| MigrateError::Io(e.to_string()))?
+            // Quota ledger create-if-absent. The job driver has no caller verb
+            // bits at this point, so the record is opened as CLUSTER_ADMIN.
+            reg.create(spacestorage_authz::Verb::CLUSTER_ADMIN.bits(), namespace)
+                .map_err(|e| MigrateError::Io(e.to_string()))?
         }
     };
     let view = QuotaView::from_record(&tenancy.usage, &ns);

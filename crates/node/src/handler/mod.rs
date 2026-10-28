@@ -69,6 +69,7 @@ impl Default for HandlerRegistry {
     }
 }
 
+pub mod controlplane_namespaces;
 pub mod admin_http;
 pub mod admin_tcp;
 pub mod console_backend;
@@ -87,7 +88,7 @@ pub mod clickhouse;
 pub mod elasticsearch;
 #[cfg(feature = "handlers-complete")]
 pub mod s3;
-#[cfg(feature = "handlers-complete")]
-pub mod webdav;
 #[cfg(feature = "complete-product")]
 pub mod syslog;
+#[cfg(feature = "handlers-complete")]
+pub mod webdav;

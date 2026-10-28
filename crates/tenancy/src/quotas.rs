@@ -19,9 +19,7 @@ impl QuotaUnit {
             "objects" => Ok(Self::Objects),
             "connections" => Ok(Self::Connections),
             "ops_per_sec" => Ok(Self::OpsPerSec),
-            other => Err(TenancyError::QuotaUnitUnknown {
-                unit: other.into(),
-            }),
+            other => Err(TenancyError::QuotaUnitUnknown { unit: other.into() }),
         }
     }
 
@@ -44,6 +42,15 @@ pub struct QuotaSpec {
 }
 
 impl QuotaSpec {
+    /// When `datatype` is set on the spec, only that type consumes the cap; unset applies to all types.
+    pub fn applies_to(&self, request_datatype: Option<&str>) -> bool {
+        match (&self.datatype, request_datatype) {
+            (None, _) => true,
+            (Some(spec), Some(dt)) => spec == dt,
+            (Some(_), None) => false,
+        }
+    }
+
     pub fn new(unit: QuotaUnit, limit: u64) -> Result<Self> {
         // Negative is impossible for u64; config parse maps signed to QuotaNegative.
         Ok(Self {

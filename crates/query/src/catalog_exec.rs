@@ -1,6 +1,7 @@
 //! Catalog-backed auto-commit SQL / row helpers used by PlannerEngine.
 
 use crate::error::ExecError;
+use crate::options::IsolationLevel;
 use crate::request::CopyFormat;
 #[cfg(feature = "query-distributed")]
 use crate::request::{AggFn, JoinKind};
@@ -35,11 +36,23 @@ pub fn execute_adhoc_sql(
     match verb.as_str() {
         "CREATE" => create_table(catalog, namespace, sql),
         "DROP" => drop_table(catalog, namespace, sql),
+        "ALTER" => alter_table(catalog, namespace, sql),
         "INSERT" => insert_row(catalog, namespace, sql),
         "SELECT" => select_rows(catalog, namespace, sql),
         "UPDATE" => update_rows(catalog, namespace, sql),
         "DELETE" => delete_rows(catalog, namespace, sql),
-        "SET" | "SHOW" | "DISCARD" | "RESET" | "PREPARE" | "EXECUTE" | "DEALLOCATE" => {
+        "SET" => {
+            if let Some(_isolation) = parse_set_transaction_isolation(sql)? {
+                return Err(ExecError::Msg(
+                    "set_transaction_requires_active_txn".into(),
+                ));
+            }
+            Ok(QueryResult {
+                tag: verb,
+                ..Default::default()
+            })
+        }
+        "SHOW" | "DISCARD" | "RESET" | "PREPARE" | "EXECUTE" | "DEALLOCATE" => {
             Ok(QueryResult {
                 tag: verb,
                 ..Default::default()
@@ -47,6 +60,41 @@ pub fn execute_adhoc_sql(
         }
         other => Err(ExecError::NotSupported(other.into())),
     }
+}
+
+fn compat_isolation_to_query(
+    level: spacestorage_compat::IsolationLevel,
+) -> IsolationLevel {
+    match level {
+        spacestorage_compat::IsolationLevel::ReadCommitted => IsolationLevel::ReadCommitted,
+        spacestorage_compat::IsolationLevel::Snapshot => IsolationLevel::Snapshot,
+    }
+}
+
+fn map_isolation_refuse(err: spacestorage_compat::CompatError) -> ExecError {
+    match err {
+        spacestorage_compat::CompatError::SerializableNongoal => ExecError::Isolation(
+            "serializable_nongoal; allowed: READ COMMITTED, SNAPSHOT".into(),
+        ),
+        other => ExecError::Isolation(other.to_string()),
+    }
+}
+
+/// Parse `SET TRANSACTION ISOLATION LEVEL …` when present.
+pub fn parse_set_transaction_isolation(
+    sql: &str,
+) -> Result<Option<IsolationLevel>, ExecError> {
+    let upper = sql.trim().trim_end_matches(';').to_ascii_uppercase();
+    if !upper.starts_with("SET") || !upper.contains("TRANSACTION") || !upper.contains("ISOLATION") {
+        return Ok(None);
+    }
+    let level_marker = "ISOLATION LEVEL";
+    let Some(pos) = upper.find(level_marker) else {
+        return Ok(None);
+    };
+    let level_text = sql[pos + level_marker.len()..].trim().trim_end_matches(';');
+    let mapped = spacestorage_compat::map_sql_isolation(level_text).map_err(map_isolation_refuse)?;
+    Ok(Some(compat_isolation_to_query(mapped)))
 }
 
 fn first_verb(sql: &str) -> String {
@@ -58,8 +106,62 @@ fn first_verb(sql: &str) -> String {
         .to_ascii_uppercase()
 }
 
+/// Quota admission for [`LogicalRequest::AdHocSql`] (PostgreSQL text path).
+///
+/// INSERT/UPDATE charge statement bytes and objects (one per VALUES row for INSERT).
+/// Reads and DELETE do not consume bytes/objects quotas.
+pub fn adhoc_sql_usage(sql: &str) -> (u64, u64) {
+    let trimmed = sql.trim().trim_end_matches(';');
+    match first_verb(trimmed).as_str() {
+        "INSERT" => {
+            let bytes = trimmed.as_bytes().len() as u64;
+            (bytes, count_insert_value_rows(trimmed))
+        }
+        "UPDATE" => (trimmed.as_bytes().len() as u64, 1),
+        _ => (0, 0),
+    }
+}
+
+fn count_insert_value_rows(sql: &str) -> u64 {
+    let upper = sql.to_ascii_uppercase();
+    let Some(idx) = upper.find("VALUES") else {
+        return 1;
+    };
+    let mut section = sql[idx + 6..].trim_start();
+    for stop in [" ON CONFLICT", " RETURNING", " ;"] {
+        if let Some(pos) = section.to_ascii_uppercase().find(stop.trim()) {
+            section = &section[..pos];
+        }
+    }
+    let mut rows = 0u64;
+    let mut chars = section.chars();
+    while let Some(c) = chars.next() {
+        if c != '(' {
+            continue;
+        }
+        rows += 1;
+        let mut depth = 1i32;
+        for c in chars.by_ref() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    rows.max(1)
+}
+
 fn create_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
+    if is_create_foreign_table(&upper) {
+        return Err(ExecError::NotSupported("FDW".into()));
+    }
     if !upper.contains("TABLE") {
         return Err(ExecError::NotSupported("CREATE without TABLE".into()));
     }
@@ -102,6 +204,9 @@ fn create_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Q
 
 fn drop_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
+    if is_drop_foreign_table(&upper) {
+        return Err(ExecError::NotSupported("FDW".into()));
+    }
     let name = extract_table_name_after(&upper, sql, "TABLE")?;
     let if_exists = upper.contains("IF EXISTS");
     let mut cat = catalog.write().expect("catalog");
@@ -116,6 +221,108 @@ fn drop_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Que
         }),
         Err(e) => Err(ExecError::Msg(e.to_string())),
     }
+}
+
+fn is_create_foreign_table(upper: &str) -> bool {
+    upper.starts_with("CREATE FOREIGN TABLE")
+        || upper.starts_with("CREATE OR REPLACE FOREIGN TABLE")
+}
+
+fn is_drop_foreign_table(upper: &str) -> bool {
+    upper.starts_with("DROP FOREIGN TABLE")
+}
+
+fn alter_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+    let upper = sql.trim().trim_end_matches(';').to_ascii_uppercase();
+    if !upper.starts_with("ALTER TABLE") {
+        return Err(ExecError::NotSupported("ALTER without TABLE".into()));
+    }
+    let name = extract_table_name_after(&upper, sql, "TABLE")?;
+    let rest = rest_after_table_name(sql, "TABLE")?;
+    let action_upper = rest.trim().to_ascii_uppercase();
+
+    if action_upper.starts_with("RENAME TO") {
+        let new_name = first_ident(rest["RENAME TO".len()..].trim_start())?;
+        let mut cat = catalog.write().expect("catalog");
+        cat.rename_container(namespace, &name, &new_name)
+            .map_err(|e| ExecError::Msg(e.to_string()))?;
+        return Ok(QueryResult {
+            tag: "ALTER TABLE".into(),
+            ..Default::default()
+        });
+    }
+
+    if action_upper.starts_with("ADD COLUMN") || action_upper.starts_with("ADD ") {
+        let col_start = if action_upper.starts_with("ADD COLUMN") {
+            rest["ADD COLUMN".len()..].trim_start()
+        } else {
+            rest["ADD".len()..].trim_start()
+        };
+        let col = first_ident(col_start)?;
+        let mut cat = catalog.write().expect("catalog");
+        let c = cat
+            .describe(namespace, &name)
+            .map_err(|e| ExecError::Msg(e.to_string()))?;
+        let prev = c
+            .schema
+            .clone()
+            .ok_or_else(|| ExecError::Msg("ALTER TABLE ADD requires schema".into()))?;
+        if prev.fields.iter().any(|f| f.name == col) {
+            return Err(ExecError::Msg(format!(
+                "column \"{col}\" of relation \"{name}\" already exists"
+            )));
+        }
+        let mut fields = prev.fields.clone();
+        fields.push(Field {
+            name: col,
+            domain: ValueDomain::Utf8,
+            nullable: true,
+        });
+        cat.alter(namespace, &name, None, Some(ContainerSchema { fields }), None)
+            .map_err(|e| ExecError::Msg(e.to_string()))?;
+        return Ok(QueryResult {
+            tag: "ALTER TABLE".into(),
+            ..Default::default()
+        });
+    }
+
+    Err(ExecError::NotSupported(format!("ALTER TABLE {name}")))
+}
+
+fn rest_after_table_name<'a>(sql: &'a str, keyword: &str) -> Result<&'a str, ExecError> {
+    let upper = sql.to_ascii_uppercase();
+    let pos = upper
+        .find(keyword)
+        .ok_or_else(|| ExecError::Msg(format!("syntax: missing {keyword}")))?;
+    let mut rest = sql[pos + keyword.len()..].trim_start();
+    let ru = rest.to_ascii_uppercase();
+    if ru.starts_with("IF NOT EXISTS") {
+        rest = rest["IF NOT EXISTS".len()..].trim_start();
+    } else if ru.starts_with("IF EXISTS") {
+        rest = rest["IF EXISTS".len()..].trim_start();
+    }
+    let name_len = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '"')
+        .count();
+    if name_len == 0 {
+        return Err(ExecError::Msg("syntax: empty table name".into()));
+    }
+    Ok(rest[name_len..].trim_start())
+}
+
+fn first_ident(s: &str) -> Result<String, ExecError> {
+    let name: String = s
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '"')
+        .collect::<String>()
+        .trim_matches('"')
+        .to_string();
+    if name.is_empty() {
+        return Err(ExecError::Msg("syntax: empty identifier".into()));
+    }
+    Ok(name)
 }
 
 fn insert_row(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
@@ -775,6 +982,149 @@ fn parse_values(sql: &str) -> Result<Vec<String>, ExecError> {
         .split(',')
         .map(|s| s.trim().trim_matches('\'').to_string())
         .collect())
+}
+
+#[cfg(test)]
+mod adhoc_usage_tests {
+    use super::adhoc_sql_usage;
+
+    #[test]
+    fn insert_counts_statement_bytes_and_rows() {
+        let sql = "INSERT INTO t VALUES ('a'), ('b')";
+        let (bytes, objects) = adhoc_sql_usage(sql);
+        assert_eq!(bytes, sql.as_bytes().len() as u64);
+        assert_eq!(objects, 2);
+    }
+
+    #[test]
+    fn select_and_delete_are_non_consuming() {
+        assert_eq!(adhoc_sql_usage("SELECT 1"), (0, 0));
+        assert_eq!(adhoc_sql_usage("DELETE FROM t"), (0, 0));
+    }
+
+    #[test]
+    fn update_charges_one_object() {
+        let sql = "UPDATE t SET v = 'x' WHERE id = '1'";
+        let (bytes, objects) = adhoc_sql_usage(sql);
+        assert_eq!(bytes, sql.as_bytes().len() as u64);
+        assert_eq!(objects, 1);
+    }
+}
+
+#[cfg(test)]
+mod ddl_exec_tests {
+    use super::{execute_adhoc_sql, SharedCatalog};
+    use crate::error::ExecError;
+    use spacestorage_types::ContainerCatalog;
+    use std::sync::{Arc, RwLock};
+
+    fn catalog_with_table() -> SharedCatalog {
+        let cat: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        execute_adhoc_sql(
+            &cat,
+            "ns",
+            "CREATE TABLE t (id text, v text)",
+        )
+        .unwrap();
+        cat
+    }
+
+    #[test]
+    fn alter_table_add_column_updates_catalog() {
+        let cat = catalog_with_table();
+        execute_adhoc_sql(&cat, "ns", "ALTER TABLE t ADD COLUMN note text").unwrap();
+        let guard = cat.read().unwrap();
+        let c = guard.describe("ns", "t").unwrap();
+        assert_eq!(c.schema.as_ref().unwrap().fields.len(), 3);
+        assert!(
+            c.schema
+                .as_ref()
+                .unwrap()
+                .fields
+                .iter()
+                .any(|f| f.name == "note")
+        );
+    }
+
+    #[test]
+    fn alter_table_rename_container() {
+        let cat = catalog_with_table();
+        execute_adhoc_sql(&cat, "ns", "ALTER TABLE t RENAME TO t2").unwrap();
+        assert!(cat.read().unwrap().describe("ns", "t").is_err());
+        assert!(cat.read().unwrap().describe("ns", "t2").is_ok());
+    }
+
+    #[test]
+    fn alter_system_not_supported() {
+        let cat: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let err = execute_adhoc_sql(&cat, "ns", "ALTER SYSTEM SET foo = bar").unwrap_err();
+        assert!(matches!(err, ExecError::NotSupported(_)));
+        assert_eq!(err.code(), "not_supported");
+    }
+
+    #[test]
+    fn create_foreign_table_not_supported() {
+        let cat: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let err = execute_adhoc_sql(
+            &cat,
+            "ns",
+            "CREATE FOREIGN TABLE ft () SERVER s OPTIONS (schema_name 'public')",
+        )
+        .unwrap_err();
+        assert!(matches!(err, ExecError::NotSupported(ref m) if m == "FDW"));
+    }
+
+    #[test]
+    fn drop_foreign_table_not_supported() {
+        let cat: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let err = execute_adhoc_sql(&cat, "ns", "DROP FOREIGN TABLE ft").unwrap_err();
+        assert!(matches!(err, ExecError::NotSupported(ref m) if m == "FDW"));
+    }
+
+    #[test]
+    fn plain_create_drop_table_still_work() {
+        let cat: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        execute_adhoc_sql(&cat, "ns", "CREATE TABLE t (id text)").unwrap();
+        execute_adhoc_sql(&cat, "ns", "DROP TABLE t").unwrap();
+        assert!(cat.read().unwrap().describe("ns", "t").is_err());
+    }
+}
+
+#[cfg(test)]
+mod isolation_exec_tests {
+    use super::{execute_adhoc_sql, parse_set_transaction_isolation, SharedCatalog};
+    use crate::options::IsolationLevel;
+    use spacestorage_types::ContainerCatalog;
+    use std::sync::{Arc, RwLock};
+
+    #[test]
+    fn parse_repeatable_read_and_serializable() {
+        let iso = parse_set_transaction_isolation(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(iso, IsolationLevel::Snapshot);
+        assert!(parse_set_transaction_isolation("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            .unwrap_err()
+            .code()
+            .contains("isolation"));
+        assert!(parse_set_transaction_isolation("SET search_path = public")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn adhoc_set_transaction_not_silent_success() {
+        let catalog: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let err = execute_adhoc_sql(
+            &catalog,
+            "ns",
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("set_transaction_requires_active_txn"));
+    }
 }
 
 fn parse_simple_where(sql: &str) -> Option<(String, String)> {

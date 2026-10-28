@@ -4,7 +4,7 @@ use spacestorage_config::model::{
     ClusterDecl, EntrypointDecl, NodeConfig, QueryDefaults, TlsDecl, Transport,
 };
 use spacestorage_node::lifecycle::NodeState;
-use spacestorage_node::{runtime, Node};
+use spacestorage_node::{Node, runtime};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -25,7 +25,8 @@ static NEXT_PORT: AtomicU16 = AtomicU16::new(0);
 fn bump_port() -> u16 {
     let cur = NEXT_PORT.load(Ordering::Relaxed);
     if cur == 0 {
-        let _ = NEXT_PORT.compare_exchange(0, next_port_base(), Ordering::Relaxed, Ordering::Relaxed);
+        let _ =
+            NEXT_PORT.compare_exchange(0, next_port_base(), Ordering::Relaxed, Ordering::Relaxed);
     }
     NEXT_PORT.fetch_add(1, Ordering::Relaxed)
 }
@@ -295,5 +296,8 @@ async fn missing_cert_files_fail_startup() {
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
     let node = Node::boot_first_binary(conf, cfg, threads, source);
     let err = node.run().await.expect_err("missing cert must fail");
-    assert!(err.contains("cannot read") || err.contains("certificate"), "{err}");
+    assert!(
+        err.contains("cannot read") || err.contains("certificate"),
+        "{err}"
+    );
 }

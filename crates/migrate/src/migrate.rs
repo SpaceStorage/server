@@ -1,16 +1,20 @@
 //! MigrationSpec + live/snapshot/offline runners (010 US1/US2).
 
 use crate::authz::AuthzContext;
-use crate::dual_write::{incomplete_name, apply_mapped, CutoverGates, DualWriteRegistry, DualWriteWindow};
+use crate::dual_write::{
+    CutoverGates, DualWriteRegistry, DualWriteWindow, apply_mapped, incomplete_name,
+};
 use crate::error::MigrateError;
 use crate::job::{JobKind, JobRecord, JobStatus, Strategy};
-use crate::quota::{measure_row_bytes, refresh_quota_view, QuotaView};
+use crate::quota::{QuotaView, measure_row_bytes, refresh_quota_view};
 use crate::store::JobStore;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use spacestorage_placement::topology::NodeTopo;
-use spacestorage_placement::{plan_replicas, PlacementError, PlanRequest};
-use spacestorage_storage::{ContentStore, EraseRecord, EraseRequest, LegalError, LegalHoldStore, StorageMode};
+use spacestorage_placement::{PlacementError, PlanRequest, plan_replicas};
+use spacestorage_storage::{
+    ContentStore, EraseRecord, EraseRequest, LegalError, LegalHoldStore, StorageMode,
+};
 use spacestorage_tenancy::Tenancy;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -74,10 +78,7 @@ impl MigrationSpec {
             authz.allow_node_migrate()?;
         }
 
-        let has_dest_placement = self
-            .dest_nodes
-            .as_ref()
-            .is_some_and(|n| !n.is_empty())
+        let has_dest_placement = self.dest_nodes.as_ref().is_some_and(|n| !n.is_empty())
             || self.dest_drives.as_ref().is_some_and(|d| !d.is_empty());
 
         if !cross_ns && !has_dest_placement && matches!(self.policy, MigratePolicy::Copy) {
@@ -234,13 +235,7 @@ impl MigrateRunner {
         let mut objects = 0u64;
         let mut bytes = 0u64;
         for (k, v) in source_rows {
-            if apply_mapped(
-                &mut applied,
-                k.clone(),
-                0,
-                v.clone(),
-                &mut dest_map,
-            ) {
+            if apply_mapped(&mut applied, k.clone(), 0, v.clone(), &mut dest_map) {
                 objects += 1;
                 bytes += (k.len() + v.len()) as u64;
             }
@@ -302,10 +297,7 @@ impl MigrateRunner {
         dest_names.insert(dest_key, target_id);
         if matches!(spec.policy, MigratePolicy::Move) {
             content.clear_content(source_id);
-            let src_key = (
-                spec.source.namespace.clone(),
-                spec.source.container.clone(),
-            );
+            let src_key = (spec.source.namespace.clone(), spec.source.container.clone());
             dest_names.remove(&src_key);
         }
         // Final drain into content while the dual-write window stays registered.
@@ -404,11 +396,7 @@ impl MigrateRunner {
                         &spec.source.container,
                     ),
                     containers: vec![source_meta.clone()],
-                    available_key_refs: source_meta
-                        .key_ref
-                        .clone()
-                        .into_iter()
-                        .collect(),
+                    available_key_refs: source_meta.key_ref.clone().into_iter().collect(),
                 },
             )
             .await?;
@@ -452,10 +440,7 @@ impl MigrateRunner {
         job.snapshot_id = Some(man.snapshot_id);
         dest_names.insert(dest_key, target_id);
         if matches!(spec.policy, MigratePolicy::Move) {
-            let src_key = (
-                spec.source.namespace.clone(),
-                spec.source.container.clone(),
-            );
+            let src_key = (spec.source.namespace.clone(), spec.source.container.clone());
             dest_names.remove(&src_key);
         }
         job.mark_completed();

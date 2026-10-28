@@ -18,6 +18,7 @@ pub struct WebDavHandler {
     pub profile: DialectProfile,
     pub namespace: String,
     pub limit_services: LimitServices,
+    pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
 }
 
 impl WebDavHandler {
@@ -31,7 +32,13 @@ impl WebDavHandler {
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
             limit_services,
+            tenancy: None,
         }
+    }
+
+    pub fn with_tenancy(mut self, tenancy: Arc<spacestorage_tenancy::Tenancy>) -> Self {
+        self.tenancy = Some(tenancy);
+        self
     }
 
     pub async fn serve<S>(&self, stream: S, cancel: CancellationToken)
@@ -62,6 +69,9 @@ impl WebDavHandler {
             profile: self.profile,
             limit_services: self.limit_services.clone(),
             principal_hold: None,
+            tenancy: self.tenancy.clone(),
+            connection_quota: None,
+            principal: None,
         };
         let mut digest_nonce = new_nonce();
 
@@ -89,9 +99,32 @@ impl WebDavHandler {
                                 continue;
                             }
 
+                            if session.connection_quota.is_none() {
+                                match spacestorage_tenancy::bind_namespace_session(
+                                    session.tenancy.as_ref(),
+                                    DEMO_USER,
+                                    session.namespace.as_str(),
+                                ) {
+                                    Ok(hold) => session.connection_quota = hold,
+                                    Err(err) => {
+                                        let body = err.to_string();
+                                        let msg = format!(
+                                            "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                            body.len()
+                                        );
+                                        if writer.write_all(msg.as_bytes()).await.is_err() {
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
                             if session.principal_hold.is_none() {
                                 match session.limit_services.try_hold_principal(DEMO_USER) {
-                                    Ok(hold) => session.principal_hold = Some(hold),
+                                    Ok(hold) => {
+                                        session.principal_hold = Some(hold);
+                                        session.principal = Some(DEMO_USER.to_string());
+                                    }
                                     Err(e) => {
                                         let body = e.to_string();
                                         let msg = format!(

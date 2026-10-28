@@ -11,7 +11,12 @@ pub struct EncryptionDeclaration {
 }
 
 impl EncryptionDeclaration {
-    pub fn validate(algorithm: &str, key_ref: &str, scope: &str, storage_mode: &str) -> Result<Self> {
+    pub fn validate(
+        algorithm: &str,
+        key_ref: &str,
+        scope: &str,
+        storage_mode: &str,
+    ) -> Result<Self> {
         if key_ref.is_empty() || key_ref.contains('\0') {
             return Err(TenancyError::KeyMaterialForbidden);
         }
@@ -49,5 +54,21 @@ mod tests {
             EncryptionDeclaration::validate("AES-256-GCM", &hex, "drives", "persistent"),
             Err(TenancyError::KeyMaterialForbidden)
         ));
+    }
+
+    #[test]
+    fn describe_carries_key_ref_and_no_key_bytes() {
+        let decl = EncryptionDeclaration::validate(
+            "AES-256-GCM",
+            "vault:tenant/acme",
+            "drives",
+            "persistent",
+        )
+        .unwrap();
+        let json = serde_json::to_string(&decl).unwrap();
+        assert!(json.contains("vault:tenant/acme"));
+        assert!(json.contains("AES-256-GCM"));
+        assert!(!json.contains("\"key\""));
+        assert_eq!(decl.key_ref, "vault:tenant/acme");
     }
 }

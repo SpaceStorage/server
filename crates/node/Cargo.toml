@@ -9,6 +9,10 @@ publish = false
 [features]
 default = ["first-binary"]
 first-binary = []
+tenancy-quotas = [
+    "spacestorage-tenancy/tenancy-quotas",
+    "spacestorage-config/tenancy-quotas",
+]
 handlers-complete = [
     "dep:spacestorage-handler-cassandra",
     "dep:spacestorage-handler-elasticsearch",
@@ -60,6 +64,7 @@ spacestorage-ingest = { path = "../ingest" }
 spacestorage-query = { path = "../query" }
 spacestorage-controlplane = { path = "../controlplane" }
 spacestorage-placement = { path = "../placement" }
+spacestorage-tenancy = { path = "../tenancy" }
 tokio = { workspace = true }
 uuid = { workspace = true }
 axum = { workspace = true }

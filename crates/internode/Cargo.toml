@@ -17,6 +17,7 @@ tracing = { workspace = true }
 subtle = { workspace = true }
 parking_lot = { workspace = true }
 bytes = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

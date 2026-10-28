@@ -27,6 +27,16 @@ impl ElasticsearchPortHandler {
             inner: ElasticsearchHandler::with_limits(catalog, limit_services),
         }
     }
+
+    pub fn with_tenancy(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+    ) -> Self {
+        Self {
+            inner: ElasticsearchHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
+        }
+    }
 }
 
 #[async_trait]

@@ -29,6 +29,8 @@ use crate::membership::VoterSet;
 use serde::{Deserialize, Serialize};
 use spacestorage_clocks::HlcStamp;
 use spacestorage_placement::{apply_placement_event, DescribeSnapshot, PlacementEvent};
+use spacestorage_tenancy::{NamespaceRecord, TenancyOp};
+use spacestorage_tenancy::roles::{Role, RoleBinding};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -78,7 +80,14 @@ pub struct ClusterState {
     pub cluster_name: String,
     pub members: BTreeMap<Uuid, MemberRecord>,
     pub namespaces: BTreeMap<Uuid, NamespaceListEntry>,
-    /// Opaque roles blob until tenancy (007) types replace it.
+    /// Typed `007` applied state. Reads use these maps and never namespace Raft.
+    #[serde(default)]
+    pub tenancy_namespaces: BTreeMap<Uuid, NamespaceRecord>,
+    #[serde(default)]
+    pub tenancy_roles: BTreeMap<String, Role>,
+    #[serde(default)]
+    pub tenancy_bindings: BTreeMap<Uuid, RoleBinding>,
+    /// Legacy opaque role payload retained for on-disk compatibility.
     pub roles: serde_json::Value,
     /// Additive cluster-log payload for 009 Kafka ingest (see module docs / T073).
     #[serde(default)]
@@ -118,6 +127,9 @@ impl ClusterState {
             cluster_name: cluster_name.into(),
             members,
             namespaces: BTreeMap::new(),
+            tenancy_namespaces: BTreeMap::new(),
+            tenancy_roles: BTreeMap::new(),
+            tenancy_bindings: BTreeMap::new(),
             roles: serde_json::json!({}),
             kafka_ingests: BTreeMap::new(),
             data_jobs: BTreeMap::new(),
@@ -149,6 +161,12 @@ pub enum ClusterOp {
     CreateNamespace { id: Uuid, name: String },
     RenameNamespace { id: Uuid, new_name: String },
     DeleteNamespace { id: Uuid },
+    /// A tenancy operation with a leader-assigned id for deterministic create apply.
+    Tenancy {
+        tenancy_op: TenancyOp,
+        #[serde(default)]
+        assigned_id: Option<Uuid>,
+    },
     SetRoles { roles: serde_json::Value },
     SetExclusiveData { on: bool },
     SetVoterSet { voter_set: VoterSet },
@@ -198,6 +216,12 @@ impl ClusterState {
             ClusterOp::DeleteNamespace { id } => {
                 self.namespaces.remove(&id);
             }
+            ClusterOp::Tenancy {
+                tenancy_op,
+                assigned_id,
+            } => {
+                self.apply_tenancy(tenancy_op, assigned_id);
+            }
             ClusterOp::SetRoles { roles } => {
                 self.roles = roles;
             }
@@ -246,6 +270,57 @@ impl ClusterState {
             }
         }
         self.hlc = hlc;
+    }
+
+    fn apply_tenancy(&mut self, op: TenancyOp, assigned_id: Option<Uuid>) {
+        match op {
+            TenancyOp::NamespaceCreate { name } => {
+                if let Some(id) = assigned_id {
+                    if let Ok(record) = NamespaceRecord::with_id(id, name.clone()) {
+                        self.namespaces.insert(
+                            id,
+                            NamespaceListEntry {
+                                id,
+                                name,
+                                group_id: GroupId::Namespace(id),
+                            },
+                        );
+                        self.tenancy_namespaces.insert(id, record);
+                    }
+                }
+            }
+            TenancyOp::NamespaceRename { id, new_name } => {
+                if let Some(record) = self.tenancy_namespaces.get_mut(&id) {
+                    record.name = new_name.clone();
+                }
+                if let Some(record) = self.namespaces.get_mut(&id) {
+                    record.name = new_name;
+                }
+            }
+            TenancyOp::NamespaceDelete { id, .. } => {
+                self.tenancy_namespaces.remove(&id);
+                self.namespaces.remove(&id);
+            }
+            TenancyOp::QuotaReplace { id, quotas } => {
+                if let Some(record) = self.tenancy_namespaces.get_mut(&id) {
+                    record.quotas = quotas;
+                }
+            }
+            TenancyOp::PolicyReplace { id, policies } => {
+                if let Some(record) = self.tenancy_namespaces.get_mut(&id) {
+                    record.policies = policies;
+                }
+            }
+            TenancyOp::RolePut { role } => {
+                self.tenancy_roles.insert(role.name.clone(), role);
+            }
+            TenancyOp::RoleBindingPut { binding } => {
+                self.tenancy_bindings.insert(binding.principal_id, binding);
+            }
+            TenancyOp::RoleBindingDelete { principal_id } => {
+                self.tenancy_bindings.remove(&principal_id);
+            }
+        }
     }
 }
 

@@ -88,6 +88,7 @@ pub enum ErrorCode {
     MasterKeyPermissions,
     KeyringRemoved,
     KeyMaterialForbidden,
+    QuotaNegative,
     TopologyLadderRequired,
     SyncNoneNotDurable,
     GcGraceTooSmall,
@@ -114,6 +115,8 @@ pub enum ErrorCode {
     IngestKafkaNoBrokers,
     /// Syslog ingest missing namespace/container.
     IngestMissingTarget,
+    /// `private_metrics` / `private_logs on` before observability export (007 R11).
+    ObservabilityRequired,
 }
 
 impl ErrorCode {
@@ -151,6 +154,7 @@ impl ErrorCode {
             Self::MasterKeyPermissions => "master_key_permissions",
             Self::KeyringRemoved => "KeyringRemoved",
             Self::KeyMaterialForbidden => "KeyMaterialForbidden",
+            Self::QuotaNegative => "QuotaNegative",
             Self::TopologyLadderRequired => "topology_ladder_required",
             Self::SyncNoneNotDurable => "sync_none_not_durable",
             Self::GcGraceTooSmall => "gc_grace_too_small",
@@ -169,6 +173,7 @@ impl ErrorCode {
             Self::UiIngestSlice11Required => "UiIngestSlice11Required",
             Self::IngestKafkaNoBrokers => "ingest_kafka_no_brokers",
             Self::IngestMissingTarget => "ingest_missing_target",
+            Self::ObservabilityRequired => "ObservabilityRequired",
         }
     }
 }
