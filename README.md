@@ -6,20 +6,22 @@ Parent layout: `spacestorage/` holds `server/` (this tree), `test/`, and `start`
 
 ## Status (honest)
 
-**Tip milestone** [`docs/milestones/009-full-product`](docs/milestones/009-full-product.md). Slices **1–11** are closed on [`007-complete-product`](docs/milestones/007-complete-product.md) (`still_owed` cleared). [`008-later-not-first`](docs/milestones/008-later-not-first.md) and `009` add live Raft TCP and the later-not-first mounts (L0, legal-hold, named CDC, external KMS, N/N+1, planetary composition, billing estimate). Merge gate:
+**Tip** [`docs/milestones/009-full-product`](docs/milestones/009-full-product.md): live Raft over internodes TCP, plus production mounts for L0, legal-hold, named CDC, external KMS, the N/N+1 window, planetary composition, and billing estimate. Slices **1–11** are closed on [`007-complete-product`](docs/milestones/007-complete-product.md). [`008-later-not-first`](docs/milestones/008-later-not-first.md) is the record those mounts sit on.
+
+Merge gate:
 
 ```bash
 cargo test -p spacestorage-conformance --features complete-product
 ```
 
-Earlier profiles remain useful regressions:
+Regression gates:
 
 ```bash
 cargo test -p spacestorage-conformance --features first-binary
 cargo test -p spacestorage-conformance --features handlers-complete
 ```
 
-Remaining work is the `009` Deferred list, not unpaid slices: invoicing and billing export, multi-process `spacestoraged` orchestration beyond the in-process and live-TCP harnesses, further `/ui/*` polish past `014` session login, WAL kill→reboot client-content cases past the existing Redis gate, and auto-bootstrapping `ControlPlane` on every membership start. Openraft `Raft::new` / 0.10, the PostgreSQL Document Store blob gate, and `/ui/*` session login are already closed on the `007` ledger.
+What remains is the Deferred list in the tip milestone (invoicing export, multi-process orchestration, further `/ui/*` polish, WAL cases past the Redis gate, per-node `ControlPlane` auto-bootstrap). Those are not unpaid slices.
 
 ## Spec Kit
 
@@ -29,25 +31,30 @@ Remaining work is the `009` Deferred list, not unpaid slices: invoicing and bill
 | `.specify/intent/01`–`16` | Per-feature intent input |
 | `specs/001`–`016` | Specs, plans, contracts, `tasks.md` |
 | `.cursor/skills/speckit-*` | Speckit commands for Cursor agents |
-| `docs/milestones/` | Shipped / deferred slice ledger |
+| `docs/milestones/` | Slice ledgers `001`–`007`; product tip `009-full-product` |
 | `docs/agent-context-graph.md` | Slice ↔ spec ↔ crate map for agents |
 
 Agent instructions: [`AGENTS.md`](AGENTS.md) (Cursor-native). Stub: [`AGENT.md`](AGENT.md).
 
-## First binary vs complete product
+## Profiles
 
-- **First binary** (slices 1–5): runtime; types + WAL + master-key; PostgreSQL subset; Redis K/V MUST; membership + internode + three-node quorum. Profile: `first-binary` / tag `slices-1-5`.
-- **Handlers-complete** (slice 6): Cassandra / ES / ClickHouse / S3 / WebDAV at `015` MUST. Profile: `handlers-complete`.
-- **Complete product** (slices 1–11): full constitution + specs `001`–`015` ladder through admin UIs / ingest, plus the `008`/`009` mounts. Profile: `complete-product`. Slice ledger: `007-complete-product`. Product tip: `009-full-product`.
+Default features on `spacestoraged` and `spacestorage-conformance` are **first-binary**. A plain `cargo build` is slices 1–5, not the tip.
 
-See `docs/milestones/` and `specs/016-mvp-and-nongoals/`.
+- **`first-binary`** (slices 1–5, tag `slices-1-5`): runtime, types, WAL, master key, PostgreSQL subset, Redis K/V, membership, internode, three-node quorum.
+- **`handlers-complete`** (through slice 6, tag `slices-1-6`): Cassandra, Elasticsearch, ClickHouse, S3, and WebDAV at the `015` MUST column.
+- **`complete-product`**: slices 1–11 (control plane, tenancy, query, observability, migration, admin UI, ingest) and the `008`/`009` mounts. Specs `001`–`016`. This is the merge gate. Product tip: `009-full-product`.
 
 ## Build and test
 
-From this directory:
+From this directory. Workspace `rust-version` is **1.88**.
 
 ```bash
-cargo build -p spacestoraged
+# first-binary daemon and CLI (default features: PostgreSQL + Redis)
+cargo build -p spacestoraged -p spacestorage
+
+# tip profile
+cargo build -p spacestoraged --features complete-product
+
 cargo test -p spacestorage-conformance --features first-binary
 cargo test -p spacestorage-conformance --features handlers-complete
 cargo test -p spacestorage-conformance --features complete-product
@@ -60,7 +67,11 @@ Milestone ledger validation:
 # or: cargo test -p spacestorage-release-profile --test ledger
 ```
 
-Starter configs live under `docs/examples/`. Quickstart: `specs/016-mvp-and-nongoals/quickstart.md`.
+Slices 1–5 walkthrough: [`specs/016-mvp-and-nongoals/quickstart.md`](specs/016-mvp-and-nongoals/quickstart.md). Starters: `docs/examples/`. Full v1 proof (3-node, Redis, live Raft TCP, L0):
+
+```bash
+cargo test -p spacestorage-conformance --features complete-product --test quickstart quickstart_full_v1_three_node_raft_and_l0
+```
 
 ## Constitution
 
