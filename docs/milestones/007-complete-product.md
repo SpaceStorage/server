@@ -20,7 +20,7 @@ Slice **11** DoD (`009-admin-ui-ingest`):
 
 ## Deferred
 
-None for slices 6–11 (`still_owed` cleared on the tip ledger). Honest residuals that do **not** keep slice 11 `still_owed`:
+None for slices 6–11 (`still_owed` cleared). Product tip is [`009-full-product`](009-full-product.md). Honest residuals that do **not** keep slice 11 `still_owed`:
 
 - ~~Live Kafka broker I/O beyond `FakeKafkaBroker`~~ — **done (2026-09-27)**: `LiveKafkaClient` (`crates/ingest/src/kafka_wire.rs`) does Metadata/Fetch/OffsetFetch/OffsetCommit over TCP via `kafka-protocol`; `FakeKafkaBroker` remains for ALO unit/conformance tests; `KafkaConsumer::poll_one_async` covers live path.
 - ~~Kafka JoinGroup/SyncGroup + range assignor~~ — **done (2026-09-27)**: live bootstrap runs FindCoordinator → JoinGroup (MEMBER_ID_REQUIRED retry) → SyncGroup with classic **range** assignor (`ConsumerProtocolSubscription` / `ConsumerProtocolAssignment`); partition set for Fetch comes from the SyncGroup assignment.
@@ -29,7 +29,7 @@ None for slices 6–11 (`still_owed` cleared on the tip ledger). Honest residual
 - ~~Outbound Kafka Produce~~ — **done**: real ProduceRequest framing + TCP Produce in `KafkaProducer`; `KafkaProducer::memory()` keeps conformance offline while still encoding wire frames.
 - ~~openraft `Raft::new` / 0.10~~ — **done (2026-09-27)**: bumped to `openraft = 0.10.0-alpha.35` (+ transitive `validit` / `quorum-set`); workspace MSRV **1.88**; `RaftGroup` owns a real `Raft::new` runtime (`openraft_adapter::start_raft` + mem log/SM); single-voter bootstrap uses `initialize` + wait-for-leader; `client_write` on the solo path; SpaceStorage on-disk `RaftStore` format retained for restore/read-index.
 - ~~Multi-node openraft peer RPCs~~ — **done (2026-09-27)**: `PeerRaftRegistry` + `PeerNetwork` (`RaftNetworkV2`) wire Vote/Append/Snapshot through `internode::raft_wire`; three-node election + `client_write` test green. Follow-on TCP dial mount: [`008-later-not-first`](008-later-not-first.md).
-- Post-ladder hardening (2026-09-26): WAL kill→reboot→re-read, PG Document Store blob, `/ui/*` `014` SessionToken via `POST /v1/auth/login` — see changelog
+- ~~Post-ladder hardening (WAL kill→reboot→re-read, PG Document Store blob, `/ui/*` `014` SessionToken via `POST /v1/auth/login`)~~ — **done (2026-09-26)**; see changelog. Edge cases past the Redis gate, and further `/ui/*` polish, stay on [`009-full-product`](009-full-product.md).
 
 ## Changelog
 

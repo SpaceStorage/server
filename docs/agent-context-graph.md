@@ -30,7 +30,7 @@ flowchart TB
 | Constitution | `.specify/memory/constitution.md` | Non-negotiable principles |
 | Intent | `.specify/intent/` | Speckit input; wins over `start` per domain |
 | Specs | `specs/001`–`016` | Spec, plan, contracts, `tasks.md` |
-| Milestones | `docs/milestones/` | What shipped vs deferred (`still_owed`) |
+| Milestones | `docs/milestones/` | Slice ledger `007-complete-product` (slices 1–11 closed). Product tip `009-full-product` |
 | Code | `crates/` | Implementation |
 | Gate | `cargo test -p spacestorage-conformance --features first-binary` | First-binary DoD signal |
 | Full product | `cargo test -p spacestorage-conformance --features complete-product` | Slices 1–11 merge gate |
@@ -66,6 +66,8 @@ flowchart LR
 | 9 | `008` | milestoned (`005-observability-catalog`) |
 | 10 | `010`, `013` snapshot/PITR | milestoned (`006-migration-backup`) |
 | 11 | `009` | milestoned (`007-complete-product`) |
+
+Slice 11 closed on `007-complete-product`. The product tip is [`009-full-product`](milestones/009-full-product.md) (live Raft TCP and the later-not-first mounts). Its Deferred section is the current residual list.
 
 `016` selects and proves the 1–5 subset (release profile, ledger, starters, conformance). It does not own protocol/type/WAL/membership behavior.
 

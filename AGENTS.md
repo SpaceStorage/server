@@ -99,12 +99,15 @@ Specify order stays numeric `001`–`016`. **Implement** for the first binary:
 
 ## Defer (residuals, not unpaid slices)
 
-Tip milestone [`docs/milestones/007-complete-product`](docs/milestones/007-complete-product.md) closed slices **1–11**. Do **not** reopen slice ledgers for residual hardening. Honest leftovers (track in milestone notes, not as `still_owed` slices):
+Slice ledger [`docs/milestones/007-complete-product`](docs/milestones/007-complete-product.md) closed slices **1–11**. Do **not** reopen slice ledgers for residual hardening. Full-v1 tip is [`docs/milestones/009-full-product`](docs/milestones/009-full-product.md). Honest leftovers live in that file's Deferred section, not as `still_owed` slices:
 
-- WAL kill→reboot→re-read of client content; PostgreSQL Document Store blob gate (alongside Redis G11)
-- UI `/ui/*` real `014` session auth (vs interim bearer→cluster-admin)
+- Invoicing / billing export
+- Multi-process `spacestoraged` orchestration beyond the in-process and live-TCP harnesses
+- Further `/ui/*` polish past `014` session login
+- WAL kill→reboot client-content cases past the existing Redis gate
+- Auto-bootstrap of `ControlPlane` on every membership start
 
-Multi-node openraft peer RPC over internodes: **done** — see [`docs/milestones/008-later-not-first`](docs/milestones/008-later-not-first.md). Intent “later, not first” product surfaces (L0 workflow, planetary compositions, external KMS, N/N+1 join window, billing formula, legal-hold/erase, named CDC) also recorded there.
+Openraft `Raft::new` / 0.10, multi-node peer RPC, the PostgreSQL Document Store blob gate, and `/ui/*` `014` session login are **done**. Later-not-first surfaces are recorded in [`docs/milestones/008-later-not-first`](docs/milestones/008-later-not-first.md).
 
 Out of scope for residual passes unless explicitly requested: inventing new slice DoD debt.
 
