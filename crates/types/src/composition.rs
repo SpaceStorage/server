@@ -37,6 +37,7 @@ pub fn l4_descriptor(name: &str) -> Option<TypeDescriptor> {
         kind: Kind::Composition,
         multi_active: false,
         schema_required: false,
+        snapshot_capable: false,
     })
 }
 

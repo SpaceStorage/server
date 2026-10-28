@@ -1,14 +1,19 @@
 //! TransformSpec + five rewrite kinds + swap (010 US3).
 
 use crate::authz::AuthzContext;
-use crate::dual_write::{incomplete_name, DualWriteRegistry, DualWriteWindow};
+use crate::dual_write::{incomplete_name, DualWriteRegistry, DualWriteRewrite, DualWriteWindow};
 use crate::error::MigrateError;
 use crate::job::{JobKind, JobRecord, Strategy};
-use crate::mapping::{resolve_mapping, MappingQuery};
+use crate::mapping::{
+    apply_row_transform, execute_mapping_query, resolve_mapping, MappingQuery, MappingSpec,
+};
+use crate::quota::{measure_row_bytes, refresh_quota_view, QuotaView};
 use crate::store::JobStore;
 use serde::{Deserialize, Serialize};
 use spacestorage_storage::{ContentStore, StorageMode};
+use spacestorage_tenancy::Tenancy;
 use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::migrate::ContainerRef;
@@ -108,6 +113,7 @@ pub struct TransformRunner {
     pub store: JobStore,
     pub dual: DualWriteRegistry,
     pub slice10: bool,
+    pub tenancy: Arc<Tenancy>,
 }
 
 impl TransformRunner {
@@ -120,11 +126,15 @@ impl TransformRunner {
         source_head: u64,
         names: &mut HashMap<(String, String), Uuid>,
         content: &mut ContentStore,
+        quota: QuotaView,
+        source_bytes: u64,
     ) -> Result<JobRecord, MigrateError> {
         if !self.slice10 {
             return Err(MigrateError::MigrateSlice10Required);
         }
         spec.validate(&AuthzContext::cluster_admin())?;
+        // FR-011 / R11: refuse before any copy when a second copy does not fit.
+        quota.check_fits(source_bytes)?;
 
         let new_name = spec
             .new_name
@@ -137,6 +147,21 @@ impl TransformRunner {
             });
         }
 
+        let to = spec
+            .target_type
+            .clone()
+            .unwrap_or_else(|| spec.source_type.clone());
+        let complex = matches!(
+            spec.rewrite,
+            RewriteKind::TypeModel | RewriteKind::IncompatibleSchema
+        );
+        let mapping: MappingSpec = resolve_mapping(
+            &spec.source_type,
+            &to,
+            spec.mapping_query.as_ref(),
+            complex,
+        )?;
+
         let target_id = Uuid::now_v7();
         job.target_internal_name = Some(incomplete_name(job.id));
         content.register_mode(target_id, StorageMode::Persistent);
@@ -145,6 +170,10 @@ impl TransformRunner {
             job_id: job.id,
             install_seq: source_head,
             target_id,
+            rewrite: Some(DualWriteRewrite {
+                kind: spec.rewrite.as_str().into(),
+                mapping: mapping.clone(),
+            }),
         })?;
         job.mark_running();
         job.progress.install_seq = Some(source_head);
@@ -152,20 +181,64 @@ impl TransformRunner {
 
         let mut objects = 0u64;
         let mut bytes = 0u64;
-        for (k, v) in source_rows {
-            // Identity map for same-type rewrites; catalog/query applied as pass-through bytes.
-            content.put(target_id, k.clone(), v.clone());
-            objects += 1;
-            bytes += (k.len() + v.len()) as u64;
+        match &mapping {
+            MappingSpec::Query(q) => {
+                // FR-014 / R13: evaluate via 005 LogicalRequest through crates/query.
+                let projected = execute_mapping_query(q, source_rows)?;
+                for (nk, nv) in projected {
+                    content.put(target_id, nk.clone(), nv.clone());
+                    objects += 1;
+                    bytes += (nk.len() + nv.len()) as u64;
+                }
+            }
+            MappingSpec::Catalog(_) => {
+                for (k, v) in source_rows {
+                    let (nk, nv) = apply_row_transform(spec.rewrite.as_str(), &mapping, k, v);
+                    content.put(target_id, nk.clone(), nv.clone());
+                    objects += 1;
+                    bytes += (nk.len() + nv.len()) as u64;
+                }
+            }
         }
         job.progress.objects_copied = objects;
         job.progress.bytes_copied = bytes;
         job.progress.last_applied_source_seq = Some(source_head);
 
-        if source_head > job.progress.last_applied_source_seq.unwrap_or(0) {
-            // Should not happen after catch-up; gate for live swap tests.
-            self.dual.unregister(source_id);
+        // Drain mapped dual-writes into the target (including puts after the first drain).
+        let mut last_applied = source_head;
+        loop {
+            let pending = self.dual.take_pending(target_id);
+            if pending.is_empty() {
+                break;
+            }
+            for (k, v) in pending {
+                content.put(target_id, k.clone(), v.clone());
+                objects += 1;
+                bytes += (k.len() + v.len()) as u64;
+                last_applied = last_applied.saturating_add(1);
+            }
+        }
+        job.progress.objects_copied = objects;
+        job.progress.bytes_copied = bytes;
+        job.progress.last_applied_source_seq = Some(last_applied.max(source_head));
+
+        let effective_head = source_head.max(last_applied);
+        if last_applied.max(source_head) < effective_head {
+            let _ = self.dual.unregister(source_id);
             let e = MigrateError::InvalidState;
+            job.mark_failed(&e);
+            self.store.insert(job.clone());
+            return Err(e);
+        }
+
+        // T077: re-read `07` usage and grown source size immediately before swap.
+        let grown = self
+            .dual
+            .grown_source_bytes(source_id, source_bytes)
+            .max(measure_row_bytes(source_rows));
+        let quota = refresh_quota_view(&self.tenancy, &spec.source.namespace, quota);
+        if let Err(e) = quota.check_fits(grown) {
+            let _ = self.dual.unregister(source_id);
             job.mark_failed(&e);
             self.store.insert(job.clone());
             return Err(e);
@@ -189,7 +262,7 @@ impl TransformRunner {
                     );
                     let rk = (spec.source.namespace.clone(), retain);
                     if names.contains_key(&rk) {
-                        self.dual.unregister(source_id);
+                        let _ = self.dual.unregister(source_id);
                         let e = MigrateError::NameExists {
                             container: format!("{}.{}", rk.0, rk.1),
                         };
@@ -202,7 +275,22 @@ impl TransformRunner {
             }
         }
 
-        self.dual.unregister(source_id);
+        // Final drain into content while the dual-write window stays registered.
+        // T078: unregister only after catalog publish so a source ack cannot miss the swap.
+        loop {
+            let pending = self.dual.take_pending(target_id);
+            if pending.is_empty() {
+                break;
+            }
+            for (k, v) in pending {
+                content.put(target_id, k.clone(), v.clone());
+                objects += 1;
+                bytes += (k.len() + v.len()) as u64;
+            }
+        }
+        job.progress.objects_copied = objects;
+        job.progress.bytes_copied = bytes;
+
         job.mark_completed();
         job.strategy = Strategy::Live;
         self.store.insert(job.clone());

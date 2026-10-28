@@ -4,9 +4,12 @@ use std::sync::{Arc, RwLock};
 
 use serde_json::{json, Value};
 use spacestorage_compat::{
-    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
+    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, LimitServices,
+    PrincipalHold, ProtocolId,
 };
-use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_query::{
+    AggFn, CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult,
+};
 use spacestorage_types::ContainerCatalog;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +22,8 @@ pub struct SessionState {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub namespace: String,
     pub profile: DialectProfile,
+    pub limit_services: LimitServices,
+    pub principal_hold: Option<PrincipalHold>,
 }
 
 impl SessionState {
@@ -27,11 +32,14 @@ impl SessionState {
             catalog,
             namespace: "demo".into(),
             profile: DialectProfile::HandlersComplete,
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
     fn engine(&self) -> PlannerEngine {
-        PlannerEngine::new(Arc::clone(&self.catalog))
+        let distributed = matches!(self.profile, DialectProfile::CompleteProduct);
+        PlannerEngine::with_distributed(Arc::clone(&self.catalog), distributed)
     }
 
     fn exec(&self, req: LogicalRequest) -> Result<QueryResult, EsReply> {
@@ -92,6 +100,13 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsRepl
             let index = args.first().copied().unwrap_or("docs");
             let id = args.get(1).copied().unwrap_or("1");
             let body = args.get(2).copied().unwrap_or("{}");
+            let limits = session.limit_services.limits();
+            if let Err(e) = limits.check_key(id.len() as u64) {
+                return error_reply(413, "limit_exceeded", &e.to_string());
+            }
+            if let Err(e) = limits.check_value(body.len() as u64) {
+                return error_reply(413, "limit_exceeded", &e.to_string());
+            }
             if let Err(e) = session.ensure_index(index) {
                 return e;
             }
@@ -196,6 +211,63 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> EsRepl
                 Err(e) => e,
             }
         }
+        "AGG_TERMS" | "AGG_MIN" | "AGG_MAX" | "AGG_SUM" | "AGG_AVG" | "AGG_HISTOGRAM"
+        | "AGG_VALUE_COUNT" | "AGG" | "AGGREGATIONS" => {
+            let index = args.first().copied().unwrap_or("docs");
+            let field = args.get(1).copied().unwrap_or("id");
+            if let Err(e) = session.ensure_index(index) {
+                return e;
+            }
+            let (func, group_by) = match upper.as_str() {
+                "AGG_TERMS" | "AGG_HISTOGRAM" => (AggFn::Count, Some(field.to_string())),
+                "AGG_MIN" => (AggFn::Min, None),
+                "AGG_MAX" => (AggFn::Max, None),
+                "AGG_SUM" => (AggFn::Sum, None),
+                "AGG_AVG" => (AggFn::Avg, None),
+                "AGG_VALUE_COUNT" | "AGG" | "AGGREGATIONS" => (AggFn::Count, None),
+                _ => (AggFn::Count, None),
+            };
+            match session.exec(LogicalRequest::Aggregate {
+                container: index.into(),
+                func,
+                group_by,
+                column: Some(field.into()),
+                filter: None,
+            }) {
+                Ok(r) => {
+                    let mut buckets = Vec::new();
+                    for row in &r.rows {
+                        let key = row.first().and_then(|x| x.clone()).unwrap_or_default();
+                        let val = row
+                            .get(1)
+                            .and_then(|x| x.as_ref())
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .or_else(|| {
+                                row.first()
+                                    .and_then(|x| x.as_ref())
+                                    .and_then(|s| s.parse::<f64>().ok())
+                            })
+                            .unwrap_or(0.0);
+                        buckets.push(json!({
+                            "key": key,
+                            "doc_count": val as u64,
+                            "value": val
+                        }));
+                    }
+                    let name = upper.to_ascii_lowercase();
+                    EsReply::Ok(json!({
+                        "hits": { "total": { "value": 0, "relation": "eq" }, "hits": [] },
+                        "aggregations": {
+                            name: {
+                                "buckets": buckets,
+                                "value": buckets.first().and_then(|b| b.get("value")).cloned().unwrap_or(json!(0))
+                            }
+                        }
+                    }))
+                }
+                Err(e) => e,
+            }
+        }
         other => refuse(
             other,
             CompatError::CompatMustNot {
@@ -242,6 +314,42 @@ mod tests {
                 assert!(reason.contains("agg_not_in_profile") || body["error"]["type"].is_string());
             }
             EsReply::Ok(_) => panic!("MUST NOT must not return 200"),
+        }
+    }
+
+    #[cfg(feature = "query-distributed")]
+    #[test]
+    fn complete_product_aggs_run() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(Arc::clone(&cat));
+        s.profile = DialectProfile::CompleteProduct;
+        assert!(matches!(
+            dispatch(&mut s, "CREATE_INDEX", &["docs"]),
+            EsReply::Ok(_)
+        ));
+        assert!(matches!(
+            dispatch(
+                &mut s,
+                "INDEX",
+                &["docs", "1", r#"{"title":"hello","n":3}"#]
+            ),
+            EsReply::Ok(_)
+        ));
+        for verb in [
+            "AGG_TERMS",
+            "AGG_MIN",
+            "AGG_MAX",
+            "AGG_SUM",
+            "AGG_AVG",
+            "AGG_HISTOGRAM",
+            "AGG_VALUE_COUNT",
+        ] {
+            match dispatch(&mut s, verb, &["docs", "n"]) {
+                EsReply::Ok(v) => {
+                    assert!(v.get("aggregations").is_some(), "{verb}: {v}");
+                }
+                other => panic!("{verb}: {other:?}"),
+            }
         }
     }
 }

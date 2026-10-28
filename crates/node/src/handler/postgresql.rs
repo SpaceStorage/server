@@ -3,6 +3,7 @@
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use spacestorage_compat::LimitServices;
 use spacestorage_handler_postgresql::{PostgresqlHandler, UserStore};
 use spacestorage_types::ContainerCatalog;
 use tokio_util::sync::CancellationToken;
@@ -15,12 +16,25 @@ pub struct PostgresqlPortHandler {
 
 impl PostgresqlPortHandler {
     pub fn new(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
-        Self::with_release(catalog, builtin_release())
+        Self::with_release_limits(catalog, builtin_release(), LimitServices::built_in())
     }
 
     pub fn with_release(catalog: Arc<RwLock<ContainerCatalog>>, release: &str) -> Self {
+        Self::with_release_limits(catalog, release, LimitServices::built_in())
+    }
+
+    pub fn with_release_limits(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        release: &str,
+        limit_services: LimitServices,
+    ) -> Self {
         Self {
-            inner: PostgresqlHandler::with_release(catalog, Arc::new(UserStore::demo()), release),
+            inner: PostgresqlHandler::with_release_limits(
+                catalog,
+                Arc::new(UserStore::demo()),
+                release,
+                limit_services,
+            ),
         }
     }
 

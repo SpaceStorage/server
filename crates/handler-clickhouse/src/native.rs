@@ -3,7 +3,7 @@
 use std::sync::{Arc, RwLock};
 
 use bytes::BytesMut;
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use spacestorage_protocol_core::{default_timeout, peek_signature, ProtocolFamily};
 use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -16,14 +16,20 @@ pub struct ClickHouseNativeHandler {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub profile: DialectProfile,
     pub namespace: String,
+    pub limit_services: LimitServices,
 }
 
 impl ClickHouseNativeHandler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
+            limit_services,
         }
     }
 
@@ -52,6 +58,8 @@ impl ClickHouseNativeHandler {
             namespace: self.namespace.clone(),
             profile: self.profile,
             protocol: spacestorage_compat::ProtocolId::ClickHouse,
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
 
         // Finish Hello if incomplete, then reply.
@@ -63,6 +71,17 @@ impl ClickHouseNativeHandler {
             match stream.read(&mut tmp).await {
                 Ok(0) | Err(_) => return,
                 Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            }
+        }
+        // Native Hello completes handshake; count as authenticated demo principal.
+        if session.principal_hold.is_none() {
+            match session.limit_services.try_hold_principal("demo") {
+                Ok(hold) => session.principal_hold = Some(hold),
+                Err(e) => {
+                    let msg = format!("limit_exceeded: {e}");
+                    let _ = stream.write_all(msg.as_bytes()).await;
+                    return;
+                }
             }
         }
         if stream.write_all(&encode_server_hello()).await.is_err() {

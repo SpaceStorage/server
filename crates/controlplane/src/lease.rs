@@ -62,6 +62,24 @@ pub fn require_lease(
         })
 }
 
+/// Fence an ordered append (log stream / total order): require current lease epoch.
+/// On mismatch → `StaleEpoch` and the caller MUST NOT enter those bytes into history.
+pub fn fence_ordered_append(
+    leases: &std::collections::BTreeMap<Uuid, LeadershipLease>,
+    container_id: Uuid,
+    presented_epoch: u64,
+    type_name: &str,
+) -> Result<u64> {
+    if is_leaderless_type(type_name) {
+        return Err(ControlPlaneError::LeaseForbidden {
+            type_name: type_name.into(),
+        });
+    }
+    let lease = require_lease(leases, container_id)?;
+    check_epoch(presented_epoch, lease)?;
+    Ok(lease.epoch)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +99,17 @@ mod tests {
         assert_eq!(second.epoch, 2);
         assert!(check_epoch(1, &second).is_err());
         assert!(check_epoch(2, &second).is_ok());
+    }
+
+    #[test]
+    fn ordered_append_fence_stale_epoch() {
+        let c = Uuid::from_u128(3);
+        let lease = grant(c, Uuid::from_u128(1), None, 1, "Log Stream").unwrap();
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(c, lease);
+        assert!(fence_ordered_append(&map, c, 1, "Log Stream").is_ok());
+        let err = fence_ordered_append(&map, c, 0, "Log Stream").unwrap_err();
+        assert!(matches!(err, ControlPlaneError::StaleEpoch { .. }));
+        assert!(fence_ordered_append(&map, c, 1, "K/V Store").is_err());
     }
 }

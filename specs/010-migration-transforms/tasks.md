@@ -276,3 +276,51 @@ Task: "MappingQuery → LogicalRequest in crates/migrate/src/mapping.rs"
 - First binary MUST refuse jobs with `MigrateSlice10Required`
 - Commit after each task or logical group
 - Stop at any checkpoint to validate the story independently
+
+---
+
+## Phase 8: Convergence
+
+**Purpose**: Close false-`[X]` product-path gaps against 010 FRs. Do not re-list open T017, T019, T038, T039, T053, T055, T056. Do not treat `GET /v1/snapshots` (013 list stub) or legal-hold/erase (008/009) as 010 work.
+
+- [X] T058 Drive accepted `data_*` jobs on the node: `JobService::start` and `resume` must run `MigrateRunner` (live default, `snapshot` via `013`, `offline` write-refuse), `TransformRunner`, and `BackupOrchestrator` against node content, update bytes/objects/sequences, and reach `completed` or a named failure — `POST /v1/migrate`, `/v1/transform`, `/v1/backup`, and `/v1/restore` currently only insert a `running` record (`crates/node/src/handler/admin_http.rs`, `crates/migrate/src/lib.rs`). Check placement before cutover and quota at start and cutover. per FR-001, FR-006, FR-007, FR-009, FR-011, plan: job supervisor (partial)
+- [X] T059 Register the dual-write interceptor on the coordinating write path so a counted source ack waits for the mapped target apply, target failure pauses the job and does not ack, and cutover/swap waits until `last_applied_source_seq` covers the source head — `DualWriteRegistry` is never consulted outside `crates/migrate` per FR-003, US1/AC4, US3/AC8, plan R4 (partial)
+- [X] T060 Apply catalog mappings and `005` `LogicalRequest` evaluation inside the transform runner so type/schema, codec, key, and sharding-key rewrites change the stored representation; do not identity-copy those kinds (`crates/migrate/src/transform.rs` pass-through bytes; `lower_to_logical_request` is unused JSON) per FR-003, FR-014, plan R13 (partial)
+- [X] T061 Persist `JobRecord` on the node’s existing `006` log (cluster log when namespaces, placement, or backup scope differ; namespace log otherwise) and resume catch-up from `last_applied_source_seq` or fail `StateUnreadable` — `crates/migrate/src/store.rs` is an in-memory map per FR-008, plan R3 (partial)
+- [X] T062 On move cutover, drop the source container name (reusable, storage released), not only `clear_content` — `MigrateRunner::run_live` leaves the source key in the name map (`crates/migrate/src/migrate.rs`) per FR-002, US2/AC2 (partial)
+- [X] T063 Build admin job `AuthzContext` from the caller principal (`MIGRATE` or `CLUSTER_ADMIN`; cross-namespace requires admin or dual `MIGRATE`) instead of `AuthzContext::cluster_admin()` in `crates/node/src/handler/admin_http.rs` per FR-010 (partial)
+- [X] T064 Refuse in-place incompatible schema, codec or key rewrite of existing data, and fixed sharding-key changes from `crates/types` and `crates/placement` with a pointer to this transform — `TypeError::IncompatibleSchemaChange` is only "incompatible schema change" and placement has no fixed-key refuse per FR-004 (partial)
+- [X] T065 On the `migration-backup` build, make `spacestorage job|migrate|transform|backup|restore` call admin-http and print the job; use `stub_service()` and exit 5 only when that feature is off — `Command::Job` always calls `stub_service()` and the other four commands only print a POST hint (`crates/spacestorage/src/main.rs`) per contracts/cli.md, plan R2 (partial)
+
+## Phase 9: Convergence
+
+**Purpose**: Close remaining 010 product-path gaps after Phase 8. Do not re-list open T017, T019, T038, T039, T053, T055, T056. Do not build `014` MIGRATE bindings in this crate.
+
+- [X] T066 CRITICAL: Await `006` cluster or namespace append for each `JobRecord` on the node Tokio runtime before `start`/`resume` returns, and run the `data_jobs.jsonl` `sync_all` on the blocking pool — `persist_job_record` fsyncs on the caller and `tokio::spawn`s `append_cluster` / `append_namespace` without waiting (`crates/node/src/job_driver.rs`) per Constitution II, FR-008, plan R3 (contradicts)
+- [X] T067 CRITICAL: Apply each mapped dual-write on the target at that container's write quorum before the source write is acknowledged; if the target apply fails, do not ack and pause the job with the named error — `intercept_source_write` only inserts `pending_target` and ignores `on_target_fail` (`crates/migrate/src/dual_write.rs`, catalog hook in `crates/node/src/job_driver.rs`) per Constitution VIII, FR-003, plan R4 (contradicts)
+- [X] T068 Validate destination placement with `04` `plan_replicas` before migrate start and again before cutover, and refuse `ConstraintUnsatisfiable` when anti-affinity, labels, or drives cannot be satisfied — `MigrationSpec::force_unsatisfiable` is not that check (`crates/migrate/src/migrate.rs`, `crates/node/src/job_driver.rs`) per FR-009, US1/AC2, plan R7 (partial)
+
+## Phase 10: Convergence
+
+**Purpose**: Close product-path gaps that remain after Phase 9. Do not re-list open T017, T019, T038, T039, T053, T055, T056. Do not build `014` MIGRATE bindings in this crate.
+
+- [X] T069 CRITICAL: Wait for the target container's declared write quorum (`04` `write_quorum_satisfied` against durable replica acks in that container's quorum domain) before the source write is acknowledged; if the quorum is not met, do not ack and pause the job with the named error — `apply_target_at_quorum` returns after local `put_mirrored` / `put_kv_durable` on the first drive (`crates/node/src/job_driver.rs`, `crates/storage/src/lib.rs`) per Constitution VIII, FR-003, plan R4 (contradicts)
+- [X] T070 Read destination namespace quota from `07` (`crates/tenancy` `admit` / `QuotaUsage`) at migrate and transform start and again before cutover or swap; refuse `QuotaExceeded` before any copy when a second copy does not fit, and on a cutover failure leave the source intact and the target incomplete — `drive_migrate` passes `QuotaView::default()` (no limit) and `TransformRunner::run` never checks quota (`crates/node/src/job_driver.rs`, `crates/migrate/src/transform.rs`) per FR-011, US2/AC4, US2/AC6, US3/AC10, plan R11 (partial)
+- [X] T071 Evaluate mapping queries by executing a `005` `LogicalRequest` (scan + project + insert) through `crates/query`; do not apply a private field remap — `lower_to_logical_request` builds JSON and `apply_row_transform` rewrites rows in-process, and `spacestorage-migrate` does not depend on `spacestorage-query` (`crates/migrate/src/mapping.rs`) per FR-014, plan R13 (contradicts)
+- [X] T072 Run the migrate `snapshot` strategy by invoking `013` snapshot of the source and restore into the destination, with no dual-write window — `Strategy::Snapshot` copies the live catalog map in `MigrateRunner::run_snapshot` (`crates/migrate/src/migrate.rs`, `crates/node/src/job_driver.rs`) per plan R6, contracts/dual-write.md (partial)
+- [X] T073 Pass optional restore `pitr_position` through to `013` `RestoreRequest.pitr` so restore stops at that WAL position — `RestoreSpec` has no position field and `run_restore` always sets `pitr: None` (`crates/migrate/src/backup.rs`) per FR-006, contracts/backup-restore.md (partial)
+- [X] T074 Fail `start` and `resume` with `StateUnreadable` when the `006` cluster or namespace append fails, and do not accept the job on a swallowed append — `persist_job_record_async` discards `append_cluster` / `append_namespace` errors and `JobStore::insert` ignores flush errors (`crates/node/src/job_driver.rs`, `crates/migrate/src/store.rs`) per FR-008, plan R3 (partial)
+- [X] T075 Increment the existing `08` job series when a supervisor-driven `data_*` job reaches `completed` or `failed` — `bump_job_metric` runs only from `JobService::complete` / `fail` / `cancel`, which `MigrateRunner`, `TransformRunner`, and `BackupOrchestrator` do not call (`crates/migrate/src/lib.rs`) per FR-007, plan R16 (partial)
+
+## Phase 11: Convergence
+
+**Purpose**: Close swap/cutover gaps that remain after Phase 10. Do not re-list open T017, T019, T038, T039, T053, T055, T056. Do not build `014` MIGRATE bindings in this crate.
+
+- [X] T076 CRITICAL: At transform swap and live-migrate cutover, keep every acknowledged source row and publish the target with every mapped dual-write: do not `replace_rows` the source or other containers from the pre-job snapshot, apply the rewrite on interceptor puts, and drain `pending_target` into the target catalog rows before `unregister` (including puts acked after the first drain) — `apply_transform_to_catalog` rewrites every name from `snapshot_source`, `TransformRunner::run` never reads `pending_for`, and the write hook copies raw source bytes (`crates/node/src/job_driver.rs`, `crates/migrate/src/transform.rs`, `crates/migrate/src/migrate.rs`, `crates/migrate/src/dual_write.rs`) per FR-003, FR-008, US3/AC8, plan R4 (contradicts)
+- [X] T077 Re-read destination `07` usage and the grown source size immediately before migrate cutover and transform swap; fail `QuotaExceeded` with the source intact and the target incomplete when that second copy no longer fits — `TransformRunner` calls `check_fits` on the start-time `QuotaView`, and `run_live` gates use `source_bytes` captured before catch-up (`crates/migrate/src/transform.rs`, `crates/node/src/job_driver.rs`, `crates/migrate/src/quota.rs`) per FR-011, US2/AC6, US3/AC10, plan R11 (partial)
+
+## Phase 12: Convergence
+
+**Purpose**: Close the catalog-publish hole left after Phase 11. Do not re-list open T017, T019, T038, T039, T053, T055, T056. Do not build `014` MIGRATE bindings in this crate.
+
+- [X] T078 Publish only the transform target at catalog cutover, and keep every other container's acknowledged rows. `apply_transform_to_catalog` treats every id in `names` except `live_source_id` as a target, but `snapshot_source` copies the whole catalog into `names`, so `replace_rows` rewrites other containers from the pre-job snapshot. When `retain_source` is set, bind the previous container under `<old>__pre_transform_<job_id>` without `drop_container` deleting that id's rows. Unregister the dual-write window only after `apply_transform_to_catalog` / `apply_name_content_to_catalog` has published the target (`TransformRunner::run` and `MigrateRunner::run_live` unregister first) so a source ack cannot land in the gap and miss the swap. per FR-003, FR-008, US3/AC4 (partial)

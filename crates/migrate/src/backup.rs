@@ -6,10 +6,11 @@ use crate::job::{JobKind, JobRecord, Strategy};
 use crate::store::JobStore;
 use serde::{Deserialize, Serialize};
 use spacestorage_backup::{
-    scope_container, scope_namespace, ContainerSnapshotMeta, RestoreRequest, RestoreService,
-    SnapshotCreateRequest, SnapshotService,
+    scope_container, scope_namespace, ContainerSnapshotMeta, PitrTarget, RestoreRequest,
+    RestoreService, SnapshotCreateRequest, SnapshotService,
 };
 use spacestorage_storage::StorageEngine;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,31 @@ pub struct RestoreSpec {
     pub dest_namespace: Option<String>,
     #[serde(default)]
     pub key_refs: Vec<String>,
+    /// Optional PITR stop position forwarded to `013` `RestoreRequest.pitr` (FR-006).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitr_position: Option<PitrPosition>,
+}
+
+/// Wire form for restore PITR (positions map or HLC stamp).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PitrPosition {
+    /// Explicit per-drive LSN map.
+    Positions(BTreeMap<String, u64>),
+    /// Tagged `{ "kind": "positions", "positions": { ... } }` or HLC.
+    Target(PitrTarget),
+    /// Bare HLC / ingest stamp.
+    Hlc(u64),
+}
+
+impl PitrPosition {
+    pub fn into_pitr_target(self) -> PitrTarget {
+        match self {
+            Self::Target(t) => t,
+            Self::Positions(positions) => PitrTarget::Positions { positions },
+            Self::Hlc(hlc) => PitrTarget::Hlc { hlc },
+        }
+    }
 }
 
 pub struct BackupOrchestrator {
@@ -125,6 +151,11 @@ impl BackupOrchestrator {
             key_refs.push(k.clone());
         }
 
+        let pitr = spec
+            .pitr_position
+            .clone()
+            .map(PitrPosition::into_pitr_target);
+
         let restore = RestoreService::new(data_dir, true);
         let man = restore
             .restore_fill(
@@ -132,7 +163,7 @@ impl BackupOrchestrator {
                 RestoreRequest {
                     snapshot_id: spec.snapshot_id,
                     confirm_drop: spec.confirm_drop,
-                    pitr: None,
+                    pitr,
                     key_refs,
                     wal_stamps: Default::default(),
                 },

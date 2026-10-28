@@ -17,7 +17,7 @@ pub mod validate;
 
 pub use ack::{AckKind, WriteAck};
 pub use catalog::{
-    Catalog, ContainerCatalog, DurableCreateHook, DurablePutHook, TypeCatalog,
+    Catalog, ContainerCatalog, DurableCreateHook, DurablePutHook, TypeCatalog, WriteInterceptorHook,
 };
 pub use cdc::{CdcCatalog, CdcEvent, CdcOp, CdcStream, CdcStreamSummary};
 pub use composition::{
@@ -30,7 +30,10 @@ pub use error::TypeError;
 pub use ident::{new_container_id, ContainerId, ContainerName, NamespaceName};
 pub use l0::{L0Catalog, L0Container, L0ContainerSummary, L0CreateRequest, L0_CREATABLE, L0_NOT_CREATABLE};
 pub use schema::{ContainerSchema, Field, ValueDomain};
-pub use validate::{validate_definition, validate_schema_alter};
+pub use validate::{
+    refuse_inplace_codec_rewrite, refuse_inplace_key_rewrite, refuse_inplace_reencode_existing,
+    validate_definition, validate_schema_alter,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum L3Model {
@@ -58,6 +61,11 @@ impl L3Model {
 
     pub fn schema_required(self) -> bool {
         matches!(self, Self::RelationalTable)
+    }
+
+    /// FR-006: Relational Table / Document Store true; K/V Store false.
+    pub fn snapshot_capable(self) -> bool {
+        matches!(self, Self::RelationalTable | Self::DocumentStore)
     }
 
     pub fn first_binary_creatable() -> &'static [L3Model] {
@@ -138,6 +146,17 @@ mod tests {
             }),
         );
         roundtrip(L3Model::DocumentStore, "docs", None);
+    }
+
+    #[test]
+    fn snapshot_capable_defaults() {
+        assert!(L3Model::RelationalTable.snapshot_capable());
+        assert!(L3Model::DocumentStore.snapshot_capable());
+        assert!(!L3Model::KvStore.snapshot_capable());
+        let d = TypeDescriptor::l3_model("kv_store", "K/V Store", false);
+        assert!(!d.snapshot_capable);
+        let r = TypeDescriptor::l3_model("relational_table", "Relational Table", true);
+        assert!(r.snapshot_capable);
     }
 
     #[test]

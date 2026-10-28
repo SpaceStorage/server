@@ -1,7 +1,10 @@
 //! Async PostgreSQL `Handler::serve` (Constitution II) — simple + extended.
 
 use crate::auth::{begin_scram, finish_scram, ScramExchange, UserStore};
-use crate::sql::{execute_sql, ExecResult, SharedCatalog};
+use crate::cancel_registry;
+use crate::sql::{
+    drop_session_portals, execute_sql, execute_sql_cancel, ExecResult, SharedCatalog,
+};
 use crate::wire::{
     try_read_message, try_read_startup, write_auth_ok, write_auth_sasl, write_auth_sasl_continue,
     write_auth_sasl_final, write_backend_key_data, write_bind_complete, write_command_complete,
@@ -9,7 +12,8 @@ use crate::wire::{
     write_ready, write_row_description, write_ssl_no, FrontendMessage, FEATURE_NOT_SUPPORTED,
 };
 use bytes::{BufMut, BytesMut};
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices, PrincipalHold};
+use spacestorage_query::CancelToken;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -19,15 +23,37 @@ struct PgSession {
     namespace: String,
     statements: HashMap<String, String>,
     portals: HashMap<String, String>,
+    /// Stable session id for txn/portal registry (BackendKeyData.pid based).
+    session_id: String,
+    cancel: CancelToken,
+    backend_pid: i32,
+    backend_key: i32,
+    /// Held after SCRAM success until disconnect (FR-011 principal cap).
+    principal_hold: Option<PrincipalHold>,
 }
 
 impl Default for PgSession {
     fn default() -> Self {
+        let cancel = CancelToken::new();
+        let (pid, key) = cancel_registry::register(cancel.clone());
         Self {
             namespace: "default".into(),
             statements: HashMap::new(),
             portals: HashMap::new(),
+            session_id: format!("pg-{pid}"),
+            cancel,
+            backend_pid: pid,
+            backend_key: key,
+            principal_hold: None,
         }
+    }
+}
+
+impl Drop for PgSession {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        cancel_registry::unregister(self.backend_pid, self.backend_key);
+        drop_session_portals(&self.session_id);
     }
 }
 
@@ -45,6 +71,7 @@ pub async fn serve<S>(
     catalog: SharedCatalog,
     profile: DialectProfile,
     users: Arc<UserStore>,
+    limit_services: LimitServices,
 ) where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
@@ -91,7 +118,11 @@ pub async fn serve<S>(
                                 }
                                 true
                             }
-                            FrontendMessage::CancelRequest { .. } => return,
+                            FrontendMessage::CancelRequest { pid, key } => {
+                                // Separate connection: cancel matching in-flight exec and exit.
+                                let _ = cancel_registry::cancel(pid, key);
+                                return;
+                            }
                             FrontendMessage::Startup { params } => {
                                 let mut ns = "default".to_string();
                                 for (k, v) in &params {
@@ -169,6 +200,16 @@ pub async fn serve<S>(
                             };
                             match finish_scram(&exch, client_final) {
                                 Ok(server_final) => {
+                                    // FR-011: principal connection cap after AUTH — reject without waiting.
+                                    match limit_services.try_hold_principal(&exch.username) {
+                                        Ok(hold) => session.principal_hold = Some(hold),
+                                        Err(e) => {
+                                            let mut out = BytesMut::new();
+                                            write_error(&mut out, "53300", &e.to_string());
+                                            let _ = stream.write_all(&out).await;
+                                            return;
+                                        }
+                                    }
                                     session.namespace = namespace;
                                     let mut out = BytesMut::new();
                                     write_auth_sasl_final(&mut out, &server_final);
@@ -179,7 +220,11 @@ pub async fn serve<S>(
                                         "16.4 (SpaceStorage)",
                                     );
                                     write_parameter_status(&mut out, "client_encoding", "UTF8");
-                                    write_backend_key_data(&mut out, 42, 42);
+                                    write_backend_key_data(
+                                        &mut out,
+                                        session.backend_pid,
+                                        session.backend_key,
+                                    );
                                     write_ready(&mut out, b'I');
                                     if stream.write_all(&out).await.is_err() {
                                         return;
@@ -235,9 +280,16 @@ pub async fn serve<S>(
                     return;
                 }
                 Ok(Some(msg)) => {
-                    if handle_msg(&mut stream, &catalog, profile, &mut session, msg)
-                        .await
-                        .is_err()
+                    if handle_msg(
+                        &mut stream,
+                        &catalog,
+                        profile,
+                        &mut session,
+                        &limit_services,
+                        msg,
+                    )
+                    .await
+                    .is_err()
                     {
                         return;
                     }
@@ -246,10 +298,17 @@ pub async fn serve<S>(
         }
 
         tokio::select! {
-            _ = cancel.cancelled() => break,
+            _ = cancel.cancelled() => {
+                session.cancel.cancel();
+                break;
+            }
             r = stream.read(&mut read_buf) => {
                 match r {
-                    Ok(0) | Err(_) => break,
+                    Ok(0) | Err(_) => {
+                        // Client disconnect stops in-flight work (FR-009).
+                        session.cancel.cancel();
+                        break;
+                    }
                     Ok(n) => buf.extend_from_slice(&read_buf[..n]),
                 }
             }
@@ -273,37 +332,68 @@ async fn handle_msg<S>(
     catalog: &SharedCatalog,
     profile: DialectProfile,
     session: &mut PgSession,
+    limit_services: &LimitServices,
     msg: FrontendMessage,
 ) -> Result<(), ()>
 where
     S: AsyncWrite + Unpin,
 {
+    let limits = limit_services.limits();
     let mut out = BytesMut::new();
     match msg {
         FrontendMessage::Terminate => return Err(()),
         FrontendMessage::Query(sql) => {
             // Simple query may contain multiple statements separated by ;
             for stmt in split_statements(&sql) {
-                render_exec(&mut out, catalog, profile, &session.namespace, &stmt);
+                render_exec(
+                    &mut out,
+                    catalog,
+                    profile,
+                    &session.namespace,
+                    &session.session_id,
+                    &session.cancel,
+                    &stmt,
+                    &limits,
+                );
             }
             write_ready(&mut out, b'I');
         }
         FrontendMessage::Parse { name, query, .. } => {
-            session.statements.insert(name, query);
-            write_parse_complete(&mut out);
+            if let Err(e) = limits.check_query_text(query.len() as u64) {
+                write_error(&mut out, "54000", &e.to_string());
+                write_ready(&mut out, b'I');
+            } else {
+                session.statements.insert(name, query);
+                write_parse_complete(&mut out);
+            }
         }
         FrontendMessage::Bind {
             portal,
             statement,
             params,
         } => {
-            let sql = session
-                .statements
-                .get(&statement)
-                .cloned()
-                .unwrap_or_default();
-            session.portals.insert(portal, bind_params(&sql, &params));
-            write_bind_complete(&mut out);
+            // FR-011: bound values against max_value (configured Limits).
+            let mut over = None;
+            for p in &params {
+                if let Some(b) = p {
+                    if let Err(e) = limits.check_value(b.len() as u64) {
+                        over = Some(e);
+                        break;
+                    }
+                }
+            }
+            if let Some(e) = over {
+                write_error(&mut out, "54000", &e.to_string());
+                write_ready(&mut out, b'I');
+            } else {
+                let sql = session
+                    .statements
+                    .get(&statement)
+                    .cloned()
+                    .unwrap_or_default();
+                session.portals.insert(portal, bind_params(&sql, &params));
+                write_bind_complete(&mut out);
+            }
         }
         FrontendMessage::Describe { typ, name } => {
             let sql = if typ == b'S' {
@@ -322,7 +412,16 @@ where
         FrontendMessage::Execute { portal, .. } => {
             let sql = session.portals.get(&portal).cloned().unwrap_or_default();
             if !sql.is_empty() {
-                render_exec(&mut out, catalog, profile, &session.namespace, &sql);
+                render_exec(
+                    &mut out,
+                    catalog,
+                    profile,
+                    &session.namespace,
+                    &session.session_id,
+                    &session.cancel,
+                    &sql,
+                    &limits,
+                );
             }
         }
         FrontendMessage::Sync => {
@@ -354,9 +453,20 @@ fn render_exec(
     catalog: &SharedCatalog,
     profile: DialectProfile,
     namespace: &str,
+    session_id: &str,
+    cancel: &CancelToken,
     sql: &str,
+    limits: &spacestorage_compat::Limits,
 ) {
-    match execute_sql(profile, catalog, namespace, sql) {
+    match execute_sql_cancel(
+        profile,
+        catalog,
+        namespace,
+        session_id,
+        sql,
+        cancel.clone(),
+        limits,
+    ) {
         Ok(res) => write_result(out, &res),
         Err(e) => write_error(out, &e.sqlstate, &e.message),
     }

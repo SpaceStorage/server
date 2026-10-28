@@ -104,12 +104,23 @@ impl PeerRaftRegistry {
 }
 
 /// Solo-voter factory (remote peers stay unreachable).
-pub async fn start_raft(node_id: Uuid) -> Result<ControlRaft> {
+///
+/// When `persist_dir` is set, openraft log/snapshot fsync under that directory
+/// before `IOFlushed` (Constitution II / T060).
+pub async fn start_raft(
+    node_id: Uuid,
+    persist_dir: Option<std::path::PathBuf>,
+) -> Result<ControlRaft> {
     let config = Arc::new(
         openraft_config().map_err(|e| ControlPlaneError::Msg(format!("openraft config: {e}")))?,
     );
-    let log_store = MemLogStore::default();
-    let state_machine = StateMachineStore::default();
+    let (log_store, state_machine) = match persist_dir {
+        Some(dir) => (
+            MemLogStore::with_persist_dir(dir.join("openraft")),
+            StateMachineStore::with_persist_dir(dir.join("openraft")),
+        ),
+        None => (MemLogStore::default(), StateMachineStore::default()),
+    };
     Raft::new(node_id, config, LocalNetworkFactory, log_store, state_machine)
         .await
         .map_err(|e| ControlPlaneError::Msg(format!("Raft::new: {e}")))
@@ -120,7 +131,7 @@ pub async fn start_raft_peered(
     node_id: Uuid,
     registry: Arc<PeerRaftRegistry>,
 ) -> Result<ControlRaft> {
-    start_raft_peered_with_secret(node_id, registry, Arc::new(Vec::new())).await
+    start_raft_peered_with_secret(node_id, registry, Arc::new(Vec::new()), None).await
 }
 
 /// Same as [`start_raft_peered`] but with a join secret for TCP dial auth.
@@ -128,12 +139,18 @@ pub async fn start_raft_peered_with_secret(
     node_id: Uuid,
     registry: Arc<PeerRaftRegistry>,
     join_secret: Arc<Vec<u8>>,
+    persist_dir: Option<std::path::PathBuf>,
 ) -> Result<ControlRaft> {
     let config = Arc::new(
         openraft_config().map_err(|e| ControlPlaneError::Msg(format!("openraft config: {e}")))?,
     );
-    let log_store = MemLogStore::default();
-    let state_machine = StateMachineStore::default();
+    let (log_store, state_machine) = match persist_dir {
+        Some(dir) => (
+            MemLogStore::with_persist_dir(dir.join("openraft")),
+            StateMachineStore::with_persist_dir(dir.join("openraft")),
+        ),
+        None => (MemLogStore::default(), StateMachineStore::default()),
+    };
     Raft::new(
         node_id,
         config,
@@ -566,7 +583,7 @@ mod tests {
     #[tokio::test]
     async fn raft_new_bootstraps_single_voter() {
         let id = Uuid::now_v7();
-        let raft = start_raft(id).await.expect("Raft::new");
+        let raft = start_raft(id, None).await.expect("Raft::new");
         bootstrap_single_voter(&raft, id)
             .await
             .expect("initialize+leader");
@@ -742,9 +759,10 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let dial = format!("{}:{}", addr.ip(), addr.port());
         let id = Uuid::now_v7();
-        let raft = start_raft_peered_with_secret(id, Arc::clone(&registry), Arc::clone(&secret))
-            .await
-            .expect("raft");
+        let raft =
+            start_raft_peered_with_secret(id, Arc::clone(&registry), Arc::clone(&secret), None)
+                .await
+                .expect("raft");
         registry.register(id, raft.clone());
         let handler = Arc::new(RegistryRaftHandler {
             registry: Arc::clone(&registry),
@@ -870,9 +888,10 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let dial = format!("{}:{}", addr.ip(), addr.port());
         let id = Uuid::now_v7();
-        let raft = start_raft_peered_with_secret(id, Arc::clone(&registry), Arc::clone(&secret))
-            .await
-            .expect("raft");
+        let raft =
+            start_raft_peered_with_secret(id, Arc::clone(&registry), Arc::clone(&secret), None)
+                .await
+                .expect("raft");
         registry.register(id, raft.clone());
         let handler = Arc::new(GatedRaftHandler {
             inner: RegistryRaftHandler {

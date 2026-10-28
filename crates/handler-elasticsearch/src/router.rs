@@ -85,6 +85,22 @@ pub fn route(session: &mut SessionState, req: &HttpRequest) -> EsReply {
         }));
     }
 
+    if !req.body.is_empty() {
+        if let Err(e) = session
+            .limit_services
+            .limits()
+            .check_query_text(req.body.len() as u64)
+        {
+            return EsReply::Error {
+                status: 413,
+                body: json!({
+                    "error": { "type": "limit_exceeded", "reason": e.to_string() },
+                    "status": 413
+                }),
+            };
+        }
+    }
+
     let segments: Vec<&str> = req
         .path
         .trim_start_matches('/')
@@ -132,6 +148,11 @@ fn classify_search(body: &[u8], query: Option<&str>) -> (String, String) {
     }
 
     let text = String::from_utf8_lossy(body);
+    if let Ok(v) = serde_json::from_slice::<Value>(body) {
+        if let Some((verb, field)) = classify_aggs(&v) {
+            return (verb, field);
+        }
+    }
     if text.contains("\"term\"") {
         if let Ok(v) = serde_json::from_slice::<Value>(body) {
             if let Some(n) = extract_term_needle(&v) {
@@ -149,6 +170,33 @@ fn classify_search(body: &[u8], query: Option<&str>) -> (String, String) {
         return ("SEARCH_MATCH".into(), String::new());
     }
     ("SEARCH_MATCH".into(), String::new())
+}
+
+/// Map closed MUST aggregation set → dispatch verb + field (FR-015).
+fn classify_aggs(v: &Value) -> Option<(String, String)> {
+    let aggs = v.get("aggs").or_else(|| v.get("aggregations"))?.as_object()?;
+    for (_name, body) in aggs {
+        let obj = body.as_object()?;
+        for (kind, spec) in obj {
+            let verb = match kind.as_str() {
+                "terms" => "AGG_TERMS",
+                "min" => "AGG_MIN",
+                "max" => "AGG_MAX",
+                "sum" => "AGG_SUM",
+                "avg" => "AGG_AVG",
+                "histogram" => "AGG_HISTOGRAM",
+                "value_count" => "AGG_VALUE_COUNT",
+                _ => continue,
+            };
+            let field = spec
+                .get("field")
+                .and_then(|f| f.as_str())
+                .unwrap_or("id")
+                .to_string();
+            return Some((verb.into(), field));
+        }
+    }
+    None
 }
 
 fn extract_match_needle(v: &Value) -> Option<String> {

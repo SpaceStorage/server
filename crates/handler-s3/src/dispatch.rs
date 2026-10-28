@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use spacestorage_compat::{
-    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
+    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, LimitServices,
+    PrincipalHold, ProtocolId,
 };
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
 use spacestorage_types::{ContainerCatalog, L3Model};
@@ -23,6 +24,8 @@ pub struct SessionState {
     pub profile: DialectProfile,
     /// multipart upload id → (bucket, key, parts)
     pub multipart: HashMap<String, (String, String, Vec<Vec<u8>>)>,
+    pub limit_services: LimitServices,
+    pub principal_hold: Option<PrincipalHold>,
 }
 
 impl SessionState {
@@ -32,6 +35,8 @@ impl SessionState {
             namespace: "demo".into(),
             profile: DialectProfile::HandlersComplete,
             multipart: HashMap::new(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
@@ -78,6 +83,20 @@ pub fn put_object_bytes(
     key: &str,
     body: Vec<u8>,
 ) -> S3Reply {
+    let limits = session.limit_services.limits();
+    if let Err(e) = limits.check_key(key.len() as u64) {
+        return S3Reply::Error {
+            code: "limit_exceeded".into(),
+            message: e.to_string(),
+        };
+    }
+    // Assembled object (incl. multipart sum) against max_value.
+    if let Err(e) = limits.check_value(body.len() as u64) {
+        return S3Reply::Error {
+            code: "limit_exceeded".into(),
+            message: e.to_string(),
+        };
+    }
     if let Err(e) = session.ensure_bucket(bucket) {
         return e;
     }

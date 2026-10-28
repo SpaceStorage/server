@@ -20,6 +20,15 @@ pub enum TxnState {
     InDoubt,
 }
 
+/// Forward-only cursor portal bound to an open transaction (FR-014 / 015 T063).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CursorPortal {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Option<String>>>,
+    pub pos: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: TxnId,
@@ -31,6 +40,14 @@ pub struct Transaction {
     pub state: TxnState,
     /// Buffered mutate SQL applied on commit (single-node path).
     pub buffered: Vec<BufferedWrite>,
+    /// DECLARE/FETCH/CLOSE portals; dropped on COMMIT / ROLLBACK / disconnect.
+    pub portals: HashMap<String, CursorPortal>,
+    /// SNAPSHOT: frozen (container → key → value) reads for capable types.
+    #[serde(skip)]
+    pub read_snapshots: HashMap<String, HashMap<String, Vec<u8>>>,
+    /// Containers already capability-checked under SNAPSHOT.
+    #[serde(skip)]
+    pub snapshot_checked: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +67,14 @@ impl Transaction {
             distributed: false,
             state: TxnState::Open,
             buffered: Vec::new(),
+            portals: HashMap::new(),
+            read_snapshots: HashMap::new(),
+            snapshot_checked: Vec::new(),
         }
+    }
+
+    pub fn clear_portals(&mut self) {
+        self.portals.clear();
     }
 
     pub fn rollback(&mut self) -> Result<(), ExecError> {

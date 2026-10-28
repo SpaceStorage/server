@@ -3,9 +3,12 @@
 use std::sync::{Arc, RwLock};
 
 use spacestorage_compat::{
-    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
+    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, LimitServices,
+    PrincipalHold, ProtocolId,
 };
-use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
+use spacestorage_query::{
+    AggFn, CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult,
+};
 use spacestorage_types::ContainerCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +23,8 @@ pub struct SessionState {
     pub namespace: String,
     pub profile: DialectProfile,
     pub protocol: ProtocolId,
+    pub limit_services: LimitServices,
+    pub principal_hold: Option<PrincipalHold>,
 }
 
 impl SessionState {
@@ -29,6 +34,8 @@ impl SessionState {
             namespace: "demo".into(),
             profile: DialectProfile::HandlersComplete,
             protocol: ProtocolId::ClickHouse,
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
@@ -38,11 +45,14 @@ impl SessionState {
             namespace: "demo".into(),
             profile: DialectProfile::HandlersComplete,
             protocol: ProtocolId::ClickHouseHttp,
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
     fn engine(&self) -> PlannerEngine {
-        PlannerEngine::new(Arc::clone(&self.catalog))
+        let distributed = matches!(self.profile, DialectProfile::CompleteProduct);
+        PlannerEngine::with_distributed(Arc::clone(&self.catalog), distributed)
     }
 
     fn exec(&self, req: LogicalRequest) -> Result<QueryResult, ClickHouseReply> {
@@ -142,6 +152,24 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> ClickH
                 Err(e) => e,
             }
         }
+        "GROUP_BY" | "SELECT_GROUP_BY" => {
+            let table = args.first().copied().unwrap_or("t");
+            let group_col = args.get(1).copied().unwrap_or("id");
+            let agg_col = args.get(2).copied().unwrap_or(group_col);
+            if let Err(e) = session.ensure_table(table) {
+                return e;
+            }
+            match session.exec(LogicalRequest::Aggregate {
+                container: table.into(),
+                func: AggFn::Count,
+                group_by: Some(group_col.into()),
+                column: Some(agg_col.into()),
+                filter: None,
+            }) {
+                Ok(r) => rows_from(r),
+                Err(e) => e,
+            }
+        }
         other => refuse(
             session.protocol,
             other,
@@ -183,6 +211,30 @@ mod tests {
             match dispatch(&mut s, v, &[]) {
                 ClickHouseReply::Error { .. } => {}
                 other => panic!("{v} must refuse, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg(feature = "query-distributed")]
+    #[test]
+    fn complete_product_group_by_both_protocols() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        for mut s in [
+            SessionState::demo_native(Arc::clone(&cat)),
+            SessionState::demo_http(Arc::clone(&cat)),
+        ] {
+            s.profile = DialectProfile::CompleteProduct;
+            assert!(matches!(
+                dispatch(&mut s, "CREATE", &["TABLE", "t"]),
+                ClickHouseReply::Ok
+            ));
+            assert!(matches!(
+                dispatch(&mut s, "INSERT", &["t", "1", r#"{"id":"a","n":1}"#]),
+                ClickHouseReply::Ok
+            ));
+            match dispatch(&mut s, "GROUP_BY", &["t", "id", "n"]) {
+                ClickHouseReply::Rows(_) | ClickHouseReply::Ok => {}
+                other => panic!("{:?} group_by: {other:?}", s.protocol),
             }
         }
     }

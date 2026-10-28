@@ -15,6 +15,8 @@ pub const OP_OPTIONS: u8 = 0x05;
 pub const OP_SUPPORTED: u8 = 0x06;
 pub const OP_QUERY: u8 = 0x07;
 pub const OP_RESULT: u8 = 0x08;
+pub const OP_PREPARE: u8 = 0x09;
+pub const OP_EXECUTE: u8 = 0x0A;
 pub const OP_AUTH_CHALLENGE: u8 = 0x0E;
 pub const OP_AUTH_RESPONSE: u8 = 0x0F;
 pub const OP_AUTH_SUCCESS: u8 = 0x10;
@@ -23,6 +25,7 @@ pub const ERR_PROTOCOL: i32 = 0x000A;
 
 pub const RESULT_VOID: i32 = 0x0001;
 pub const RESULT_ROWS: i32 = 0x0002;
+pub const RESULT_PREPARED: i32 = 0x0004;
 
 pub const TYPE_VARCHAR: i16 = 0x000d;
 
@@ -210,6 +213,55 @@ pub fn parse_startup(body: &[u8]) -> Result<Vec<(String, String)>, FrameError> {
 pub fn parse_query_cql(body: &[u8]) -> Result<String, FrameError> {
     let mut off = 0;
     read_long_string(body, &mut off)
+}
+
+/// PREPARE body: `<query><flags…>` — long string query (v4/v5).
+pub fn parse_prepare_cql(body: &[u8]) -> Result<String, FrameError> {
+    let mut off = 0;
+    read_long_string(body, &mut off)
+}
+
+/// EXECUTE body: `<id><consistency…>` — short bytes id.
+pub fn parse_execute_id(body: &[u8]) -> Result<Vec<u8>, FrameError> {
+    let mut off = 0;
+    let id = read_short_bytes(body, &mut off)?.ok_or_else(|| {
+        FrameError::Protocol("missing prepared id".into())
+    })?;
+    Ok(id)
+}
+
+pub fn read_short_bytes(body: &[u8], off: &mut usize) -> Result<Option<Vec<u8>>, FrameError> {
+    if body.len() < *off + 2 {
+        return Err(FrameError::Protocol("short bytes".into()));
+    }
+    let n = u16::from_be_bytes([body[*off], body[*off + 1]]) as usize;
+    *off += 2;
+    if body.len() < *off + n {
+        return Err(FrameError::Protocol("truncated short bytes".into()));
+    }
+    let b = body[*off..*off + n].to_vec();
+    *off += n;
+    Ok(Some(b))
+}
+
+pub fn write_short_bytes(out: &mut Vec<u8>, data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u16).to_be_bytes());
+    out.extend_from_slice(data);
+}
+
+/// RESULT PREPARED: id + metadata (empty columns) + result metadata.
+pub fn encode_prepared_result(version: u8, stream: i16, id: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&RESULT_PREPARED.to_be_bytes());
+    write_short_bytes(&mut body, id);
+    // prepared metadata: flags=0, columns=0, pk_count=0
+    body.extend_from_slice(&0i32.to_be_bytes()); // flags
+    body.extend_from_slice(&0i32.to_be_bytes()); // columns count
+    body.extend_from_slice(&0i32.to_be_bytes()); // pk count
+    // result metadata: flags=NO_METADATA, columns=0
+    body.extend_from_slice(&0x0004i32.to_be_bytes()); // NO_METADATA
+    body.extend_from_slice(&0i32.to_be_bytes());
+    encode_frame(response_version(version), stream, OP_RESULT, 0, &body)
 }
 
 pub fn encode_supported(version: u8, stream: i16) -> Vec<u8> {

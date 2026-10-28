@@ -160,28 +160,46 @@ impl StorageEngine {
         key: &str,
         value: &[u8],
     ) -> Result<(), StorageError> {
+        self.put_kv_durable_acks(container_id, key, value, "")
+            .await
+            .map(|_| ())
+    }
+
+    /// Durable put on every open drive; returns labelled [`WriteAck`]s for quorum waits (010 T069).
+    pub async fn put_kv_durable_acks(
+        &self,
+        container_id: uuid::Uuid,
+        key: &str,
+        value: &[u8],
+        quorum_domain: &str,
+    ) -> Result<Vec<spacestorage_types::WriteAck>, StorageError> {
         let drives = self.all_drives().await;
-        let wal = drives
-            .first()
-            .ok_or_else(|| StorageError::WalCorrupt("no drive open".into()))?;
+        if drives.is_empty() {
+            return Err(StorageError::WalCorrupt("no drive open".into()));
+        }
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        crate::kv_put::put_durable(
-            wal,
-            container_id,
-            stamp,
-            key.as_bytes(),
-            value,
-            spacestorage_types::StorageModeChoice::Persistent,
-            None,
-        )
-        .await?;
+        let mut acks = Vec::with_capacity(drives.len());
+        for wal in &drives {
+            let (_lsn, ack) = crate::kv_put::put_durable_in_domain(
+                wal,
+                container_id,
+                stamp,
+                key.as_bytes(),
+                value,
+                spacestorage_types::StorageModeChoice::Persistent,
+                None,
+                quorum_domain,
+            )
+            .await?;
+            acks.push(ack);
+        }
         let mut content = self.content.write().await;
         content.register_mode(container_id, StorageMode::Persistent);
         content.put(container_id, key.as_bytes().to_vec(), value.to_vec());
-        Ok(())
+        Ok(acks)
     }
 }
 

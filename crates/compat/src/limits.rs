@@ -5,7 +5,7 @@ use crate::profile::DialectProfile;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Byte count used by size knobs.
 pub type ByteCount = u64;
@@ -394,6 +394,98 @@ impl EffectiveLimits {
     }
 }
 
+/// Live size/connection limits + process-local counters for handlers (FR-011).
+///
+/// Node injects a provider that reads the effective configured `limits { }`
+/// (not only [`Limits::default`]). Handlers call [`Self::limits`] at check time
+/// so live reload applies to new connections/queries.
+#[derive(Clone)]
+pub struct LimitServices {
+    counters: Arc<SessionCounters>,
+    limits: Arc<dyn Fn() -> Limits + Send + Sync>,
+}
+
+impl std::fmt::Debug for LimitServices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LimitServices")
+            .field("limits", &self.limits())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for LimitServices {
+    fn default() -> Self {
+        Self::built_in()
+    }
+}
+
+impl LimitServices {
+    pub fn new(
+        counters: Arc<SessionCounters>,
+        limits: impl Fn() -> Limits + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            counters,
+            limits: Arc::new(limits),
+        }
+    }
+
+    /// Built-in defaults with a private counter set (unit tests / demos).
+    pub fn built_in() -> Self {
+        Self::new(Arc::new(SessionCounters::new()), Limits::default)
+    }
+
+    /// Fixed snapshot of limits sharing an external counter set.
+    pub fn with_fixed(counters: Arc<SessionCounters>, limits: Limits) -> Self {
+        Self::new(counters, move || limits.clone())
+    }
+
+    pub fn counters(&self) -> &Arc<SessionCounters> {
+        &self.counters
+    }
+
+    /// Effective configured (or built-in) limits at call time.
+    pub fn limits(&self) -> Limits {
+        (self.limits)()
+    }
+
+    /// Count an authenticated session for `principal_id`; release via [`PrincipalHold`] drop.
+    pub fn try_hold_principal(&self, principal_id: &str) -> Result<PrincipalHold, CompatError> {
+        self.counters
+            .try_accept_principal(principal_id, &self.limits())?;
+        Ok(PrincipalHold {
+            counters: Arc::clone(&self.counters),
+            principal_id: principal_id.to_string(),
+        })
+    }
+}
+
+/// RAII release for a principal connection slot ([`SessionCounters::release_principal`]).
+pub struct PrincipalHold {
+    counters: Arc<SessionCounters>,
+    principal_id: String,
+}
+
+impl PrincipalHold {
+    pub fn principal_id(&self) -> &str {
+        &self.principal_id
+    }
+}
+
+impl Drop for PrincipalHold {
+    fn drop(&mut self) {
+        self.counters.release_principal(&self.principal_id);
+    }
+}
+
+impl std::fmt::Debug for PrincipalHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrincipalHold")
+            .field("principal_id", &self.principal_id)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +599,32 @@ mod tests {
         assert!(c.try_admit_query("ns", &p, 1024, false).is_err());
         drop(g);
         assert!(c.try_admit_query("ns", &p, 1024, false).is_ok());
+    }
+
+    #[test]
+    fn limit_services_principal_hold() {
+        let c = Arc::new(SessionCounters::new());
+        let mut lim = Limits::default();
+        lim.max_connections_per_principal = 1;
+        let svc = LimitServices::with_fixed(Arc::clone(&c), lim);
+        let h1 = svc.try_hold_principal("alice").expect("first");
+        assert!(svc.try_hold_principal("alice").is_err());
+        drop(h1);
+        assert!(svc.try_hold_principal("alice").is_ok());
+    }
+
+    #[test]
+    fn limit_services_reads_provider() {
+        let c = Arc::new(SessionCounters::new());
+        let lim = Arc::new(std::sync::Mutex::new(Limits::default()));
+        {
+            let mut g = lim.lock().unwrap();
+            g.max_key = 8;
+        }
+        let lim2 = Arc::clone(&lim);
+        let svc = LimitServices::new(c, move || lim2.lock().unwrap().clone());
+        assert_eq!(svc.limits().max_key, 8);
+        lim.lock().unwrap().max_key = 16;
+        assert_eq!(svc.limits().max_key, 16);
     }
 }

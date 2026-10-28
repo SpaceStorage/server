@@ -276,3 +276,19 @@ Task: "T045–T047 introduced_in + peers_ok + format_too_new"
 - [X] T058 HC handler crates + `handlers-complete` feature + `compat_handlers_complete` suite (T016/T023–T025) — classify-gated MUST dialects; full wire codecs residual
 - [ ] T059 Expose `spacestorage_compat_must_not_total{protocol,verb}` on `/metrics` via `008` (process-local counters exist in `compat::metrics`)
 - [ ] T060 Stock-client wire conformance for Cassandra native / ES HTTP / CH native+HTTP / S3 SigV4 / WebDAV (beyond dispatch APIs)
+
+## Phase 10: Convergence
+
+- [X] T061 Wire PostgreSQL `CancelRequest` and client disconnect to the in-flight exec cancel token so query work stops inside the timeout window per FR-009 (partial)
+- [X] T062 Refuse complete-product `SNAPSHOT` / `REPEATABLE READ` when any touched type is not snapshot-capable, naming the type and the allowed set (`READ COMMITTED`, `SNAPSHOT`), and read a snapshot on capable types instead of current data per FR-006 (partial)
+- [X] T063 Implement complete-product forward-only `DECLARE` / `FETCH` / `CLOSE` as a portal bound to the open transaction (rows from the declared query; drop on COMMIT, ROLLBACK, or disconnect) per FR-014 (partial)
+- [X] T064 On `DialectProfile::CompleteProduct`, spill documented sort, hash, and aggregation plans that exceed max query memory, and reject non-spillable plans naming the cap; do not use spill to admit an extra concurrent query per FR-010 (partial)
+- [X] T065 Classify Cassandra prepared statements as MUST and serve native v4/v5 `PREPARE` / `EXECUTE` so they succeed per FR-003 (partial)
+- [X] T066 Run complete-product Elasticsearch aggregations `terms`, `min`, `max`, `sum`, `avg`, `histogram`, and `value_count` through the shared engine; do not return not-supported after `classify` returns Must per FR-015 (contradicts)
+- [X] T067 Run complete-product ClickHouse `GROUP BY` on both `clickhouse` and `clickhouse-http` through the shared engine; do not return not-supported from the dispatch catch-all after `classify` returns Must per FR-003 (contradicts)
+- [X] T068 Enforce documented max key, value/document/object, query text, result size, and connections per entrypoint and per principal with a named `limit_exceeded` reject on the accept and result paths per FR-011 (partial)
+
+## Phase 11: Convergence
+
+- [X] T069 Count each authenticated session with `SessionCounters::try_accept_principal` (and `release_principal` on disconnect) against the effective `max_connections_per_principal`, and reject with named `limit_exceeded` without waiting; `try_accept_principal` currently has no caller outside `crates/compat` per FR-011 (partial)
+- [X] T070 Enforce the effective configured `Limits` (not `Limits::default()` alone) for `max_key`, `max_value`, `max_query_text`, and `max_result` on the paths [limits.md](contracts/limits.md) names that still accept oversize input: S3 object key and assembled object (multipart sum), Elasticsearch document and body, Cassandra CQL text and values, ClickHouse query text, WebDAV path and body, plus PostgreSQL bound values and the existing Redis/PostgreSQL gates per FR-011 (partial)

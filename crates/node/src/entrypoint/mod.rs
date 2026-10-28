@@ -149,11 +149,23 @@ async fn accept_loop(
                             drop(stream);
                             continue;
                         }
+                        // FR-011: connections per entrypoint — named limit_exceeded reject.
+                        let limits = node.config.load().limits.limits.clone();
+                        if let Err(e) = node
+                            .session_counters
+                            .try_accept_entrypoint(&name, &limits)
+                        {
+                            warn!(entrypoint=%name, error=%e, "connection limit_exceeded");
+                            drop(stream);
+                            continue;
+                        }
                         let force_cancel = node.force_cancel.clone();
                         let handler = handler.clone();
                         let tls_acceptor = tls_acceptor.clone();
                         let stats = node.stats.clone();
                         let ep_name = name.clone();
+                        let counters = Arc::clone(&node.session_counters);
+                        let ep_release = ep_name.clone();
                         node.tasks.spawn(async move {
                             // FR-004: entrypoint stays on this span so protocol_mismatch
                             // events inside Handler::serve name both entrypoint and handler.
@@ -182,6 +194,7 @@ async fn accept_loop(
                             }
                             .instrument(span)
                             .await;
+                            counters.release_entrypoint(&ep_release);
                             stats.dec_inflight();
                         });
                         let _ = peer;

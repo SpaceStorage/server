@@ -18,6 +18,21 @@ impl AuthzContext {
         }
     }
 
+    /// Build from a caller principal: cluster-admin token, MIGRATE, or dual MIGRATE.
+    pub fn from_principal(cluster_admin: bool, has_migrate: bool, dual_migrate: bool) -> Self {
+        if cluster_admin {
+            return Self::cluster_admin();
+        }
+        let mut verbs = Verb::from_bits(0);
+        if has_migrate {
+            verbs = verbs | Verb::MIGRATE;
+        }
+        Self {
+            verbs,
+            dual_migrate: dual_migrate && has_migrate,
+        }
+    }
+
     pub fn allow_node_migrate(&self) -> Result<(), MigrateError> {
         if self.verbs.contains(Verb::CLUSTER_ADMIN) || self.verbs.contains(Verb::MIGRATE) {
             Ok(())

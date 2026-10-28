@@ -41,3 +41,18 @@ pub fn validate_schema_alter(
         Some(prev) => is_additive_schema_change(prev, to),
     }
 }
+
+/// Refuse in-place codec rewrite of existing rows (FR-004 / 010).
+pub fn refuse_inplace_codec_rewrite() -> TypeError {
+    TypeError::InPlaceRewriteRefused("codec rewrite")
+}
+
+/// Refuse in-place key rewrite of existing rows (FR-004 / 010).
+pub fn refuse_inplace_key_rewrite() -> TypeError {
+    TypeError::InPlaceRewriteRefused("key rewrite")
+}
+
+/// Refuse in-place re-encrypt / recompress of existing ciphertext/blob (FR-004 / 010).
+pub fn refuse_inplace_reencode_existing() -> TypeError {
+    TypeError::InPlaceRewriteRefused("re-encode/recompress/re-encrypt")
+}

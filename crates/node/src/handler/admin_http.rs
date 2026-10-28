@@ -115,6 +115,14 @@ async fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
     };
     if check_bearer(token, expected.trim()) {
         Ok(())
+    } else if node
+        .sessions
+        .read()
+        .ok()
+        .and_then(|s| s.resolve(token))
+        .is_some()
+    {
+        Ok(())
     } else {
         Err(ErrorBody {
             code: "unauthorized".into(),
@@ -122,6 +130,35 @@ async fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
             details: serde_json::json!({}),
         })
     }
+}
+
+/// Build migrate AuthzContext from the caller principal (T063 / FR-010).
+fn migrate_authz(headers: &HeaderMap, node: &Node) -> spacestorage_migrate::AuthzContext {
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth.strip_prefix("Bearer ").unwrap_or("");
+    let cfg = node.config.load();
+    let expected = cfg
+        .admin_token_file
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
+    if check_bearer(token, expected.trim()) {
+        return spacestorage_migrate::AuthzContext::cluster_admin();
+    }
+    if let Ok(store) = node.sessions.read() {
+        if let Some(rec) = store.resolve(token) {
+            return spacestorage_migrate::AuthzContext::from_principal(
+                rec.cluster_admin,
+                rec.cluster_admin, // session without admin has no MIGRATE grant yet
+                rec.cluster_admin,
+            );
+        }
+    }
+    // Unauthenticated path is rejected by `auth` first; safe default refuse.
+    spacestorage_migrate::AuthzContext::from_principal(false, false, false)
 }
 
 fn with_headers(node: &Node, mut resp: axum::response::Response) -> axum::response::Response {
@@ -340,7 +377,7 @@ async fn jobs_create(
         Ok(s) => s,
         Err(e) => return migrate_err_response(e),
     };
-    let authz = spacestorage_migrate::AuthzContext::cluster_admin();
+    let authz = migrate_authz(&headers, &node);
     match node.jobs.start(kind, uuid::Uuid::nil(), strategy, v, &authz) {
         Ok(job) => (
             StatusCode::ACCEPTED,
@@ -441,7 +478,7 @@ async fn kind_alias(
         Ok(s) => s,
         Err(e) => return migrate_err_response(e),
     };
-    let authz = spacestorage_migrate::AuthzContext::cluster_admin();
+    let authz = migrate_authz(&headers, &node);
     match node.jobs.start(kind, uuid::Uuid::nil(), strategy, v, &authz) {
         Ok(job) => (
             StatusCode::ACCEPTED,

@@ -28,9 +28,14 @@ complete-product = [
     "spacestorage-release-profile/complete-product",
     "spacestorage-admin-ui/ui",
     "spacestorage-ingest/ingest",
+    "spacestorage-query/query-distributed",
+    "spacestorage-handler-postgresql/query-distributed",
+    "spacestorage-handler-elasticsearch?/query-distributed",
+    "spacestorage-handler-clickhouse?/query-distributed",
 ]
 [dependencies]
 spacestorage-config = { path = "../config" }
+spacestorage-compat = { path = "../compat" }
 spacestorage-admin-proto = { path = "../admin-proto" }
 spacestorage-release-profile = { path = "../release-profile" }
 spacestorage-storage = { path = "../storage" }
@@ -54,6 +59,7 @@ spacestorage-admin-ui = { path = "../admin-ui" }
 spacestorage-ingest = { path = "../ingest" }
 spacestorage-query = { path = "../query" }
 spacestorage-controlplane = { path = "../controlplane" }
+spacestorage-placement = { path = "../placement" }
 tokio = { workspace = true }
 uuid = { workspace = true }
 axum = { workspace = true }

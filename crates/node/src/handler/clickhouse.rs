@@ -3,6 +3,7 @@
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use spacestorage_compat::LimitServices;
 use spacestorage_handler_clickhouse::{ClickHouseHttpHandler, ClickHouseNativeHandler};
 use spacestorage_types::ContainerCatalog;
 use tokio_util::sync::CancellationToken;
@@ -15,8 +16,15 @@ pub struct ClickHousePortHandler {
 
 impl ClickHousePortHandler {
     pub fn new(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+    ) -> Self {
         Self {
-            inner: ClickHouseNativeHandler::with_demo(catalog),
+            inner: ClickHouseNativeHandler::with_limits(catalog, limit_services),
         }
     }
 }
@@ -46,8 +54,15 @@ pub struct ClickHouseHttpPortHandler {
 
 impl ClickHouseHttpPortHandler {
     pub fn new(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+    ) -> Self {
         Self {
-            inner: ClickHouseHttpHandler::with_demo(catalog),
+            inner: ClickHouseHttpHandler::with_limits(catalog, limit_services),
         }
     }
 }

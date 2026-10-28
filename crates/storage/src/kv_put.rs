@@ -15,6 +15,20 @@ pub async fn put_durable(
     mode: StorageModeChoice,
     data_key: Option<&[u8; 32]>,
 ) -> Result<(u64, WriteAck), StorageError> {
+    put_durable_in_domain(wal, container_id, stamp, key, value, mode, data_key, "").await
+}
+
+/// Like [`put_durable`], but labels the ack with `quorum_domain` for `04` write-quorum waits.
+pub async fn put_durable_in_domain(
+    wal: &DriveWal,
+    container_id: Uuid,
+    stamp: u64,
+    key: &[u8],
+    value: &[u8],
+    mode: StorageModeChoice,
+    data_key: Option<&[u8; 32]>,
+    quorum_domain: &str,
+) -> Result<(u64, WriteAck), StorageError> {
     let mut payload = Vec::with_capacity(4 + key.len() + value.len());
     payload.extend_from_slice(&(key.len() as u32).to_le_bytes());
     payload.extend_from_slice(key);
@@ -29,7 +43,7 @@ pub async fn put_durable(
         ack.kind,
         mode,
         wal.durable_lsn(),
-        "",
+        quorum_domain,
     );
     debug_assert!(
         !(matches!(mode, StorageModeChoice::Persistent | StorageModeChoice::Hybrid)

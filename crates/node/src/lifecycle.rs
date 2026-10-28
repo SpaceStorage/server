@@ -278,6 +278,118 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
     Ok(())
 }
 
+/// 006: mount `RaftClusterStore` when membership/internodes is live (T061 / T070).
+///
+/// - Existing `{data_dir}/raft/` → `ControlPlane::open_existing` (no bootstrap).
+/// - Fresh `011` bootstrap path → `ControlPlane::bootstrap` once.
+/// - Join without local raft yet → open as non-voting until admitted.
+/// Roster is pushed via `apply_controlplane_roster`; raft handler mounts on fabric.
+pub async fn start_controlplane(node: &Node) -> Result<(), String> {
+    let cfg = node.config.load();
+    let membership = node.membership.read().await.clone();
+    let Some(svc) = membership else {
+        info!("no membership; skipping controlplane");
+        return Ok(());
+    };
+    let Some(node_id) = svc.node_id() else {
+        return Err("controlplane: membership has no node_id".into());
+    };
+    let data_dir = cfg
+        .storage_data_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            node.config_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("data")
+        });
+    let raft_cluster = data_dir.join("raft").join("cluster");
+    let view = svc.view_snapshot();
+    let cluster_uuid = view
+        .as_ref()
+        .map(|v| v.cluster_uuid)
+        .unwrap_or_else(uuid::Uuid::nil);
+    let cluster_name = view
+        .as_ref()
+        .map(|v| v.cluster_name.clone())
+        .unwrap_or_else(|| cfg.cluster.name.clone().unwrap_or_else(|| "cluster".into()));
+    let is_member = svc.is_admitted();
+
+    // T070: discover/open raft dirs before ready.
+    let _plan = spacestorage_controlplane::restore::RestorePlan::discover(&data_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let cp = if raft_cluster.exists() {
+        info!("controlplane: opening existing raft directory");
+        spacestorage_controlplane::ControlPlane::open_existing(
+            &data_dir,
+            node_id,
+            &cfg.node_name,
+            is_member,
+        )
+        .await
+        .map_err(|e| e.to_string())?
+    } else if cfg.cluster.bootstrap && is_member {
+        // Bootstrap cluster Raft only on the 011 bootstrap path — not every membership start.
+        info!("controlplane: bootstrapping cluster Raft on 011 bootstrap path");
+        spacestorage_controlplane::ControlPlane::bootstrap(
+            &data_dir,
+            node_id,
+            &cfg.node_name,
+            cluster_uuid,
+            &cluster_name,
+        )
+        .await
+        .map_err(|e| e.to_string())?
+    } else {
+        info!("controlplane: open as joining / non-bootstrap (no local raft yet)");
+        spacestorage_controlplane::ControlPlane::open_existing(
+            &data_dir,
+            node_id,
+            &cfg.node_name,
+            is_member,
+        )
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    cp.set_metrics(Arc::clone(&node.metrics));
+    if cp.elections_total.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+        spacestorage_controlplane::record_election(
+            &node.metrics,
+            &cfg.node_name,
+            "cluster",
+            true,
+            std::time::Duration::from_millis(1),
+        );
+    }
+    // Mount raft peer RPCs on internodes fabric (Constitution XII / FR-014).
+    spacestorage_controlplane::mount_raft_handler_on_fabric(
+        &node.fabric,
+        Arc::clone(&cp.raft_registry),
+        node_id,
+    );
+    if let Some(cg) = cp.cluster_group.lock().await.as_ref() {
+        cp.raft_registry.register(node_id, cg.raft.clone());
+    }
+    // Roster from control plane → membership view.
+    if is_member {
+        let roster = cp.membership_roster();
+        if !roster.is_empty() {
+            let _ = svc.apply_controlplane_roster(roster);
+        }
+    }
+    // Non-members must not vote (FR-010).
+    if !is_member {
+        *cp.is_member.lock() = false;
+    }
+    *node.controlplane.write().await = Some(Arc::new(cp));
+    info!("controlplane: RaftClusterStore selected");
+    Ok(())
+}
+
 /// 011: start membership when cluster bootstrap, join, or name is configured.
 /// Without a cluster block, first-binary lab tests may become ready without membership.
 pub async fn start_membership(node: &Node) -> Result<(), String> {

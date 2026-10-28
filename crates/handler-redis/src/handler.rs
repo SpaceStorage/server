@@ -3,6 +3,7 @@
 use std::sync::{Arc, RwLock};
 
 use bytes::BytesMut;
+use spacestorage_compat::LimitServices;
 use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
@@ -17,16 +18,22 @@ pub struct RedisHandler {
     pub expected_secret: String,
     pub namespace: String,
     pub default_container: String,
+    pub limit_services: LimitServices,
 }
 
 impl RedisHandler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             expected_user: "demo".into(),
             expected_secret: "demo".into(),
             namespace: "demo".into(),
             default_container: "redis".into(),
+            limit_services,
         }
     }
 
@@ -58,6 +65,8 @@ impl RedisHandler {
             password_ok: false,
             expected_secret: self.expected_secret.clone(),
             expected_user: self.expected_user.clone(),
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
 
         let mut buf = BytesMut::from(peeked.as_slice());
@@ -97,6 +106,7 @@ impl RedisHandler {
                 }
             }
         }
+        // Drop session → PrincipalHold::drop releases principal slot.
     }
 }
 

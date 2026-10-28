@@ -158,6 +158,44 @@ pub enum Command {
         #[arg(long, default_value = "http://127.0.0.1:8080")]
         endpoint: String,
     },
+    /// Describe cluster / namespace controllers (006).
+    Controllers {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+        #[command(subcommand)]
+        voters: Option<ControllersVoters>,
+    },
+    /// Raft status for cluster or namespace group (006).
+    RaftStatus {
+        #[arg(long, default_value = "cluster")]
+        group: String,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ControllersVoters {
+    Replace {
+        #[arg(long)]
+        group: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+    },
+    Grow {
+        #[arg(long)]
+        group: String,
+        #[arg(long)]
+        add: Vec<String>,
+    },
+    Shrink {
+        #[arg(long)]
+        group: String,
+        #[arg(long)]
+        remove: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

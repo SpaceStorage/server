@@ -1,5 +1,6 @@
 pub mod apply;
 pub mod cluster;
+pub mod election_metrics;
 pub mod error;
 pub mod group;
 pub mod lease;
@@ -17,21 +18,26 @@ pub mod restore;
 // In-process Raft group + ControlPlane live in this module file below.
 
 use crate::apply::ApplyEngine;
-use crate::cluster::{ClusterOp, ClusterState, MemberRecord, MemberStatus};
+use crate::cluster::{MemberRecord, MemberStatus};
 use crate::error::{ControlPlaneError, Result};
 use crate::group::GroupId;
+use crate::lease::fence_ordered_append;
 use crate::membership::{first_binary_voter_set, MembershipOp, VoterSet};
+use crate::metrics_agg::MetricsAggregator;
 use crate::openraft_adapter::{app_request_to_record, RaftAppRequest};
 use crate::raft_net::{InProcessRaftNet, RaftAppend, RaftRpc, RaftVote};
 use crate::raft_store::{RaftBody, RaftLogRecord, RaftStore};
 use crate::read::ReadIndex;
+use crate::restore::RestorePlan;
 use openraft::type_config::async_runtime::watch::WatchReceiver;
 use parking_lot::Mutex as SyncMutex;
 use spacestorage_clocks::HlcStamp;
+use spacestorage_observability::Metrics;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -41,6 +47,9 @@ pub use crate::openraft_adapter::{
     start_raft, start_raft_peered, start_raft_peered_with_secret, wait_for_leader, ControlRaft,
     PeerNetworkFactory, PeerRaftRegistry, RegistryRaftHandler, OPENRAFT_ACTIVE_PIN,
 };
+pub use crate::cluster::{ClusterOp, ClusterState, DriveInventory, MemoryInventory};
+pub use crate::election_metrics::record_election;
+pub use crate::lease::LeadershipLease;
 pub use crate::raft_store::RAFT_FORMAT_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +82,8 @@ impl RaftGroup {
         voter_set: VoterSet,
     ) -> Result<Self> {
         let store = RaftStore::open(data_dir, group).await?;
-        let raft = start_raft(node_id).await?;
+        let persist = group.raft_dir(data_dir);
+        let raft = start_raft(node_id, Some(persist)).await?;
         Ok(Self {
             group,
             node_id,
@@ -103,16 +113,37 @@ impl RaftGroup {
 
     /// Bootstrap openraft membership `{self}` and mark this node Leader (single-voter path).
     pub async fn become_leader(&mut self) -> Result<()> {
+        let started = Instant::now();
         bootstrap_single_voter(&self.raft, self.node_id).await?;
         self.role = RaftRole::Leader;
         self.leader = Some(self.node_id);
         let m = self.raft.metrics().borrow_watched().clone();
         self.store.current_term = m.current_term.max(1);
         self.elections_total.fetch_add(1, Ordering::Relaxed);
+        let _ = started;
         for v in &self.voter_set.voters {
             self.match_index.insert(*v, self.store.commit_index);
         }
         Ok(())
+    }
+
+    /// Record an election outcome against the `08` series when metrics are available.
+    pub fn record_election_metric(
+        &self,
+        metrics: Option<&Metrics>,
+        node_name: &str,
+        ok: bool,
+        duration: Duration,
+    ) {
+        if let Some(m) = metrics {
+            crate::election_metrics::record_election(
+                m,
+                node_name,
+                &self.group.to_string(),
+                ok,
+                duration,
+            );
+        }
     }
 
     pub async fn append_as_leader(
@@ -322,7 +353,7 @@ impl RaftGroup {
 
 /// Control-plane handle: cluster + namespace groups; implements ClusterStore semantics.
 pub struct ControlPlane {
-    pub data_dir: std::path::PathBuf,
+    pub data_dir: PathBuf,
     pub node_id: Uuid,
     pub apply: SyncMutex<ApplyEngine>,
     pub cluster_group: Mutex<Option<RaftGroup>>,
@@ -330,30 +361,132 @@ pub struct ControlPlane {
     pub elections_total: AtomicU64,
     /// When false, process must not vote (restore / join pending).
     pub is_member: SyncMutex<bool>,
+    /// Shared-datatype metric aggregators keyed by namespace (namespace primary only).
+    pub metrics_aggs: SyncMutex<BTreeMap<Uuid, MetricsAggregator>>,
+    /// Optional process metrics for FR-016 election series.
+    pub metrics: SyncMutex<Option<Arc<Metrics>>>,
+    pub node_name: SyncMutex<String>,
+    /// Raft peer registry for internodes mount (T061).
+    pub raft_registry: Arc<PeerRaftRegistry>,
 }
 
 impl ControlPlane {
+    fn empty_shell(
+        data_dir: PathBuf,
+        node_id: Uuid,
+        node_name: String,
+        cluster: ClusterState,
+        is_member: bool,
+    ) -> Self {
+        Self {
+            data_dir,
+            node_id,
+            apply: SyncMutex::new(ApplyEngine::new(cluster)),
+            cluster_group: Mutex::new(None),
+            namespace_groups: Mutex::new(BTreeMap::new()),
+            elections_total: AtomicU64::new(0),
+            is_member: SyncMutex::new(is_member),
+            metrics_aggs: SyncMutex::new(BTreeMap::new()),
+            metrics: SyncMutex::new(None),
+            node_name: SyncMutex::new(node_name),
+            raft_registry: Arc::new(PeerRaftRegistry::new()),
+        }
+    }
+
     pub async fn bootstrap(
-        data_dir: impl Into<std::path::PathBuf>,
+        data_dir: impl Into<PathBuf>,
         node_id: Uuid,
         node_name: impl Into<String>,
         cluster_uuid: Uuid,
         cluster_name: impl Into<String>,
     ) -> Result<Self> {
         let data_dir = data_dir.into();
-        let cluster = ClusterState::bootstrap(cluster_uuid, cluster_name, node_id, node_name);
+        let node_name = node_name.into();
+        let cluster = ClusterState::bootstrap(
+            cluster_uuid,
+            cluster_name,
+            node_id,
+            node_name.clone(),
+        );
         let voter_set = cluster.voter_set.clone();
         let mut group = RaftGroup::open(&data_dir, GroupId::Cluster, node_id, voter_set).await?;
+        let started = Instant::now();
         group.become_leader().await?;
-        Ok(Self {
-            data_dir,
+        let cp = Self::empty_shell(data_dir, node_id, node_name.clone(), cluster, true);
+        cp.elections_total.store(1, Ordering::Relaxed);
+        group.record_election_metric(None, &node_name, true, started.elapsed());
+        *cp.cluster_group.lock().await = Some(group);
+        Ok(cp)
+    }
+
+    /// Open existing raft directories without re-bootstrapping (restart / join catch-up).
+    ///
+    /// Bootstrap of the cluster group MUST only run on the `011` bootstrap path
+    /// (`ControlPlane::bootstrap`), never on every membership start (T061).
+    pub async fn open_existing(
+        data_dir: impl Into<PathBuf>,
+        node_id: Uuid,
+        node_name: impl Into<String>,
+        is_member: bool,
+    ) -> Result<Self> {
+        let data_dir = data_dir.into();
+        let node_name = node_name.into();
+        let plan = RestorePlan::discover(&data_dir).await?;
+        let stores = plan.open_stores(&data_dir).await?;
+        let mut eng = ApplyEngine::new(ClusterState::bootstrap(
+            Uuid::nil(),
+            "reopen",
             node_id,
-            apply: SyncMutex::new(ApplyEngine::new(cluster)),
-            cluster_group: Mutex::new(Some(group)),
-            namespace_groups: Mutex::new(BTreeMap::new()),
-            elections_total: AtomicU64::new(1),
-            is_member: SyncMutex::new(true),
-        })
+            &node_name,
+        ));
+        // Replay cluster + namespace log bodies into apply state when present.
+        for store in &stores {
+            for rec in &store.records {
+                let _ = eng.apply_record(rec);
+            }
+        }
+        let cluster = eng.cluster.clone();
+        let namespaces = eng.namespaces.clone();
+        let voter_set = cluster.voter_set.clone();
+        let group = RaftGroup::open(&data_dir, GroupId::Cluster, node_id, voter_set).await?;
+        // Do NOT call become_leader / initialize — existing openraft dir / election owns role.
+        let cp = Self::empty_shell(data_dir.clone(), node_id, node_name, cluster, is_member);
+        {
+            let mut a = cp.apply.lock();
+            a.namespaces = namespaces;
+        }
+        *cp.cluster_group.lock().await = Some(group);
+        // Re-open namespace groups discovered on disk without bootstrap.
+        for g in plan.groups {
+            if let GroupId::Namespace(id) = g {
+                let vs = {
+                    let a = cp.apply.lock();
+                    a.namespaces
+                        .get(&id)
+                        .and_then(|n| n.voter_set.clone())
+                        .unwrap_or_else(|| {
+                            let mut v = a.cluster.voter_set.clone();
+                            v.group = GroupId::Namespace(id);
+                            v
+                        })
+                };
+                let ng = RaftGroup::open(&data_dir, GroupId::Namespace(id), node_id, vs).await?;
+                cp.namespace_groups.lock().await.insert(id, ng);
+            }
+        }
+        Ok(cp)
+    }
+
+    pub fn set_metrics(&self, metrics: Arc<Metrics>) {
+        *self.metrics.lock() = Some(metrics);
+    }
+
+    fn next_hlc(&self) -> HlcStamp {
+        let mut a = self.apply.lock();
+        let wall = spacestorage_clocks::stamp::wall_micros();
+        let next = a.cluster.hlc.tick(wall, self.node_id);
+        a.cluster.hlc = next.clone();
+        next
     }
 
     pub fn cluster_snapshot(&self) -> ClusterState {
@@ -399,12 +532,19 @@ impl ControlPlane {
         if !*self.is_member.lock() {
             return Err(ControlPlaneError::NotMember);
         }
-        let hlc = {
-            let a = self.apply.lock();
-            let mut h = a.cluster.hlc.clone();
-            h.logical = h.logical.saturating_add(1);
-            h
-        };
+        {
+            let g = self.cluster_group.lock().await;
+            let cg = g
+                .as_ref()
+                .ok_or_else(|| ControlPlaneError::Msg("cluster group not started".into()))?;
+            if !cg.is_leader() {
+                return Err(ControlPlaneError::NotLeader {
+                    group: GroupId::Cluster,
+                    leader: cg.leader,
+                });
+            }
+        }
+        let hlc = self.next_hlc();
         let body = RaftBody::Cluster(
             serde_json::to_value(&op).map_err(|e| ControlPlaneError::Msg(e.to_string()))?,
         );
@@ -415,18 +555,32 @@ impl ControlPlane {
                 .ok_or_else(|| ControlPlaneError::Msg("cluster group not started".into()))?;
             cg.append_as_leader(body, hlc.clone(), None).await?
         };
+        let created_ns = match &op {
+            ClusterOp::CreateNamespace { id, .. } => Some(*id),
+            _ => None,
+        };
+        let deleted_ns = match &op {
+            ClusterOp::DeleteNamespace { id } => Some(*id),
+            _ => None,
+        };
         let maybe_vs = {
             let mut apply = self.apply.lock();
             apply.cluster.apply(op.clone(), hlc);
-            if let ClusterOp::CreateNamespace { id, .. } = &op {
+            if let Some(id) = created_ns {
                 let mut vs = apply.cluster.voter_set.clone();
-                vs.group = GroupId::Namespace(*id);
+                vs.group = GroupId::Namespace(id);
+                // Other members (non-voters) are learners on the namespace group.
+                for mid in apply.cluster.members.keys() {
+                    if !vs.voters.contains(mid) {
+                        vs.learners.insert(*mid);
+                    }
+                }
                 apply
                     .namespaces
-                    .insert(*id, crate::namespace::NamespaceState::new(*id, vs));
+                    .insert(id, crate::namespace::NamespaceState::new(id, vs));
             }
-            if let ClusterOp::DeleteNamespace { id } = &op {
-                apply.namespaces.remove(id);
+            if let Some(id) = deleted_ns {
+                apply.namespaces.remove(&id);
             }
             if let ClusterOp::AdmitMember { .. } = &op {
                 let ids = apply.cluster.member_ids_ordered();
@@ -445,7 +599,236 @@ impl ControlPlane {
                 cg.voter_set = vs;
             }
         }
+        // T062: start namespace Raft group with cluster voter set (+ learners).
+        if let Some(id) = created_ns {
+            self.start_namespace_group(id).await?;
+        }
+        if let Some(id) = deleted_ns {
+            self.namespace_groups.lock().await.remove(&id);
+            self.metrics_aggs.lock().remove(&id);
+        }
         Ok(index)
+    }
+
+    /// Start `GroupId::Namespace` in `namespace_groups` (T062).
+    pub async fn start_namespace_group(&self, namespace_id: Uuid) -> Result<()> {
+        let vs = {
+            let apply = self.apply.lock();
+            apply
+                .namespaces
+                .get(&namespace_id)
+                .and_then(|n| n.voter_set.clone())
+                .ok_or_else(|| {
+                    ControlPlaneError::Msg(format!("namespace {namespace_id} state missing"))
+                })?
+        };
+        let mut ng =
+            RaftGroup::open(&self.data_dir, GroupId::Namespace(namespace_id), self.node_id, vs)
+                .await?;
+        // Single-voter first-binary: become leader locally when we are the sole voter.
+        if ng.voter_set.voters.len() == 1 && ng.voter_set.is_voter(&self.node_id) {
+            let started = Instant::now();
+            ng.become_leader().await?;
+            let name = self.node_name.lock().clone();
+            let metrics = self.metrics.lock().clone();
+            ng.record_election_metric(metrics.as_deref(), &name, true, started.elapsed());
+            self.elections_total.fetch_add(1, Ordering::Relaxed);
+        }
+        self.namespace_groups
+            .lock()
+            .await
+            .insert(namespace_id, ng);
+        // Metrics aggregator lives only on the namespace primary (FR-013 / T068).
+        let hb = Duration::from_millis(500);
+        self.metrics_aggs
+            .lock()
+            .insert(namespace_id, MetricsAggregator::new(namespace_id, hb));
+        Ok(())
+    }
+
+    /// Commit schema / definition / shared-datatype metadata through the namespace majority.
+    pub async fn append_namespace(
+        &self,
+        namespace_id: Uuid,
+        body_value: serde_json::Value,
+    ) -> Result<u64> {
+        if !*self.is_member.lock() {
+            return Err(ControlPlaneError::NotMember);
+        }
+        let hlc = self.next_hlc();
+        let body = RaftBody::Namespace(body_value.clone());
+        let index = {
+            let mut groups = self.namespace_groups.lock().await;
+            let ng = groups.get_mut(&namespace_id).ok_or_else(|| {
+                ControlPlaneError::Msg(format!("namespace group {namespace_id} not started"))
+            })?;
+            if !ng.is_leader() {
+                return Err(ControlPlaneError::NotLeader {
+                    group: GroupId::Namespace(namespace_id),
+                    leader: ng.leader,
+                });
+            }
+            ng.append_as_leader(body, hlc.clone(), None).await?
+        };
+        {
+            let mut apply = self.apply.lock();
+            let rec = RaftLogRecord {
+                group: GroupId::Namespace(namespace_id),
+                term: 1,
+                index,
+                hlc,
+                body: RaftBody::Namespace(body_value),
+            };
+            apply.apply_record(&rec)?;
+        }
+        Ok(index)
+    }
+
+    /// Epoch fence for ordered appends (T063). Leaderless types → `LeaseForbidden`.
+    pub fn fence_ordered_append(
+        &self,
+        namespace_id: Uuid,
+        container_id: Uuid,
+        presented_epoch: u64,
+        type_name: &str,
+    ) -> Result<u64> {
+        let apply = self.apply.lock();
+        let ns = apply.namespaces.get(&namespace_id).ok_or_else(|| {
+            ControlPlaneError::Msg(format!("unknown namespace {namespace_id}"))
+        })?;
+        fence_ordered_append(&ns.leases, container_id, presented_epoch, type_name)
+    }
+
+    pub fn put_lease(&self, namespace_id: Uuid, lease: crate::lease::LeadershipLease) -> Result<()> {
+        let hlc = self.next_hlc();
+        let mut apply = self.apply.lock();
+        let ns = apply.namespaces.get_mut(&namespace_id).ok_or_else(|| {
+            ControlPlaneError::Msg(format!("unknown namespace {namespace_id}"))
+        })?;
+        ns.put_lease(lease, hlc);
+        Ok(())
+    }
+
+    pub async fn publish_inventory(
+        &self,
+        drives: Vec<crate::cluster::DriveInventory>,
+        memory: crate::cluster::MemoryInventory,
+    ) -> Result<()> {
+        self.append_cluster(ClusterOp::PublishDrives {
+            node_id: self.node_id,
+            drives,
+        })
+        .await?;
+        self.append_cluster(ClusterOp::PublishMemory {
+            node_id: self.node_id,
+            memory,
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Append a `004` [`spacestorage_placement::PlacementEvent`] via the cluster Raft group
+    /// (`ReplicaHealth` updates the shared describe snapshot). Never carries schemas or
+    /// container definitions (FR-003 / T099).
+    pub async fn append_placement_event(
+        &self,
+        event: spacestorage_placement::PlacementEvent,
+    ) -> Result<u64> {
+        self.append_cluster(ClusterOp::PlacementEvent { event }).await
+    }
+
+    /// Membership roster for `apply_controlplane_roster` (T061).
+    pub fn membership_roster(&self) -> Vec<spacestorage_membership::MemberRecord> {
+        let apply = self.apply.lock();
+        apply
+            .cluster
+            .members
+            .values()
+            .map(|m| spacestorage_membership::MemberRecord {
+                node_id: m.node_id,
+                node_name: m.node_name.clone(),
+                status: match m.status {
+                    MemberStatus::Draining => spacestorage_membership::MemberStatus::Draining,
+                    MemberStatus::Joining | MemberStatus::Ready | MemberStatus::Dead => {
+                        spacestorage_membership::MemberStatus::Ready
+                    }
+                },
+                incarnation: 1,
+                quorum_domain: "default".into(),
+                voter: apply.cluster.voter_set.is_voter(&m.node_id),
+                labels: m.labels.clone(),
+            })
+            .collect()
+    }
+
+    pub async fn raft_status(&self, group: GroupId) -> Result<RaftStatusView> {
+        match group {
+            GroupId::Cluster => {
+                let g = self.cluster_group.lock().await;
+                let cg = g.as_ref().ok_or_else(|| {
+                    ControlPlaneError::Msg("cluster group not started".into())
+                })?;
+                Ok(RaftStatusView {
+                    group,
+                    term: cg.store.current_term,
+                    commit_index: cg.store.commit_index,
+                    role: format!("{:?}", cg.role),
+                    leader: cg.leader,
+                    voters: cg.voter_set.voters.iter().copied().collect(),
+                    learners: cg.voter_set.learners.iter().copied().collect(),
+                })
+            }
+            GroupId::Namespace(id) => {
+                let g = self.namespace_groups.lock().await;
+                let ng = g.get(&id).ok_or_else(|| {
+                    ControlPlaneError::Msg(format!("namespace group {id} missing"))
+                })?;
+                Ok(RaftStatusView {
+                    group,
+                    term: ng.store.current_term,
+                    commit_index: ng.store.commit_index,
+                    role: format!("{:?}", ng.role),
+                    leader: ng.leader,
+                    voters: ng.voter_set.voters.iter().copied().collect(),
+                    learners: ng.voter_set.learners.iter().copied().collect(),
+                })
+            }
+        }
+    }
+
+    pub fn leases_view(&self, namespace_id: Uuid) -> Result<Vec<crate::lease::LeadershipLease>> {
+        let apply = self.apply.lock();
+        let ns = apply.namespaces.get(&namespace_id).ok_or_else(|| {
+            ControlPlaneError::Msg(format!("unknown namespace {namespace_id}"))
+        })?;
+        Ok(ns.leases.values().cloned().collect())
+    }
+
+    /// Namespace-primary scrape path for shared-datatype merge (T068).
+    pub fn namespace_metrics_snapshot(
+        &self,
+        namespace_id: Uuid,
+    ) -> Option<crate::metrics_agg::SharedMetricAggregate> {
+        // Only when this node is namespace primary.
+        let is_primary = self
+            .namespace_groups
+            .try_lock()
+            .ok()
+            .and_then(|g| g.get(&namespace_id).map(|n| n.is_leader()))
+            .unwrap_or(false);
+        if !is_primary {
+            return None;
+        }
+        self.metrics_aggs
+            .lock()
+            .get(&namespace_id)
+            .map(|a| a.snapshot())
+    }
+
+    pub fn push_shared_metric(&self, namespace_id: Uuid, name: impl Into<String>, value: f64) {
+        if let Some(agg) = self.metrics_aggs.lock().get_mut(&namespace_id) {
+            agg.push_local(name, value);
+        }
     }
 
     /// Admit a member and expand voters per first-binary table.
@@ -518,6 +901,17 @@ pub struct NamespaceControllerView {
     pub namespace_id: Uuid,
     pub name: String,
     pub primary: Option<Uuid>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RaftStatusView {
+    pub group: GroupId,
+    pub term: u64,
+    pub commit_index: u64,
+    pub role: String,
+    pub leader: Option<Uuid>,
+    pub voters: Vec<Uuid>,
+    pub learners: Vec<Uuid>,
 }
 
 /// `004` ClusterStore seam: append metadata via Raft majority.

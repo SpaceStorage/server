@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use spacestorage_compat::{ClassifyOutcome, DialectProfile, ProtocolId, classify_outcome};
+use spacestorage_compat::{
+    classify_outcome, ClassifyOutcome, DialectProfile, LimitServices, PrincipalHold, ProtocolId,
+};
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
 use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
 
@@ -87,6 +89,10 @@ pub struct SessionState {
     /// Expected password for AUTH (demo default).
     pub expected_secret: String,
     pub expected_user: String,
+    /// Effective configured limits + principal connection counters (FR-011).
+    pub limit_services: LimitServices,
+    /// Held while this connection is authenticated for a principal.
+    pub principal_hold: Option<PrincipalHold>,
 }
 
 impl SessionState {
@@ -100,6 +106,8 @@ impl SessionState {
             password_ok: false,
             expected_secret: "demo".into(),
             expected_user: "demo".into(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
@@ -198,6 +206,15 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 _ => return RedisReply::Error("ERR wrong number of arguments for 'auth'".into()),
             };
             if user == session.expected_user && pass == session.expected_secret {
+                // FR-011: count authenticated session per principal; reject without waiting.
+                if session.principal_hold.is_none() {
+                    match session.limit_services.try_hold_principal(user) {
+                        Ok(hold) => session.principal_hold = Some(hold),
+                        Err(e) => {
+                            return RedisReply::Error(format!("ERR max connections {e}"));
+                        }
+                    }
+                }
                 session.authenticated = true;
                 session.password_ok = true;
                 RedisReply::Ok
@@ -221,6 +238,13 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(val) = args.get(1) else {
                 return RedisReply::Error("ERR wrong number of arguments for 'set'".into());
             };
+            let limits = session.limit_services.limits();
+            if let Err(e) = limits.check_key(key.len() as u64) {
+                return RedisReply::Error(format!("ERR {e}"));
+            }
+            if let Err(e) = limits.check_value(val.len() as u64) {
+                return RedisReply::Error(format!("ERR {e}"));
+            }
             let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
@@ -261,6 +285,10 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let Some(key) = args.first() else {
                 return RedisReply::Error("ERR wrong number of arguments for 'get'".into());
             };
+            let limits = session.limit_services.limits();
+            if let Err(e) = limits.check_key(key.len() as u64) {
+                return RedisReply::Error(format!("ERR {e}"));
+            }
             let id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
@@ -276,6 +304,11 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                         .get(1)
                         .and_then(|x| x.as_ref())
                         .map(|s| s.as_bytes().to_vec());
+                    if let Some(ref bytes) = v {
+                        if let Err(e) = limits.check_result(bytes.len() as u64) {
+                            return RedisReply::Error(format!("ERR {e}"));
+                        }
+                    }
                     RedisReply::Bulk(v)
                 }
                 Err(e) => e,
@@ -431,6 +464,63 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_rejects_oversized_key() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(cat);
+        s.authenticated = true;
+        let big = "k".repeat(spacestorage_compat::DEFAULT_MAX_KEY as usize + 1);
+        match dispatch(&mut s, "SET", &[&big, "v"]) {
+            RedisReply::Error(e) => assert!(e.contains("limit_exceeded"), "{e}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn auth_rejects_over_principal_cap() {
+        use spacestorage_compat::{LimitServices, Limits, SessionCounters};
+        let counters = Arc::new(SessionCounters::new());
+        let mut lim = Limits::default();
+        lim.max_connections_per_principal = 1;
+        let svc = LimitServices::with_fixed(Arc::clone(&counters), lim);
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut a = SessionState::demo(Arc::clone(&cat));
+        a.limit_services = svc.clone();
+        let mut b = SessionState::demo(cat);
+        b.limit_services = svc;
+        assert!(matches!(
+            dispatch(&mut a, "AUTH", &["demo", "demo"]),
+            RedisReply::Ok
+        ));
+        match dispatch(&mut b, "AUTH", &["demo", "demo"]) {
+            RedisReply::Error(e) => {
+                assert!(e.contains("max connections"), "{e}");
+                assert!(e.contains("limit_exceeded"), "{e}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_uses_configured_max_key() {
+        use spacestorage_compat::{LimitServices, Limits, SessionCounters};
+        let mut lim = Limits::default();
+        lim.max_key = 4;
+        let svc = LimitServices::with_fixed(Arc::new(SessionCounters::new()), lim);
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(cat);
+        s.limit_services = svc;
+        s.authenticated = true;
+        match dispatch(&mut s, "SET", &["abcde", "v"]) {
+            RedisReply::Error(e) => assert!(e.contains("limit_exceeded"), "{e}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            dispatch(&mut s, "SET", &["abcd", "v"]),
+            RedisReply::Ok
+        ));
+    }
 
     #[test]
     fn must_list_and_off_list() {

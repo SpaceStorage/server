@@ -60,8 +60,150 @@ impl AdminService {
                 })
                 .unwrap())
             }
+            AdminOp::Controllers => controlplane_controllers(node).await,
+            AdminOp::RaftStatus { group } => controlplane_raft_status(node, group).await,
+            AdminOp::Leases { namespace } => controlplane_leases(node, namespace).await,
+            AdminOp::VoterReplace { group, from, to } => {
+                controlplane_voter_op(
+                    node,
+                    spacestorage_controlplane::membership::MembershipOp::Replace { from, to },
+                    &group,
+                )
+                .await
+            }
+            AdminOp::VoterGrow { group, add } => {
+                if add.len() != 2 {
+                    return Err(ErrorBody {
+                        code: "invalid_argument".into(),
+                        message: "VoterGrow requires exactly two ids".into(),
+                        details: serde_json::json!({}),
+                    });
+                }
+                controlplane_voter_op(
+                    node,
+                    spacestorage_controlplane::membership::MembershipOp::Grow {
+                        add: [add[0], add[1]],
+                    },
+                    &group,
+                )
+                .await
+            }
+            AdminOp::VoterShrink { group, remove } => {
+                if remove.len() != 2 {
+                    return Err(ErrorBody {
+                        code: "invalid_argument".into(),
+                        message: "VoterShrink requires exactly two ids".into(),
+                        details: serde_json::json!({}),
+                    });
+                }
+                controlplane_voter_op(
+                    node,
+                    spacestorage_controlplane::membership::MembershipOp::Shrink {
+                        remove: [remove[0], remove[1]],
+                    },
+                    &group,
+                )
+                .await
+            }
         }
     }
+}
+
+async fn require_cp(
+    node: &Node,
+) -> Result<Arc<spacestorage_controlplane::ControlPlane>, ErrorBody> {
+    node.controlplane
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| ErrorBody {
+            code: "unavailable".into(),
+            message: "controlplane not started".into(),
+            details: serde_json::json!({}),
+        })
+}
+
+fn cp_err(e: spacestorage_controlplane::Error) -> ErrorBody {
+    let code = match &e {
+        spacestorage_controlplane::Error::NotLeader { .. } => "NotLeader",
+        spacestorage_controlplane::Error::Minority { .. } => "Minority",
+        spacestorage_controlplane::Error::Slice7Required { .. } => "Slice7Required",
+        _ => "controlplane_error",
+    };
+    ErrorBody {
+        code: code.into(),
+        message: e.to_string(),
+        details: serde_json::json!({}),
+    }
+}
+
+async fn controlplane_controllers(node: &Node) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let view = cp.controllers_view().await;
+    // Metadata reads via read-index when follower.
+    if let Ok(g) = cp.cluster_group.try_lock() {
+        if let Some(cg) = g.as_ref() {
+            let _ = cg.read_index().allow_consistent_read().map_err(cp_err)?;
+        }
+    }
+    Ok(serde_json::json!({
+        "cluster_primary": view.cluster_primary,
+        "cluster_secondaries": view.cluster_secondaries,
+        "term": view.term,
+        "commit_index": view.commit_index,
+        "namespaces": view.namespaces.iter().map(|n| serde_json::json!({
+            "namespace_id": n.namespace_id,
+            "name": n.name,
+            "primary": n.primary,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+async fn controlplane_raft_status(
+    node: &Node,
+    group: Option<String>,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let gid = match group.as_deref() {
+        None | Some("cluster") => spacestorage_controlplane::group::GroupId::Cluster,
+        Some(s) => {
+            let id = uuid::Uuid::parse_str(s).map_err(|e| ErrorBody {
+                code: "invalid_argument".into(),
+                message: format!("group: {e}"),
+                details: serde_json::json!({}),
+            })?;
+            spacestorage_controlplane::group::GroupId::Namespace(id)
+        }
+    };
+    let st = cp.raft_status(gid).await.map_err(cp_err)?;
+    Ok(serde_json::json!({
+        "group": st.group.to_string(),
+        "term": st.term,
+        "commit_index": st.commit_index,
+        "role": st.role,
+        "leader": st.leader,
+        "voters": st.voters,
+        "learners": st.learners,
+    }))
+}
+
+async fn controlplane_leases(
+    node: &Node,
+    namespace: uuid::Uuid,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    let leases = cp.leases_view(namespace).map_err(cp_err)?;
+    Ok(serde_json::to_value(leases).unwrap_or_else(|_| serde_json::json!([])))
+}
+
+async fn controlplane_voter_op(
+    node: &Node,
+    op: spacestorage_controlplane::membership::MembershipOp,
+    _group: &str,
+) -> Result<serde_json::Value, ErrorBody> {
+    let cp = require_cp(node).await?;
+    cp.voter_op(op).await.map_err(cp_err)?;
+    Ok(serde_json::json!({"ok": true}))
 }
 
 fn entrypoint_statuses(node: &Node) -> Vec<EntrypointStatus> {

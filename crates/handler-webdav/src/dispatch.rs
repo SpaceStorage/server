@@ -3,7 +3,8 @@
 use std::sync::{Arc, RwLock};
 
 use spacestorage_compat::{
-    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
+    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, LimitServices,
+    PrincipalHold, ProtocolId,
 };
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
 use spacestorage_types::ContainerCatalog;
@@ -21,6 +22,8 @@ pub struct SessionState {
     pub namespace: String,
     pub collection: String,
     pub profile: DialectProfile,
+    pub limit_services: LimitServices,
+    pub principal_hold: Option<PrincipalHold>,
 }
 
 impl SessionState {
@@ -30,6 +33,8 @@ impl SessionState {
             namespace: "demo".into(),
             collection: "dav".into(),
             profile: DialectProfile::HandlersComplete,
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
@@ -101,12 +106,26 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> WebDav
         "PUT" => {
             let path = args.first().copied().unwrap_or("/f");
             let body = args.get(1).copied().unwrap_or("").as_bytes().to_vec();
+            let key = path_key(path);
+            let limits = session.limit_services.limits();
+            if let Err(e) = limits.check_key(key.len() as u64) {
+                return WebDavReply::Error {
+                    code: "limit_exceeded".into(),
+                    message: e.to_string(),
+                };
+            }
+            if let Err(e) = limits.check_value(body.len() as u64) {
+                return WebDavReply::Error {
+                    code: "limit_exceeded".into(),
+                    message: e.to_string(),
+                };
+            }
             if let Err(e) = session.ensure_collection() {
                 return e;
             }
             match session.exec(LogicalRequest::Object {
                 container: session.collection.clone(),
-                key: path_key(path),
+                key,
                 bytes: body,
             }) {
                 Ok(_) => WebDavReply::Ok,

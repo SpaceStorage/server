@@ -10,6 +10,7 @@ pub use manifest::{
     SNAPSHOT_MAGIC,
 };
 pub use pitr::{map_hlc_to_positions, resolve_positions, PitrError, PitrTarget, StampLsn};
+// PitrTarget is part of the public restore/PITR surface used by 010 RestoreSpec.
 pub use restore::{RestoreRequest, RestoreService};
 pub use snapshot::{
     create_snapshot, load_manifest, scope_container, scope_namespace, SnapshotCreateRequest,

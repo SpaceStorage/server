@@ -74,6 +74,8 @@ fn live_evacuate_copies_kv() {
     let dest_id = *names.get(&("acme".into(), "kv_b".into())).unwrap();
     assert_eq!(content.get(dest_id, b"a"), Some(b"1".as_slice()));
     assert_eq!(content.len(source_id), 2); // copy leaves source
+    // T078: runner leaves the dual-write window for catalog publish.
+    let _ = svc.dual.unregister(source_id);
 }
 
 #[test]

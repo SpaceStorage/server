@@ -1955,6 +1955,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -2100,6 +2101,8 @@ dependencies = [
  "spacestorage-clocks",
  "spacestorage-internode",
  "spacestorage-membership",
+ "spacestorage-observability",
+ "spacestorage-placement",
  "spacestorage-storage",
  "tempfile",
  "thiserror",
@@ -2320,7 +2323,9 @@ dependencies = [
  "spacestorage-backup",
  "spacestorage-observability",
  "spacestorage-placement",
+ "spacestorage-query",
  "spacestorage-storage",
+ "spacestorage-tenancy",
  "spacestorage-types",
  "tempfile",
  "thiserror",
@@ -2351,6 +2356,7 @@ dependencies = [
  "spacestorage-admin-ui",
  "spacestorage-authz",
  "spacestorage-backup",
+ "spacestorage-compat",
  "spacestorage-config",
  "spacestorage-controlplane",
  "spacestorage-crypto",
@@ -2366,6 +2372,7 @@ dependencies = [
  "spacestorage-membership",
  "spacestorage-migrate",
  "spacestorage-observability",
+ "spacestorage-placement",
  "spacestorage-query",
  "spacestorage-release-profile",
  "spacestorage-replication",

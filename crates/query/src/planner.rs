@@ -32,6 +32,8 @@ pub struct Task {
     pub placement: Vec<String>,
     pub shard: Option<String>,
     pub estimated_memory: u64,
+    /// Sort / hash / aggregation MAY spill under CompleteProduct (FR-010).
+    pub spillable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +115,7 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
                 placement: vec![],
                 shard: None,
                 estimated_memory: 0,
+                spillable: false,
             });
         }
         LogicalRequest::Ddl { container, .. } => {
@@ -158,7 +161,7 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
         LogicalRequest::Aggregate { container, func, .. } => {
             containers.push(container.clone());
             ops.push(format!("agg:{func:?}"));
-            tasks.push(simple(EngineKind::Aggregate));
+            tasks.push(spillable_task(EngineKind::Aggregate, 4 * 1024 * 1024));
         }
         LogicalRequest::Join {
             left,
@@ -172,7 +175,7 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
             let engine = match kind {
                 JoinKind::Inner | JoinKind::Left => EngineKind::HashJoin,
             };
-            tasks.push(simple(engine));
+            tasks.push(spillable_task(engine, 4 * 1024 * 1024));
         }
         LogicalRequest::CopyIn { container, .. } => {
             containers.push(container.clone());
@@ -197,8 +200,8 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
             containers.push(container.clone());
             ops.push("mapreduce".into());
             tasks.push(simple(EngineKind::Map));
-            tasks.push(simple(EngineKind::Shuffle));
-            tasks.push(simple(EngineKind::Reduce));
+            tasks.push(spillable_task(EngineKind::Shuffle, 2 * 1024 * 1024));
+            tasks.push(spillable_task(EngineKind::Reduce, 2 * 1024 * 1024));
         }
     }
     Ok((containers, ops, tasks))
@@ -211,7 +214,24 @@ fn simple(engine: EngineKind) -> Task {
         placement: vec!["local".into()],
         shard: None,
         estimated_memory: 64 * 1024,
+        spillable: false,
     }
+}
+
+fn spillable_task(engine: EngineKind, estimated_memory: u64) -> Task {
+    Task {
+        id: Uuid::now_v7(),
+        engine,
+        placement: vec!["local".into()],
+        shard: None,
+        estimated_memory,
+        spillable: true,
+    }
+}
+
+/// True when any task in the plan is a documented spill candidate (sort/hash/agg).
+pub fn plan_is_spillable(plan: &PhysicalPlan) -> bool {
+    plan.tasks.iter().any(|t| t.spillable)
 }
 
 pub fn explain_text(plan: &LogicalPlan, physical: &PhysicalPlan) -> String {

@@ -50,6 +50,9 @@ pub struct NodeTopo {
     pub name: String,
     pub labels: BTreeMap<String, String>,
     pub quorum_domain: String,
+    /// When true, excluded as a new tenant replica target (`controller_exclusive_data`).
+    #[serde(default)]
+    pub no_tenant_data: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

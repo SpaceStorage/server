@@ -4,6 +4,7 @@ pub mod effective;
 pub mod entrypoint;
 pub mod handler;
 pub mod ingest_append;
+pub mod job_driver;
 pub mod kafka_runtime;
 pub mod later_surfaces;
 pub mod lifecycle;
@@ -49,6 +50,11 @@ pub struct Node {
     key_authority: tokio::sync::RwLock<Option<SharedKeyAuthority>>,
     /// Cluster membership (011); `None` when no cluster bootstrap/join/name configured.
     pub membership: Arc<tokio::sync::RwLock<Option<Arc<MembershipService>>>>,
+    /// Raft control plane (006); `None` until membership starts with internodes.
+    pub controlplane: Arc<tokio::sync::RwLock<Option<Arc<spacestorage_controlplane::ControlPlane>>>>,
+    /// Local `004` replica describe when RaftClusterStore is not selected yet (T098/T099).
+    /// When controlplane is live, prefer `cluster_snapshot().replica_describe`.
+    pub placement_describe: Arc<RwLock<spacestorage_placement::DescribeSnapshot>>,
     /// Shared internode/replication fabric (012); join secret injected after membership.
     pub fabric: Arc<spacestorage_internode::FabricRuntime>,
     /// Global `/metrics` exposition (008 / 016 G1).
@@ -75,6 +81,8 @@ pub struct Node {
     pub worker_threads: u32,
     pub threads_source: String,
     pub drain_flag: Arc<AtomicBool>,
+    /// Process-local connection / query admission counters (015 FR-011).
+    pub session_counters: Arc<spacestorage_compat::SessionCounters>,
 }
 
 impl Node {
@@ -199,6 +207,10 @@ impl Node {
             storage: tokio::sync::RwLock::new(None),
             key_authority: tokio::sync::RwLock::new(None),
             membership: Arc::new(tokio::sync::RwLock::new(None)),
+            controlplane: Arc::new(tokio::sync::RwLock::new(None)),
+            placement_describe: Arc::new(RwLock::new(
+                spacestorage_placement::DescribeSnapshot::default(),
+            )),
             fabric: Arc::clone(&fabric_rt),
             metrics,
             jobs,
@@ -215,6 +227,7 @@ impl Node {
             worker_threads,
             threads_source,
             drain_flag: Arc::new(AtomicBool::new(false)),
+            session_counters: Arc::new(spacestorage_compat::SessionCounters::new()),
         });
         {
             let mut reg = node.handlers.write().unwrap();
@@ -238,45 +251,82 @@ impl Node {
                 durable,
             }))
             .unwrap();
+            // 010: drive accepted data_* jobs; dual-write + durable JobStore hooks.
+            crate::job_driver::install(&node);
+            // FR-011: shared counters + live configured limits for auth/size gates.
+            let limit_services = {
+                let config = Arc::clone(&node.config);
+                let counters = Arc::clone(&node.session_counters);
+                spacestorage_compat::LimitServices::new(counters, move || {
+                    config.load().limits.limits.clone()
+                })
+            };
             // 002 first-binary: real async protocol handlers (replace byte-sink stubs).
-            reg.register(Arc::new(postgresql::PostgresqlPortHandler::new(Arc::clone(
-                &node.catalog,
-            ))))
+            reg.register(Arc::new(
+                postgresql::PostgresqlPortHandler::with_release_limits(
+                    Arc::clone(&node.catalog),
+                    if cfg!(feature = "complete-product") {
+                        "complete-product"
+                    } else if cfg!(feature = "handlers-complete") {
+                        "handlers-complete"
+                    } else {
+                        "first-binary"
+                    },
+                    limit_services.clone(),
+                ),
+            ))
             .unwrap();
-            reg.register(Arc::new(redis::RedisPortHandler::new(Arc::clone(
-                &node.catalog,
-            ))))
+            reg.register(Arc::new(redis::RedisPortHandler::with_limits(
+                Arc::clone(&node.catalog),
+                limit_services.clone(),
+            )))
             .unwrap();
             #[cfg(feature = "handlers-complete")]
             {
-                reg.register(Arc::new(crate::handler::cassandra::CassandraPortHandler::new(
+                reg.register(Arc::new(
+                    crate::handler::cassandra::CassandraPortHandler::with_limits(
+                        Arc::clone(&node.catalog),
+                        limit_services.clone(),
+                    ),
+                ))
+                .unwrap();
+                reg.register(Arc::new(
+                    crate::handler::elasticsearch::ElasticsearchPortHandler::with_limits(
+                        Arc::clone(&node.catalog),
+                        limit_services.clone(),
+                    ),
+                ))
+                .unwrap();
+                reg.register(Arc::new(
+                    crate::handler::clickhouse::ClickHousePortHandler::with_limits(
+                        Arc::clone(&node.catalog),
+                        limit_services.clone(),
+                    ),
+                ))
+                .unwrap();
+                reg.register(Arc::new(
+                    crate::handler::clickhouse::ClickHouseHttpPortHandler::with_limits(
+                        Arc::clone(&node.catalog),
+                        limit_services.clone(),
+                    ),
+                ))
+                .unwrap();
+                reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_limits(
                     Arc::clone(&node.catalog),
+                    limit_services.clone(),
                 )))
                 .unwrap();
                 reg.register(Arc::new(
-                    crate::handler::elasticsearch::ElasticsearchPortHandler::new(Arc::clone(
-                        &node.catalog,
-                    )),
+                    crate::handler::webdav::WebDavPortHandler::with_limits(
+                        Arc::clone(&node.catalog),
+                        limit_services.clone(),
+                    ),
                 ))
                 .unwrap();
-                reg.register(Arc::new(crate::handler::clickhouse::ClickHousePortHandler::new(
-                    Arc::clone(&node.catalog),
-                )))
-                .unwrap();
-                reg.register(Arc::new(
-                    crate::handler::clickhouse::ClickHouseHttpPortHandler::new(Arc::clone(
-                        &node.catalog,
-                    )),
-                ))
-                .unwrap();
-                reg.register(Arc::new(crate::handler::s3::S3PortHandler::new(Arc::clone(
-                    &node.catalog,
-                ))))
-                .unwrap();
-                reg.register(Arc::new(crate::handler::webdav::WebDavPortHandler::new(
-                    Arc::clone(&node.catalog),
-                )))
-                .unwrap();
+            }
+            #[cfg(not(feature = "handlers-complete"))]
+            {
+                let _ = limit_services;
             }
             #[cfg(feature = "complete-product")]
             {
@@ -305,16 +355,23 @@ impl Node {
             lifecycle::watch_os_signals(sig_node).await;
         });
 
-        // 013 US2: open per-drive WAL and restore before ready.
-        if let Err(e) = lifecycle::restore_storage(&self).await {
-            tracing::error!(error = %e, "storage restore failed");
+        // 011: membership before ready when cluster bootstrap/join/name is set.
+        if let Err(e) = lifecycle::start_membership(&self).await {
+            tracing::error!(error = %e, "membership start failed");
             self.state.set(lifecycle::NodeState::Failed);
             return Err(e);
         }
 
-        // 011: membership before ready when cluster bootstrap/join/name is set.
-        if let Err(e) = lifecycle::start_membership(&self).await {
-            tracing::error!(error = %e, "membership start failed");
+        // 006 T061/T070: open RaftClusterStore + restore plan before ready / 013 content.
+        if let Err(e) = lifecycle::start_controlplane(&self).await {
+            tracing::error!(error = %e, "controlplane start failed");
+            self.state.set(lifecycle::NodeState::Failed);
+            return Err(e);
+        }
+
+        // 013 US2: open per-drive WAL and restore content after Raft definitions (T070).
+        if let Err(e) = lifecycle::restore_storage(&self).await {
+            tracing::error!(error = %e, "storage restore failed");
             self.state.set(lifecycle::NodeState::Failed);
             return Err(e);
         }

@@ -1,5 +1,6 @@
 //! Topology ladder + placement/quorum (004 first-binary).
 
+pub mod cluster_store;
 pub mod error;
 pub mod fanout;
 pub mod planner;
@@ -8,15 +9,20 @@ pub mod replica;
 pub mod stamp;
 pub mod topology;
 
+pub use cluster_store::{apply_placement_event, PlacementEvent};
 pub use error::PlacementError;
 pub use fanout::{
     fanout_read, fanout_write, in_source_domain, FanoutAck, FanoutRead, FanoutReadOutcome,
     FanoutReplica, FanoutWrite, FanoutWriteOutcome,
 };
 pub use planner::{
-    finest_ladder_key, plan_replicas, resolve_anti_affinity_keys, PlanRequest, PlacementPlan,
+    finest_ladder_key, plan_replicas, refuse_fixed_sharding_key_change, resolve_anti_affinity_keys,
+    PlanRequest, PlacementPlan,
 };
 pub use quorum::{product_defaults, QuorumLevel};
+pub use replica::{
+    DescribeSnapshot, Replica, ReplicaDescribe, ReplicaHealth, ReplicaLag, ReplicaSet,
+};
 pub use stamp::VersionStamp;
 pub use topology::{TopologyLadder, TopologyView};
 

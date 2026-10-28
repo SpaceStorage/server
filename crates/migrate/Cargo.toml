@@ -28,6 +28,8 @@ spacestorage-backup = { path = "../backup" }
 spacestorage-storage = { path = "../storage" }
 spacestorage-placement = { path = "../placement" }
 spacestorage-observability = { path = "../observability" }
+spacestorage-query = { path = "../query" }
+spacestorage-tenancy = { path = "../tenancy" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

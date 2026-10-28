@@ -309,3 +309,22 @@ Continue through **US2** (namespace Raft, no required leases) and **US3** (resto
 - Commit after each task or logical group
 - Stop at any checkpoint to validate the story independently
 - Avoid: per-container Raft, LWW merge of ordered histories, aggregating shared metrics on cluster primary or lease holder
+
+---
+
+## Phase 9: Convergence
+
+- [X] T060 CRITICAL: Signal openraft `IOFlushed` only after the group log and snapshot are fsynced on the blocking pool; `MemLogStore::append` in `crates/controlplane/src/openraft_store.rs` completes flush from an in-memory map per Constitution II (contradicts)
+- [X] T061 CRITICAL: Select `RaftClusterStore` on `Node` when internodes is enabled, mount the existing `mount_raft_handler_on_fabric`, and take the membership roster from `apply_controlplane_roster`; open an existing raft directory on restart and bootstrap the cluster group only on the `011` bootstrap path, not on every membership start per Constitution XII, FR-020, plan: node wiring (missing)
+- [X] T062 CRITICAL: On `CreateNamespace`, start `GroupId::Namespace` in `namespace_groups` with the cluster voter set and other members as learners, and commit schema, definition, and shared-datatype metadata only through that group's majority (`Minority` otherwise) per FR-004, US2/AC1 (missing)
+- [X] T063 Require a namespace leadership-lease epoch on ordered appends (log stream / total order), refuse `StaleEpoch` so those bytes never enter the ordered history, and do not grant a lease to leaderless types per FR-006, US2/AC3 (missing)
+- [X] T064 Add admin `Controllers`, `RaftStatus`, `Leases`, and slice-7 `VoterReplace` / `VoterGrow` / `VoterShrink`, plus CLI `spacestorage controllers` and `spacestorage raft-status`; serve metadata reads through read-index and return `NotLeader` for writes on a non-primary; without `controlplane-ops`, voter changes return `Slice7Required` per plan: admin-cli, FR-011, FR-018 (missing)
+- [X] T065 Store member-published drives and memory inventory on `ClusterState`, and keep schemas and container definitions out of the cluster log per FR-003 (partial)
+- [X] T066 Stamp applied cluster and namespace records with an HLC from `012` (`spacestorage_clocks`) instead of a local logical counter left at `physical_micros = 0` per FR-015 (partial)
+- [X] T067 Emit the `08` series `spacestorage_raft_leader_elections_total`, `spacestorage_raft_leader_election_errors_total`, and `spacestorage_raft_leader_election_duration_seconds` with `node` and `raft_group` labels from control-plane elections per FR-016 (partial)
+- [X] T068 Aggregate shared-datatype metrics in memory only on the namespace primary (`MetricsPush` each `cluster.raft.heartbeat`, stale after `2 * heartbeat`) and expose that merge on the namespace-primary scrape path; do not aggregate on the cluster primary or a leadership-lease holder per FR-013 (partial)
+- [X] T069 Consume `tenant_replica_excluded` in placement so `controller_exclusive_data` on excludes those voters from new tenant replicas and blocks while replicas remain (drain, never drop); default stays off per FR-019 (partial)
+- [X] T070 Run `RestorePlan` before node ready (open raft dirs and apply definitions), invoke the existing `013` content restore for persistent/hybrid, leave unreplicated memory content empty with a volatility notice, and refuse votes and new replica targets when the process is not a member per FR-009, FR-010 (partial)
+- [X] T071 Add conformance coverage for SC-001, SC-002, SC-003, SC-004, SC-005, SC-007, SC-008, and SC-011, plus SC-006 behind `controlplane-leases` and SC-009 / SC-010 behind `controlplane-ops` per plan: conformance harness (missing)
+- [X] T072 Add config validation tests that `raft-heartbeat-zero.conf`, `raft-election-timeout-le-heartbeat.conf`, and `exclusive-data-on-first-binary.conf` fail validate with exit code 2 per plan: config fixtures (partial)
+- [X] T073 Justify Kafka ingest records on `ClusterState` as an additive cluster-log payload or move them off the 006 membership and namespace stores without dropping live 009 ingest behavior per plan: cluster store (unrequested)

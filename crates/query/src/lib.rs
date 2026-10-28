@@ -35,7 +35,7 @@ pub use planner::{EngineKind, LogicalPlan, PhysicalPlan, Task};
 pub use record::{ExecutionRecord, ExecutionStage};
 pub use request::{AggFn, CopyFormat, JoinKind, LogicalRequest};
 pub use subscribe::{JobRegistry, JobState, SharedJobRegistry, Subscription};
-pub use txn::{SharedTxnRegistry, Transaction, TxnRegistry, TxnState};
+pub use txn::{CursorPortal, SharedTxnRegistry, Transaction, TxnRegistry, TxnState};
 
 /// Legacy stub surface kept for early unit tests.
 #[derive(Debug, Clone)]

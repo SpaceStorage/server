@@ -3,7 +3,8 @@
 use std::sync::{Arc, RwLock};
 
 use spacestorage_compat::{
-    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
+    classify_outcome, record_must_not, ClassifyOutcome, CompatError, DialectProfile, LimitServices,
+    PrincipalHold, ProtocolId,
 };
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
 use spacestorage_types::ContainerCatalog;
@@ -20,6 +21,10 @@ pub struct SessionState {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub namespace: String,
     pub profile: DialectProfile,
+    /// Native PREPARE id (hex) → CQL text.
+    pub prepared: std::collections::HashMap<String, String>,
+    pub limit_services: LimitServices,
+    pub principal_hold: Option<PrincipalHold>,
 }
 
 impl SessionState {
@@ -28,6 +33,9 @@ impl SessionState {
             catalog,
             namespace: "demo".into(),
             profile: DialectProfile::HandlersComplete,
+            prepared: std::collections::HashMap::new(),
+            limit_services: LimitServices::built_in(),
+            principal_hold: None,
         }
     }
 
@@ -143,10 +151,45 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> Cassan
         }
         "ALTER" => CassandraReply::Ok,
         "PREPARE" => {
-            let id = format!("prep-{}", args.first().unwrap_or(&"q"));
+            let cql = args.first().copied().unwrap_or("SELECT 1");
+            if let Err(e) = session.limit_services.limits().check_query_text(cql.len() as u64) {
+                return CassandraReply::Error {
+                    code: "limit_exceeded".into(),
+                    message: e.to_string(),
+                };
+            }
+            let id = format!("{:x}", {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut h = DefaultHasher::new();
+                cql.hash(&mut h);
+                h.finish()
+            });
+            session.prepared.insert(id.clone(), cql.to_string());
             CassandraReply::Prepared(id)
         }
-        "EXECUTE" | "QUERY" => {
+        "EXECUTE" => {
+            let id = args.first().copied().unwrap_or("");
+            let cql = match session.prepared.get(id) {
+                Some(s) => s.clone(),
+                None => {
+                    return CassandraReply::Error {
+                        code: "unprepared".into(),
+                        message: format!("unknown prepared id {id}"),
+                    };
+                }
+            };
+            // Re-dispatch prepared CQL through classify_cql path args.
+            if let Some((verb, pargs)) = crate::cql::classify_cql(&cql) {
+                let refs: Vec<&str> = pargs.iter().map(String::as_str).collect();
+                return dispatch(session, &verb, &refs);
+            }
+            CassandraReply::Error {
+                code: "invalid".into(),
+                message: format!("cannot execute prepared: {cql}"),
+            }
+        }
+        "QUERY" => {
             let table = args.first().copied().unwrap_or("t");
             let key = args.get(1).copied().unwrap_or("k");
             if let Err(e) = session.ensure_table(table) {
@@ -164,6 +207,19 @@ pub fn dispatch(session: &mut SessionState, verb: &str, args: &[&str]) -> Cassan
             let table = args.first().copied().unwrap_or("t");
             let key = args.get(1).copied().unwrap_or("k");
             let val = args.get(2).copied().unwrap_or("");
+            let limits = session.limit_services.limits();
+            if let Err(e) = limits.check_key(key.len() as u64) {
+                return CassandraReply::Error {
+                    code: "limit_exceeded".into(),
+                    message: e.to_string(),
+                };
+            }
+            if let Err(e) = limits.check_value(val.len() as u64) {
+                return CassandraReply::Error {
+                    code: "limit_exceeded".into(),
+                    message: e.to_string(),
+                };
+            }
             if let Err(e) = session.ensure_table(table) {
                 return e;
             }
@@ -282,6 +338,33 @@ mod tests {
         match dispatch(&mut s, "LWT", &[]) {
             CassandraReply::Error { code, .. } => assert_eq!(code, "compat_must_not"),
             other => panic!("expected refuse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_execute_must() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(cat);
+        assert!(matches!(
+            dispatch(&mut s, "CREATE", &["TABLE", "t"]),
+            CassandraReply::Ok
+        ));
+        assert!(matches!(
+            dispatch(&mut s, "INSERT", &["t", "1", "a"]),
+            CassandraReply::Ok
+        ));
+        let prep = dispatch(
+            &mut s,
+            "PREPARE",
+            &["SELECT v FROM t WHERE id='1'"],
+        );
+        let id = match prep {
+            CassandraReply::Prepared(id) => id,
+            other => panic!("prepare: {other:?}"),
+        };
+        match dispatch(&mut s, "EXECUTE", &[&id]) {
+            CassandraReply::Rows(r) => assert_eq!(r[0].1, "a"),
+            other => panic!("execute: {other:?}"),
         }
     }
 }

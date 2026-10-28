@@ -3,7 +3,7 @@
 use std::sync::{Arc, RwLock};
 
 use bytes::BytesMut;
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use spacestorage_protocol_core::{default_timeout, peek_signature, ProtocolFamily};
 use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -13,10 +13,11 @@ use tracing::debug;
 use crate::cql::classify_cql;
 use crate::dispatch::{CassandraReply, SessionState, dispatch};
 use crate::frame::{
-    encode_auth_success, encode_authenticate, encode_error, encode_protocol_error,
-    encode_ready, encode_rows_result, encode_supported, encode_void_result, parse_options,
-    parse_query_cql, parse_startup, read_bytes, try_decode_frame, OP_AUTH_RESPONSE,
-    OP_OPTIONS, OP_QUERY, OP_STARTUP, TYPE_VARCHAR, VERSION_V4,
+    encode_auth_success, encode_authenticate, encode_error, encode_prepared_result,
+    encode_protocol_error, encode_ready, encode_rows_result, encode_supported, encode_void_result,
+    parse_execute_id, parse_options, parse_prepare_cql, parse_query_cql, parse_startup, read_bytes,
+    try_decode_frame, OP_AUTH_RESPONSE, OP_EXECUTE, OP_OPTIONS, OP_PREPARE, OP_QUERY, OP_STARTUP,
+    TYPE_VARCHAR, VERSION_V4,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,16 +32,22 @@ pub struct CassandraHandler {
     pub namespace: String,
     pub expected_user: String,
     pub expected_pass: String,
+    pub limit_services: LimitServices,
 }
 
 impl CassandraHandler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
             expected_user: "demo".into(),
             expected_pass: "demo".into(),
+            limit_services,
         }
     }
 
@@ -64,6 +71,9 @@ impl CassandraHandler {
             catalog: Arc::clone(&self.catalog),
             namespace: self.namespace.clone(),
             profile: self.profile,
+            prepared: std::collections::HashMap::new(),
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
         let mut phase = ConnPhase::PreAuth;
         let mut wire_version = VERSION_V4;
@@ -180,6 +190,19 @@ fn handle_frame(
                     "Invalid credentials",
                 )]);
             }
+            if session.principal_hold.is_none() {
+                match session.limit_services.try_hold_principal(expected_user) {
+                    Ok(hold) => session.principal_hold = Some(hold),
+                    Err(e) => {
+                        return Ok(vec![encode_error(
+                            v,
+                            stream,
+                            0x1001, // CONFIG_ERROR / overloaded-style
+                            &e.to_string(),
+                        )]);
+                    }
+                }
+            }
             *phase = ConnPhase::Ready;
             Ok(vec![
                 encode_auth_success(v, stream),
@@ -188,6 +211,13 @@ fn handle_frame(
         }
         OP_QUERY if *phase == ConnPhase::Ready => {
             let cql = parse_query_cql(&frame.body).map_err(|e| e.to_string())?;
+            if let Err(e) = session
+                .limit_services
+                .limits()
+                .check_query_text(cql.len() as u64)
+            {
+                return Ok(vec![encode_error(v, stream, 0x2200, &e.to_string())]);
+            }
             let reply = if let Some((verb, args)) = classify_cql(&cql) {
                 let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
                 dispatch(session, &verb, &arg_refs)
@@ -199,7 +229,20 @@ fn handle_frame(
             };
             Ok(vec![reply_to_frame(v, stream, &reply)])
         }
-        OP_QUERY => Err("connection not ready".into()),
+        OP_PREPARE if *phase == ConnPhase::Ready => {
+            let cql = parse_prepare_cql(&frame.body).map_err(|e| e.to_string())?;
+            // Classify PREPARE as MUST, store CQL under id.
+            let reply = dispatch(session, "PREPARE", &[&cql]);
+            Ok(vec![reply_to_frame(v, stream, &reply)])
+        }
+        OP_EXECUTE if *phase == ConnPhase::Ready => {
+            let id = parse_execute_id(&frame.body).map_err(|e| e.to_string())?;
+            // Prepared id on the wire is the UTF-8 key stored at PREPARE time.
+            let id_str = String::from_utf8_lossy(&id).into_owned();
+            let reply = dispatch(session, "EXECUTE", &[&id_str]);
+            Ok(vec![reply_to_frame(v, stream, &reply)])
+        }
+        OP_QUERY | OP_PREPARE | OP_EXECUTE => Err("connection not ready".into()),
         _ => Err(format!("unsupported opcode 0x{:02x}", frame.opcode)),
     }
 }
@@ -218,7 +261,11 @@ fn check_sasl_plain(token: &[u8], user: &str, pass: &str) -> bool {
 
 fn reply_to_frame(version: u8, stream: i16, reply: &CassandraReply) -> Vec<u8> {
     match reply {
-        CassandraReply::Ok | CassandraReply::Prepared(_) => encode_void_result(version, stream),
+        CassandraReply::Ok => encode_void_result(version, stream),
+        CassandraReply::Prepared(id) => {
+            // Wire id as ASCII hex bytes (matches EXECUTE lookup).
+            encode_prepared_result(version, stream, id.as_bytes())
+        }
         CassandraReply::Rows(rows) => {
             let data: Vec<Vec<(&str, &str)>> = rows
                 .iter()

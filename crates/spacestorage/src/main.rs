@@ -60,38 +60,148 @@ fn main() -> ExitCode {
             eprintln!("jobs: GET /v1/jobs | wait | cancel (005 slice 8)");
             ExitCode::from(exit::USAGE)
         }
-        args::Command::Job { action, .. } => {
-            let svc = spacestorage_migrate::stub_service();
-            if !svc.slice10_enabled {
+        args::Command::Job { action, endpoint } => {
+            if !cfg!(feature = "migration-backup") {
+                let _ = spacestorage_migrate::stub_service();
                 eprintln!("MigrateSlice10Required: data_* jobs require slice 10");
                 return ExitCode::from(exit::SLICE10_REQUIRED);
             }
-            match action {
-                args::JobAction::List => {
-                    println!("{{\"jobs\":[]}}");
-                    ExitCode::from(exit::OK)
-                }
-                args::JobAction::Status { id }
-                | args::JobAction::Cancel { id }
-                | args::JobAction::Resume { id } => {
-                    eprintln!("job {id}: use admin-http /v1/jobs");
-                    ExitCode::from(exit::USAGE)
-                }
-            }
+            let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
+            let token = std::env::var("SPACESTORAGE_TOKEN").ok();
+            job_cli(&endpoint, token.as_deref(), action)
         }
-        args::Command::Migrate { .. }
-        | args::Command::Transform { .. }
-        | args::Command::Backup { .. }
-        | args::Command::Restore { .. } => {
-            if cfg!(feature = "migration-backup") {
-                eprintln!("use POST /v1/migrate|/v1/transform|/v1/backup|/v1/restore");
-                ExitCode::from(exit::USAGE)
-            } else {
+        args::Command::Migrate {
+            from,
+            to_node,
+            to_namespace,
+            name,
+            policy,
+            strategy,
+            endpoint,
+        } => {
+            if !cfg!(feature = "migration-backup") {
                 eprintln!(
                     "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
                 );
-                ExitCode::from(exit::SLICE10_REQUIRED)
+                return ExitCode::from(exit::SLICE10_REQUIRED);
             }
+            let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
+            let token = std::env::var("SPACESTORAGE_TOKEN").ok();
+            let (ns, container) = split_ns_container(&from);
+            let mut body = serde_json::json!({
+                "source": {"namespace": ns, "container": container},
+                "policy": policy,
+                "strategy": strategy,
+            });
+            if let Some(n) = to_node {
+                body["dest_nodes"] = serde_json::json!([n]);
+            }
+            if let Some(n) = to_namespace {
+                body["dest_namespace"] = serde_json::json!(n);
+            }
+            if let Some(n) = name {
+                body["dest_name"] = serde_json::json!(n);
+            }
+            post_job(&endpoint, token.as_deref(), "/v1/migrate", &body)
+        }
+        args::Command::Transform {
+            from,
+            rewrite,
+            to_type,
+            mapping_file,
+            swap,
+            no_swap,
+            retain_source,
+            endpoint,
+        } => {
+            if !cfg!(feature = "migration-backup") {
+                eprintln!(
+                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
+                );
+                return ExitCode::from(exit::SLICE10_REQUIRED);
+            }
+            let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
+            let token = std::env::var("SPACESTORAGE_TOKEN").ok();
+            let (ns, container) = split_ns_container(&from);
+            let mut body = serde_json::json!({
+                "source": {"namespace": ns, "container": container},
+                "rewrite": rewrite,
+                "swap": swap && !no_swap,
+                "retain_source": retain_source,
+                "source_type": "kv_store",
+            });
+            if let Some(t) = to_type {
+                body["target_type"] = serde_json::json!(t);
+            }
+            if let Some(path) = mapping_file {
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(q) => body["mapping_query"] = q,
+                        Err(e) => {
+                            eprintln!("mapping-file: {e}");
+                            return ExitCode::from(exit::CONFIG_INVALID);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("mapping-file: {e}");
+                        return ExitCode::from(exit::CONFIG_INVALID);
+                    }
+                }
+            }
+            post_job(&endpoint, token.as_deref(), "/v1/transform", &body)
+        }
+        args::Command::Backup {
+            namespace,
+            container,
+            pitr,
+            endpoint,
+        } => {
+            if !cfg!(feature = "migration-backup") {
+                eprintln!(
+                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
+                );
+                return ExitCode::from(exit::SLICE10_REQUIRED);
+            }
+            let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
+            let token = std::env::var("SPACESTORAGE_TOKEN").ok();
+            let scope = if let Some(c) = container {
+                let (ns, name) = split_ns_container(&c);
+                serde_json::json!({"namespace": ns, "container": name})
+            } else if let Some(ns) = namespace {
+                serde_json::json!({"name": ns})
+            } else {
+                eprintln!("backup: require --namespace or --container");
+                return ExitCode::from(exit::USAGE);
+            };
+            let body = serde_json::json!({ "scope": scope, "pitr": pitr });
+            post_job(&endpoint, token.as_deref(), "/v1/backup", &body)
+        }
+        args::Command::Restore {
+            snapshot,
+            pitr: _,
+            namespace,
+            key_ref,
+            endpoint,
+        } => {
+            if !cfg!(feature = "migration-backup") {
+                eprintln!(
+                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
+                );
+                return ExitCode::from(exit::SLICE10_REQUIRED);
+            }
+            let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
+            let token = std::env::var("SPACESTORAGE_TOKEN").ok();
+            let mut body = serde_json::json!({
+                "snapshot_id": snapshot,
+                "confirm_drop": true,
+            });
+            if let Some(ns) = namespace {
+                body["dest_namespace"] = serde_json::json!(ns);
+            }
+            if let Some(k) = key_ref {
+                body["key_ref"] = serde_json::json!(k);
+            }
+            post_job(&endpoint, token.as_deref(), "/v1/restore", &body)
         }
         args::Command::QueryStats { .. } => {
             eprintln!("query-stats: see /metrics query-processing series (008)");
@@ -174,6 +284,137 @@ fn main() -> ExitCode {
         args::Command::Kms { endpoint } => {
             println!("GET {endpoint}/v1/kms/status");
             ExitCode::from(exit::OK)
+        }
+        args::Command::Controllers { endpoint, voters } => match voters {
+            None => {
+                println!("POST {endpoint}/v1/admin op=controllers");
+                ExitCode::from(exit::OK)
+            }
+            Some(args::ControllersVoters::Replace { group, from, to }) => {
+                println!(
+                    "POST {endpoint}/v1/admin op=voter_replace group={group} from={from} to={to}"
+                );
+                ExitCode::from(exit::OK)
+            }
+            Some(args::ControllersVoters::Grow { group, add }) => {
+                println!(
+                    "POST {endpoint}/v1/admin op=voter_grow group={group} add={add:?}"
+                );
+                ExitCode::from(exit::OK)
+            }
+            Some(args::ControllersVoters::Shrink { group, remove }) => {
+                println!(
+                    "POST {endpoint}/v1/admin op=voter_shrink group={group} remove={remove:?}"
+                );
+                ExitCode::from(exit::OK)
+            }
+        },
+        args::Command::RaftStatus { group, endpoint } => {
+            println!("POST {endpoint}/v1/admin op=raft_status group={group}");
+            ExitCode::from(exit::OK)
+        }
+    }
+}
+
+fn split_ns_container(s: &str) -> (String, String) {
+    match s.split_once('.') {
+        Some((ns, c)) => (ns.to_string(), c.to_string()),
+        None => ("default".into(), s.to_string()),
+    }
+}
+
+fn print_http_job(r: http_client::HttpResponse) -> ExitCode {
+    match r.status {
+        200 | 202 => {
+            print!("{}", r.body);
+            if !r.body.ends_with('\n') {
+                println!();
+            }
+            ExitCode::from(exit::OK)
+        }
+        401 | 403 => {
+            eprintln!("{}", r.body);
+            ExitCode::from(exit::UNAUTHORIZED)
+        }
+        422 | 409 | 404 => {
+            eprintln!("{}", r.body);
+            ExitCode::from(exit::CONFIG_INVALID)
+        }
+        501 => {
+            eprintln!("{}", r.body);
+            ExitCode::from(exit::SLICE10_REQUIRED)
+        }
+        other => {
+            eprintln!("HTTP {other}: {}", r.body);
+            ExitCode::from(exit::CONNECT)
+        }
+    }
+}
+
+fn post_job(
+    endpoint: &str,
+    token: Option<&str>,
+    path: &str,
+    body: &serde_json::Value,
+) -> ExitCode {
+    let payload = body.to_string();
+    match http_client::request("POST", endpoint, path, token, Some(&payload)) {
+        Ok(r) => print_http_job(r),
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::from(exit::CONNECT)
+        }
+    }
+}
+
+fn job_cli(endpoint: &str, token: Option<&str>, action: args::JobAction) -> ExitCode {
+    match action {
+        args::JobAction::List => match http_client::request("GET", endpoint, "/v1/jobs", token, None)
+        {
+            Ok(r) => print_http_job(r),
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(exit::CONNECT)
+            }
+        },
+        args::JobAction::Status { id } => {
+            match http_client::request("GET", endpoint, &format!("/v1/jobs/{id}"), token, None) {
+                Ok(r) => print_http_job(r),
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
+            }
+        }
+        args::JobAction::Cancel { id } => {
+            match http_client::request(
+                "POST",
+                endpoint,
+                &format!("/v1/jobs/{id}/cancel"),
+                token,
+                None,
+            ) {
+                Ok(r) => print_http_job(r),
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
+            }
+        }
+        args::JobAction::Resume { id } => {
+            match http_client::request(
+                "POST",
+                endpoint,
+                &format!("/v1/jobs/{id}/resume"),
+                token,
+                None,
+            ) {
+                Ok(r) => print_http_job(r),
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
+            }
         }
     }
 }

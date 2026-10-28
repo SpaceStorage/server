@@ -21,7 +21,8 @@
 //! ```
 //!
 //! Redis: `classify_outcome(profile, ProtocolId::Redis, "GET")`.
-//! Size / connections: [`Limits::check_value`], [`SessionCounters::try_accept_entrypoint`].
+//! Size / connections: [`Limits::check_value`], [`SessionCounters::try_accept_entrypoint`],
+//! [`LimitServices::try_hold_principal`] after AUTH.
 //! Concurrent queries: [`SessionCounters::try_admit_query`] (never hangs; spill ≠ slot).
 //!
 //! FirstBinary has **no** Elasticsearch/Cassandra/ClickHouse/S3/WebDAV handlers —
@@ -48,10 +49,10 @@ pub use isolation::{
 };
 pub use limits::{
     check_size, AdmissionGuard, AdmissionPolicy, ByteCount, EffectiveLimits, LimitKind,
-    LimitProvenance, Limits, SessionCounters, SpillMode, DEFAULT_MAX_CONNECTIONS_PER_ENTRYPOINT,
-    DEFAULT_MAX_CONNECTIONS_PER_PRINCIPAL, DEFAULT_MAX_CONCURRENT_PER_NAMESPACE,
-    DEFAULT_MAX_CONCURRENT_PER_NODE, DEFAULT_MAX_KEY, DEFAULT_MAX_QUERY_MEMORY,
-    DEFAULT_MAX_QUERY_TEXT, DEFAULT_MAX_RESULT, DEFAULT_MAX_VALUE,
+    LimitProvenance, LimitServices, Limits, PrincipalHold, SessionCounters, SpillMode,
+    DEFAULT_MAX_CONNECTIONS_PER_ENTRYPOINT, DEFAULT_MAX_CONNECTIONS_PER_PRINCIPAL,
+    DEFAULT_MAX_CONCURRENT_PER_NAMESPACE, DEFAULT_MAX_CONCURRENT_PER_NODE, DEFAULT_MAX_KEY,
+    DEFAULT_MAX_QUERY_MEMORY, DEFAULT_MAX_QUERY_TEXT, DEFAULT_MAX_RESULT, DEFAULT_MAX_VALUE,
 };
 pub use matrix::{
     classify, classify_outcome, classify_pg_copy, classify_pg_cursor, classify_pg_verb,

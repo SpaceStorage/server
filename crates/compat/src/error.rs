@@ -101,7 +101,10 @@ impl fmt::Display for CompatError {
             }
             Self::SerializableNongoal => write!(f, "serializable_nongoal"),
             Self::SnapshotUnsupported { type_name } => {
-                write!(f, "snapshot_unsupported{{type:{type_name}}}")
+                write!(
+                    f,
+                    "snapshot_unsupported{{type:{type_name}}}; allowed: READ COMMITTED, SNAPSHOT"
+                )
             }
             Self::LimitExceeded {
                 limit,

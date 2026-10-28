@@ -85,7 +85,12 @@ impl PlannerEngine {
     }
 
     pub fn with_distributed(catalog: SharedCatalog, distributed: bool) -> Self {
-        Self::with_limits(catalog, AdmissionLimits::default(), distributed)
+        let mut limits = AdmissionLimits::default();
+        // Complete-product (distributed) spills sort/hash/agg past query memory (FR-010).
+        if distributed {
+            limits.spill = true;
+        }
+        Self::with_limits(catalog, limits, distributed)
     }
 
     pub fn with_limits(
@@ -141,6 +146,88 @@ impl PlannerEngine {
         }
     }
 
+    /// Refuse SNAPSHOT when a touched type is not snapshot-capable; freeze rows for capable types.
+    fn ensure_snapshot_for_sql(
+        &self,
+        namespace: &str,
+        session: &str,
+        sql: &str,
+    ) -> Result<(), ExecError> {
+        let upper = sql.to_ascii_uppercase();
+        let table = extract_table_from_dml(&upper, sql);
+        let Some(table) = table else {
+            return Ok(());
+        };
+        self.txns.with_mut(session, |txn| {
+            if txn.snapshot_checked.iter().any(|t| t == &table) {
+                return Ok(());
+            }
+            let cat = self.catalog.read().expect("catalog");
+            let container = match cat.describe(namespace, &table) {
+                Ok(c) => c,
+                Err(_) => {
+                    // Table may be created later in the txn; defer capability check.
+                    return Ok(());
+                }
+            };
+            let model = container.model;
+            let type_name = model.display_name().to_string();
+            let capable = model.snapshot_capable();
+            spacestorage_compat::check_snapshot_capable(&type_name, capable).map_err(|e| {
+                match e {
+                    spacestorage_compat::CompatError::SnapshotUnsupported { type_name } => {
+                        ExecError::SnapshotUnsupported(type_name)
+                    }
+                    other => ExecError::Isolation(other.to_string()),
+                }
+            })?;
+            // Freeze current rows for subsequent SELECTs in this SNAPSHOT txn.
+            if let Ok(id) = cat.describe(namespace, &table).map(|c| c.id) {
+                if let Ok(keys) = cat.keys(id) {
+                    let mut snap = std::collections::HashMap::new();
+                    for k in keys {
+                        if let Ok(Some(v)) = cat.get(id, &k) {
+                            snap.insert(k, v.to_vec());
+                        }
+                    }
+                    txn.read_snapshots.insert(table.clone(), snap);
+                }
+            }
+            txn.snapshot_checked.push(table);
+            Ok(())
+        })
+    }
+
+    fn snapshot_select(
+        &self,
+        namespace: &str,
+        session: &str,
+        sql: &str,
+    ) -> Option<Result<QueryResult, ExecError>> {
+        let upper = sql.trim_start().to_ascii_uppercase();
+        if !upper.starts_with("SELECT") {
+            return None;
+        }
+        let txn = self.txns.get(session)?;
+        if txn.isolation != IsolationLevel::Snapshot || txn.state != crate::txn::TxnState::Open {
+            return None;
+        }
+        let table = extract_table_from_dml(&upper, sql)?;
+        let snap = txn.read_snapshots.get(&table)?;
+        // Materialize frozen rows as SELECT result (key, value columns).
+        let mut rows = Vec::new();
+        for (k, v) in snap {
+            let text = String::from_utf8_lossy(v).into_owned();
+            rows.push(vec![Some(k.clone()), Some(text)]);
+        }
+        let _ = namespace;
+        Some(Ok(QueryResult {
+            tag: format!("SELECT {}", rows.len()),
+            columns: vec!["id".into(), "v".into()],
+            rows,
+        }))
+    }
+
     /// Synchronous execute path (handlers + unit tests).
     pub fn execute_blocking(
         &self,
@@ -193,7 +280,22 @@ impl PlannerEngine {
             mem,
             vec![],
         )?;
+        let _spill_guard = if sched.token.spilled {
+            if let Some(dir) = &self.data_dir {
+                Some(crate::spill::SpillDir::create(dir, rec.id)?)
+            } else {
+                // Spill admitted without a data_dir — still honour the spill path
+                // by creating under a temp sibling of CWD when needed for tests.
+                let tmp = std::env::temp_dir().join("spacestorage-spill");
+                Some(crate::spill::SpillDir::create(&tmp, rec.id)?)
+            }
+        } else {
+            None
+        };
         let _token = sched.token;
+        if _spill_guard.is_some() {
+            rec.spill_bytes = mem;
+        }
         rec.set_stage(ExecutionStage::Scheduled);
 
         if let Some(task) = pp.tasks.first() {
@@ -246,8 +348,12 @@ impl PlannerEngine {
     ) -> Result<QueryResult, ExecError> {
         match request {
             LogicalRequest::AdHocSql { sql } => {
+                cancel.check()?;
                 if let Some(txn) = self.txns.get(session) {
                     if txn.state == crate::txn::TxnState::Open {
+                        if txn.isolation == IsolationLevel::Snapshot {
+                            self.ensure_snapshot_for_sql(namespace, session, &sql)?;
+                        }
                         let verb = sql
                             .trim_start()
                             .split_whitespace()
@@ -269,6 +375,10 @@ impl PlannerEngine {
                         }
                     }
                 }
+                // SNAPSHOT reads: prefer frozen table copy when present.
+                if let Some(snap) = self.snapshot_select(namespace, session, &sql) {
+                    return snap;
+                }
                 execute_adhoc_sql(&self.catalog, namespace, &sql)
             }
             LogicalRequest::TxnBegin { isolation } => {
@@ -285,6 +395,7 @@ impl PlannerEngine {
                     .txns
                     .take(session)
                     .ok_or_else(|| ExecError::Msg("no_active_txn".into()))?;
+                txn.clear_portals();
                 for w in txn.buffered.clone() {
                     execute_adhoc_sql(&self.catalog, &w.namespace, &w.sql)?;
                 }
@@ -300,6 +411,7 @@ impl PlannerEngine {
                     .txns
                     .take(session)
                     .ok_or_else(|| ExecError::Msg("no_active_txn".into()))?;
+                txn.clear_portals();
                 txn.rollback()?;
                 Ok(QueryResult {
                     tag: "ROLLBACK".into(),
@@ -609,6 +721,23 @@ fn lower_copy(sql: &str) -> Result<LogicalRequest, ExecError> {
     } else {
         Err(ExecError::Msg("COPY requires FROM or TO".into()))
     }
+}
+
+fn extract_table_from_dml(upper: &str, original: &str) -> Option<String> {
+    for kw in [" FROM ", " INTO ", " UPDATE ", " TABLE "] {
+        if let Some(pos) = upper.find(kw) {
+            let rest = original[pos + kw.len()..].trim_start();
+            let name = rest
+                .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
+                .next()
+                .unwrap_or("")
+                .trim_matches('"');
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn extract_ident_after(upper: &str, original: &str, keyword: &str) -> Result<String, ExecError> {

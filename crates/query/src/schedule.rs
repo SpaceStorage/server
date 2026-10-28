@@ -3,7 +3,7 @@
 use crate::admission::{AdmissionController, AdmissionToken};
 use crate::error::ExecError;
 use crate::options::Concurrency;
-use crate::planner::PhysicalPlan;
+use crate::planner::{plan_is_spillable, PhysicalPlan};
 use crate::rank::{rank_nodes, RankKey};
 
 pub struct ScheduleOutcome {
@@ -20,7 +20,8 @@ pub fn schedule(
     memory_estimate: u64,
     rank_inputs: Vec<(String, RankKey)>,
 ) -> Result<ScheduleOutcome, ExecError> {
-    let token = admission.try_acquire(namespace, memory_estimate)?;
+    let spillable = plan_is_spillable(plan);
+    let token = admission.try_acquire_spillable(namespace, memory_estimate, spillable)?;
     let remaining_slots = admission
         .limits()
         .max_concurrent_per_node

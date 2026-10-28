@@ -30,6 +30,14 @@ pub fn finest_ladder_key(ladder: &[String]) -> Option<&str> {
     ladder.first().map(|s| s.as_str())
 }
 
+/// Refuse changing a container's fixed sharding / anti-affinity key in place (010 FR-004).
+/// Callers that would mutate `anti_affinity_keys` on live data MUST use a transform job.
+pub fn refuse_fixed_sharding_key_change(container: impl Into<String>) -> PlacementError {
+    PlacementError::FixedShardingKeyChange {
+        container: container.into(),
+    }
+}
+
 /// Resolve anti-affinity keys: explicit list wins; else RF≥2 → finest ladder key.
 pub fn resolve_anti_affinity_keys(
     replication_factor: u32,
@@ -94,6 +102,10 @@ pub fn plan_replicas(req: &PlanRequest) -> Result<PlacementPlan, PlacementError>
         if targets.len() as u32 >= req.replication_factor {
             break;
         }
+        // T069 / FR-019: controller_exclusive_data → no_tenant_data excludes voters.
+        if node.no_tenant_data {
+            continue;
+        }
         let mut ok = true;
         for k in &keys {
             let Some(val) = node.labels.get(k) else {
@@ -142,6 +154,7 @@ mod tests {
             name: name.into(),
             labels: BTreeMap::from([("az".into(), az.into())]),
             quorum_domain: "lab".into(),
+            no_tenant_data: false,
         }
     }
 
@@ -153,7 +166,25 @@ mod tests {
                 ("az".into(), az.into()),
             ]),
             quorum_domain: "lab".into(),
+            no_tenant_data: false,
         }
+    }
+
+    #[test]
+    fn exclusive_data_excludes_no_tenant_nodes() {
+        let mut a = node("a", "1");
+        a.no_tenant_data = true;
+        let b = node("b", "2");
+        let c = node("c", "3");
+        let plan = plan_replicas(&PlanRequest {
+            container: "t".into(),
+            replication_factor: 2,
+            anti_affinity_keys: vec!["az".into()],
+            topology_ladder: vec!["az".into()],
+            candidates: vec![a, b, c],
+        })
+        .unwrap();
+        assert_eq!(plan.targets, vec!["b".to_string(), "c".to_string()]);
     }
 
     #[test]

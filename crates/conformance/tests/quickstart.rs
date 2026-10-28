@@ -183,9 +183,10 @@ async fn quickstart_full_v1_three_node_raft_and_l0() {
         let addr = listener.local_addr().unwrap();
         let dial = format!("{}:{}", addr.ip(), addr.port());
         let id = Uuid::now_v7();
-        let raft = start_raft_peered_with_secret(id, Arc::clone(&registry), Arc::clone(&secret))
-            .await
-            .unwrap();
+        let raft =
+            start_raft_peered_with_secret(id, Arc::clone(&registry), Arc::clone(&secret), None)
+                .await
+                .unwrap();
         registry.register(id, raft.clone());
         let handler = Arc::new(RegistryRaftHandler {
             registry: Arc::clone(&registry),

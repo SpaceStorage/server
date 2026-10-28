@@ -3,8 +3,8 @@
 #![cfg(feature = "migration-backup")]
 
 use spacestorage_migrate::{
-    resolve_mapping, AuthzContext, ContainerRef, JobKind, JobService, RewriteKind, Strategy,
-    TransformSpec,
+    resolve_mapping, AuthzContext, ContainerRef, JobKind, JobService, QuotaView, RewriteKind,
+    Strategy, TransformSpec,
 };
 use spacestorage_storage::{ContentStore, StorageMode};
 use std::collections::HashMap;
@@ -61,9 +61,21 @@ fn five_rewrite_kinds_run() {
             )
             .unwrap();
         let done = runner
-            .run(job, &spec, source_id, &rows, 1, &mut names, &mut content)
+            .run(
+                job,
+                &spec,
+                source_id,
+                &rows,
+                1,
+                &mut names,
+                &mut content,
+                QuotaView::default(),
+                2,
+            )
             .unwrap();
         assert_eq!(done.status, spacestorage_migrate::JobStatus::Completed);
+        // T078: runner leaves the dual-write window registered for catalog publish.
+        let _ = svc.dual.unregister(source_id);
     }
 }
 

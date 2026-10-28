@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use bytes::BytesMut;
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use spacestorage_protocol_core::{
     default_timeout, parse_http_request_line, peek_signature, split_target, ProtocolFamily,
 };
@@ -20,14 +20,20 @@ pub struct S3Handler {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub profile: DialectProfile,
     pub namespace: String,
+    pub limit_services: LimitServices,
 }
 
 impl S3Handler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
+            limit_services,
         }
     }
 
@@ -49,6 +55,8 @@ impl S3Handler {
             namespace: self.namespace.clone(),
             profile: self.profile,
             multipart: Default::default(),
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
 
         let mut buf = BytesMut::from(peeked.as_slice());
@@ -189,9 +197,10 @@ fn header_pairs(headers: &[(String, String)]) -> Vec<(&str, &str)> {
 }
 
 /// Smoke-only bypass: `x-spacestorage-demo-auth: demo` skips SigV4 (real verify in `sigv4`).
-fn authenticate(req: &ParsedHttpRequest) -> Result<(), (String, String)> {
+/// Returns principal id (access key / demo) for connection-cap accounting.
+fn authenticate(req: &ParsedHttpRequest) -> Result<String, (String, String)> {
     if header_lookup(&req.headers, "x-spacestorage-demo-auth") == Some("demo") {
-        return Ok(());
+        return Ok("demo".into());
     }
     let authorization = header_lookup(&req.headers, "authorization")
         .ok_or(("AccessDenied".into(), "Missing Authorization".into()))?;
@@ -219,7 +228,10 @@ fn authenticate(req: &ParsedHttpRequest) -> Result<(), (String, String)> {
         };
         return Err((code, msg));
     }
-    Ok(())
+    let access_key = crate::sigv4::parse_authorization(authorization)
+        .map(|a| a.access_key)
+        .unwrap_or_else(|_| "s3".into());
+    Ok(access_key)
 }
 
 fn parse_query(q: &str) -> HashMap<String, String> {
@@ -244,8 +256,20 @@ fn split_bucket_key(path: &str) -> (Option<String>, Option<String>) {
 }
 
 fn handle_http(session: &mut SessionState, req: &ParsedHttpRequest) -> S3Reply {
-    if let Err((code, message)) = authenticate(req) {
-        return S3Reply::Error { code, message };
+    let principal = match authenticate(req) {
+        Ok(p) => p,
+        Err((code, message)) => return S3Reply::Error { code, message },
+    };
+    if session.principal_hold.is_none() {
+        match session.limit_services.try_hold_principal(&principal) {
+            Ok(hold) => session.principal_hold = Some(hold),
+            Err(e) => {
+                return S3Reply::Error {
+                    code: "SlowDown".into(),
+                    message: e.to_string(),
+                };
+            }
+        }
     }
 
     let (bucket, key) = split_bucket_key(&req.path);
@@ -421,6 +445,7 @@ mod tests {
                             catalog: Arc::clone(&handler.catalog),
                             profile: handler.profile,
                             namespace: handler.namespace.clone(),
+                            limit_services: handler.limit_services.clone(),
                         };
                         let c = cancel.child_token();
                         tokio::spawn(async move { h.serve(sock, c).await });

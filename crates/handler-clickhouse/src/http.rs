@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use bytes::BytesMut;
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use spacestorage_protocol_core::{
     default_timeout, parse_http_request_line, peek_signature, split_target, ProtocolFamily,
 };
@@ -19,14 +19,20 @@ pub struct ClickHouseHttpHandler {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub profile: DialectProfile,
     pub namespace: String,
+    pub limit_services: LimitServices,
 }
 
 impl ClickHouseHttpHandler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
+            limit_services,
         }
     }
 
@@ -54,6 +60,8 @@ impl ClickHouseHttpHandler {
             namespace: self.namespace.clone(),
             profile: self.profile,
             protocol: spacestorage_compat::ProtocolId::ClickHouseHttp,
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
 
         let mut buf = BytesMut::from(peeked.as_slice());
@@ -64,14 +72,27 @@ impl ClickHouseHttpHandler {
                     match req {
                         Ok(None) => break,
                         Ok(Some(req)) => {
-                            if let Err(status) = authenticate(&req.headers) {
-                                if write_http(&mut stream, status, "Code: 516. AUTHENTICATION_FAILED\n")
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
+                            let principal = match authenticate(&req.headers) {
+                                Ok(p) => p,
+                                Err(status) => {
+                                    if write_http(&mut stream, status, "Code: 516. AUTHENTICATION_FAILED\n")
+                                        .await
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                    continue;
                                 }
-                                continue;
+                            };
+                            if session.principal_hold.is_none() {
+                                match session.limit_services.try_hold_principal(&principal) {
+                                    Ok(hold) => session.principal_hold = Some(hold),
+                                    Err(e) => {
+                                        let body = format!("Code: 241. {e}\n");
+                                        let _ = write_http(&mut stream, 429, &body).await;
+                                        break;
+                                    }
+                                }
                             }
                             let sql = resolve_sql(&req);
                             let reply = execute_sql(&mut session, &sql);
@@ -96,7 +117,8 @@ struct HttpReq {
     body: Vec<u8>,
 }
 
-fn authenticate(headers: &HashMap<String, String>) -> Result<(), u16> {
+/// Returns principal id for connection accounting.
+fn authenticate(headers: &HashMap<String, String>) -> Result<String, u16> {
     // Optional Basic; also accept query user/password via resolve path.
     // Missing auth is allowed for smoke if X-ClickHouse-User is absent — require Basic when present.
     if let Some(auth) = headers.get("authorization") {
@@ -106,13 +128,13 @@ fn authenticate(headers: &HashMap<String, String>) -> Result<(), u16> {
             let u = parts.next().unwrap_or("");
             let p = parts.next().unwrap_or("");
             if u == "demo" && p == "demo" {
-                return Ok(());
+                return Ok(u.to_string());
             }
             return Err(403);
         }
     }
     // No Authorization → allow demo smoke (CH HTTP often uses ?user=&password=).
-    Ok(())
+    Ok("demo".into())
 }
 
 fn decode_basic(b64: &str) -> Option<String> {

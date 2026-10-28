@@ -57,7 +57,7 @@ pub struct SnapshotMeta {
 pub struct RaftStore {
     pub group: GroupId,
     dir: PathBuf,
-    records: Vec<RaftLogRecord>,
+    pub records: Vec<RaftLogRecord>,
     pub snapshot: Option<SnapshotMeta>,
     pub current_term: u64,
     pub voted_for: Option<Uuid>,

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use spacestorage_protocol_core::{
     default_timeout, peek_signature, ProtocolFamily, MismatchRefusal,
 };
@@ -18,14 +18,20 @@ pub struct ElasticsearchHandler {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub profile: DialectProfile,
     pub namespace: String,
+    pub limit_services: LimitServices,
 }
 
 impl ElasticsearchHandler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
+            limit_services,
         }
     }
 
@@ -53,6 +59,8 @@ impl ElasticsearchHandler {
             catalog: Arc::clone(&self.catalog),
             namespace: self.namespace.clone(),
             profile: self.profile,
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
 
         loop {
@@ -62,9 +70,29 @@ impl ElasticsearchHandler {
                     match read {
                         Ok(Some(req)) => {
                             let reply = match authenticate(&req.headers) {
-                                Ok(ns) => {
-                                    session.namespace = ns;
-                                    router::route(&mut session, &req)
+                                Ok((user, ns)) => {
+                                    if session.principal_hold.is_none() {
+                                        match session.limit_services.try_hold_principal(&user) {
+                                            Ok(hold) => {
+                                                session.principal_hold = Some(hold);
+                                                session.namespace = ns;
+                                                router::route(&mut session, &req)
+                                            }
+                                            Err(e) => EsReply::Error {
+                                                status: 429,
+                                                body: serde_json::json!({
+                                                    "error": {
+                                                        "type": "limit_exceeded",
+                                                        "reason": e.to_string()
+                                                    },
+                                                    "status": 429
+                                                }),
+                                            },
+                                        }
+                                    } else {
+                                        session.namespace = ns;
+                                        router::route(&mut session, &req)
+                                    }
                                 }
                                 Err(r) => r,
                             };
@@ -127,7 +155,8 @@ async fn read_http_request<R: AsyncRead + Unpin>(
     }
 }
 
-fn authenticate(headers: &HashMap<String, String>) -> Result<String, EsReply> {
+/// Returns `(principal_id, namespace)` on success.
+fn authenticate(headers: &HashMap<String, String>) -> Result<(String, String), EsReply> {
     let auth = headers
         .get("authorization")
         .ok_or_else(security_unauthorized)?;
@@ -140,7 +169,7 @@ fn authenticate(headers: &HashMap<String, String>) -> Result<String, EsReply> {
         String::from_utf8(decoded).map_err(|_| security_unauthorized())?;
     let (user, secret) = creds.split_once(':').ok_or_else(security_unauthorized)?;
     if user == "demo" && secret == "demo" {
-        Ok("demo".into())
+        Ok((user.to_string(), "demo".into()))
     } else {
         Err(security_unauthorized())
     }

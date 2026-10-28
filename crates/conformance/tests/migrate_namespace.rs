@@ -61,6 +61,7 @@ fn copy_leaves_source_move_drops() {
     assert_eq!(done.status, JobStatus::Completed);
     assert!(names.contains_key(&("acme".into(), "t".into())));
     assert!(names.contains_key(&("beta".into(), "t".into())));
+    let _ = svc.dual.unregister(source_id);
 
     let source2 = Uuid::now_v7();
     names.insert(("acme".into(), "t2".into()), source2);
@@ -88,6 +89,10 @@ fn copy_leaves_source_move_drops() {
         )
         .unwrap();
     assert_eq!(content.len(source2), 0);
+    // Move cutover drops the source name (reusable) — T062.
+    assert!(!names.contains_key(&("acme".into(), "t2".into())));
+    assert!(names.contains_key(&("beta".into(), "t2".into())));
+    let _ = svc.dual.unregister(source2);
 }
 
 #[test]

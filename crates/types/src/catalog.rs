@@ -89,6 +89,8 @@ pub struct ContainerCatalog {
     durable_put: Option<DurablePutHook>,
     /// Optional durable create (catalog definitions.jsonl).
     durable_create: Option<DurableCreateHook>,
+    /// Optional 010 dual-write interceptor on the coordinating write path.
+    write_interceptor: Option<WriteInterceptorHook>,
 }
 
 /// Sync hook invoked after an in-memory put for durable modes (013 residual).
@@ -98,6 +100,13 @@ pub type DurablePutHook =
 /// Sync hook invoked after container create for Persistent/Hybrid (definitions persist).
 pub type DurableCreateHook = Arc<
     dyn Fn(ContainerId, &str, &str, L3Model, StorageModeChoice) -> Result<(), String> + Send + Sync,
+>;
+
+/// Coordinating write-path interceptor (010 dual-write). Called after the local row is
+/// staged with `&mut Catalog` so the hook can mirror onto the target without re-locking;
+/// `Err` rolls the source put back so the client is not acked.
+pub type WriteInterceptorHook = Arc<
+    dyn Fn(&mut ContainerCatalog, ContainerId, &str, &[u8]) -> Result<(), String> + Send + Sync,
 >;
 
 impl Default for ContainerCatalog {
@@ -114,6 +123,7 @@ impl ContainerCatalog {
             rows: HashMap::new(),
             durable_put: None,
             durable_create: None,
+            write_interceptor: None,
         }
     }
 
@@ -124,6 +134,10 @@ impl ContainerCatalog {
     ) {
         self.durable_put = put;
         self.durable_create = create;
+    }
+
+    pub fn set_write_interceptor(&mut self, hook: Option<WriteInterceptorHook>) {
+        self.write_interceptor = hook;
     }
 
     /// Create via `validate_definition` + `TypeCatalog` lookup (FR-016).
@@ -231,10 +245,13 @@ impl ContainerCatalog {
         mode: Option<StorageModeChoice>,
     ) -> Result<(), TypeError> {
         let key = (namespace.into(), name.into());
-        let c = self
-            .containers
-            .get_mut(&key)
-            .ok_or(TypeError::NotFound)?;
+        let (id, prev_mode, prev_schema, prev_model) = {
+            let c = self
+                .containers
+                .get(&key)
+                .ok_or(TypeError::NotFound)?;
+            (c.id, c.mode, c.schema.clone(), c.model)
+        };
 
         if let Some(tn) = new_type {
             let requested = self
@@ -242,21 +259,42 @@ impl ContainerCatalog {
                 .resolve(tn)
                 .and_then(|d| L3Model::parse(&d.name))
                 .or_else(|| L3Model::parse(tn));
-            if requested.map(|m| m != c.model).unwrap_or(true) {
+            if requested.map(|m| m != prev_model).unwrap_or(true) {
                 return Err(TypeError::TypeImmutable);
             }
         }
 
-        if let Some(next_schema) = schema {
-            validate_schema_alter(c.schema.as_ref(), &next_schema)?;
-            c.schema = Some(next_schema);
+        if let Some(ref next_schema) = schema {
+            validate_schema_alter(prev_schema.as_ref(), next_schema)?;
         }
 
+        if let Some(m) = mode {
+            if m != prev_mode {
+                let has_rows = self.rows.get(&id).map(|r| !r.is_empty()).unwrap_or(false);
+                if has_rows {
+                    // Mode flip on existing rows = in-place codec/storage rewrite (FR-004).
+                    return Err(crate::validate::refuse_inplace_codec_rewrite());
+                }
+            }
+        }
+
+        let c = self
+            .containers
+            .get_mut(&key)
+            .ok_or(TypeError::NotFound)?;
+        if let Some(next_schema) = schema {
+            c.schema = Some(next_schema);
+        }
         if let Some(m) = mode {
             c.mode = m;
         }
 
         Ok(())
+    }
+
+    /// Explicit refuse for in-place key rewrite of existing data (FR-004 / 010).
+    pub fn refuse_inplace_key_change(&self) -> TypeError {
+        crate::validate::refuse_inplace_key_rewrite()
     }
 
     pub fn describe(
@@ -276,7 +314,83 @@ impl ContainerCatalog {
         Ok(())
     }
 
+    /// Remove a public name binding without deleting the container's rows (010 T078 retain_source).
+    pub fn unbind_name(&mut self, namespace: &str, name: &str) -> Result<ContainerId, TypeError> {
+        let key = (namespace.into(), name.into());
+        let c = self.containers.remove(&key).ok_or(TypeError::NotFound)?;
+        Ok(c.id)
+    }
+
+    /// Rebind a container to a new public name in the same namespace; rows stay on the id.
+    pub fn rename_container(
+        &mut self,
+        namespace: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), TypeError> {
+        let from_key = (namespace.into(), from.into());
+        let to_key = (namespace.into(), to.into());
+        if self.containers.contains_key(&to_key) {
+            return Err(TypeError::AlreadyExists);
+        }
+        let mut c = self
+            .containers
+            .remove(&from_key)
+            .ok_or(TypeError::NotFound)?;
+        c.name = ContainerName::new(to);
+        self.containers.insert(to_key, c);
+        Ok(())
+    }
+
     pub fn put(&mut self, id: ContainerId, key: &str, value: Vec<u8>) -> Result<(), TypeError> {
+        let mode = self
+            .containers
+            .values()
+            .find(|c| c.id == id)
+            .map(|c| c.mode)
+            .ok_or(TypeError::NotFound)?;
+        if !self.rows.contains_key(&id) {
+            return Err(TypeError::NotFound);
+        }
+        let prev = self.rows.get(&id).and_then(|m| m.get(key).cloned());
+        if !matches!(mode, StorageModeChoice::Memory) {
+            if let Some(hook) = &self.durable_put {
+                hook(id, mode, key, &value).map_err(TypeError::Msg)?;
+            }
+        }
+        let map = self.rows.get_mut(&id).ok_or(TypeError::NotFound)?;
+        map.insert(key.into(), value.clone());
+        // Dual-write: counted source ack waits for mapped target apply (010 R4).
+        // Temporarily take the hook so it can call `put_mirrored` on `&mut self`.
+        let hook = self.write_interceptor.take();
+        let intercept = match &hook {
+            Some(h) => h(self, id, key, &value),
+            None => Ok(()),
+        };
+        self.write_interceptor = hook;
+        if let Err(e) = intercept {
+            let map = self.rows.get_mut(&id).ok_or(TypeError::NotFound)?;
+            match prev {
+                Some(old) => {
+                    map.insert(key.into(), old);
+                }
+                None => {
+                    map.remove(key);
+                }
+            }
+            return Err(TypeError::Msg(e));
+        }
+        Ok(())
+    }
+
+    /// Apply a mirrored dual-write put without re-entering the write interceptor.
+    /// Runs the durable put hook (WAL / write-quorum wait) for Persistent/Hybrid.
+    pub fn put_mirrored(
+        &mut self,
+        id: ContainerId,
+        key: &str,
+        value: Vec<u8>,
+    ) -> Result<(), TypeError> {
         let mode = self
             .containers
             .values()
@@ -412,6 +526,7 @@ mod tests {
             rows: HashMap::new(),
             durable_put: None,
             durable_create: None,
+            write_interceptor: None,
         };
         let def = ContainerDefinition {
             type_name: "kv_store".into(),
@@ -487,5 +602,38 @@ mod tests {
             .unwrap();
         assert_eq!(id.get_version_num(), 7);
         assert_ne!(id, Uuid::nil());
+    }
+
+    #[test]
+    fn rename_preserves_rows_drop_does_not() {
+        let mut c = ContainerCatalog::new();
+        let id = c
+            .create(
+                "ns",
+                "t",
+                L3Model::KvStore,
+                false,
+                None,
+                StorageModeChoice::Persistent,
+            )
+            .unwrap();
+        c.put(id, "k", b"v".to_vec()).unwrap();
+        c.rename_container("ns", "t", "t__pre_transform_x")
+            .unwrap();
+        assert!(c.describe("ns", "t").is_err());
+        assert_eq!(c.get(id, "k").unwrap(), Some(b"v".as_slice()));
+        let id2 = c
+            .create(
+                "ns",
+                "other",
+                L3Model::KvStore,
+                false,
+                None,
+                StorageModeChoice::Persistent,
+            )
+            .unwrap();
+        c.put(id2, "a", b"1".to_vec()).unwrap();
+        c.drop_container("ns", "other").unwrap();
+        assert!(c.get(id2, "a").is_err());
     }
 }

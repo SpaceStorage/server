@@ -4,27 +4,33 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
 
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use spacestorage_protocol_core::{default_timeout, peek_signature, ProtocolFamily};
 use spacestorage_types::ContainerCatalog;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
-use crate::auth::{authorize, new_nonce, unauthorized_http};
+use crate::auth::{authorize, new_nonce, unauthorized_http, DEMO_USER};
 use crate::dispatch::{dispatch, SessionState, WebDavReply};
 
 pub struct WebDavHandler {
     pub catalog: Arc<RwLock<ContainerCatalog>>,
     pub profile: DialectProfile,
     pub namespace: String,
+    pub limit_services: LimitServices,
 }
 
 impl WebDavHandler {
     pub fn with_demo(catalog: Arc<RwLock<ContainerCatalog>>) -> Self {
+        Self::with_limits(catalog, LimitServices::built_in())
+    }
+
+    pub fn with_limits(catalog: Arc<RwLock<ContainerCatalog>>, limit_services: LimitServices) -> Self {
         Self {
             catalog,
             profile: DialectProfile::HandlersComplete,
             namespace: "demo".into(),
+            limit_services,
         }
     }
 
@@ -54,6 +60,8 @@ impl WebDavHandler {
             namespace: self.namespace.clone(),
             collection: "dav".into(),
             profile: self.profile,
+            limit_services: self.limit_services.clone(),
+            principal_hold: None,
         };
         let mut digest_nonce = new_nonce();
 
@@ -79,6 +87,21 @@ impl WebDavHandler {
                                     break;
                                 }
                                 continue;
+                            }
+
+                            if session.principal_hold.is_none() {
+                                match session.limit_services.try_hold_principal(DEMO_USER) {
+                                    Ok(hold) => session.principal_hold = Some(hold),
+                                    Err(e) => {
+                                        let body = e.to_string();
+                                        let msg = format!(
+                                            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                            body.len()
+                                        );
+                                        let _ = writer.write_all(msg.as_bytes()).await;
+                                        break;
+                                    }
+                                }
                             }
 
                             let reply = route_request(&mut session, &parsed);

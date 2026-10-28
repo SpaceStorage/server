@@ -400,3 +400,10 @@ Task: "T036 quorum arithmetic unit tests in crates/placement/src/quorum.rs"
 
 - [X] T096 CRITICAL: Complete false-marked T030 — when RF≥2 and anti-affinity is unset, default to the **finest** key on the cluster topology ladder (FB `[az]`); empty `anti_affinity_keys` MUST NOT place replicas that share that key's value; pass ladder into `plan_replicas` / `PlanRequest` in `crates/placement/src/planner.rs` and cover with unit tests (FR-020) (`partial`)
 - [X] T097 CRITICAL: Complete false-marked T039 — replace stub `FanoutWrite`/`FanoutRead` path with leaderless source-`quorum_domain` coordinator fan-out that waits for durable acks in-domain (library + internode helpers in `crates/internode/src/{rpc,fanout}.rs` and placement/coordinator call sites); keep ordinary containers leaderless; do **not** implement Raft (FR-045, Constitution VI) (`partial`)
+
+## Phase 14: Convergence
+
+**Purpose**: Mount replica describe (health + lag) onto the live admin map, and record that describe through the `RaftClusterStore` `006` Phase 9 already selects on the node. Do not re-list open T004–T094 (CLI, destination groups, repair, rebalance, 2PC) and do not reimplement Raft.
+
+- [X] T098 Add `lag` (`duration` and pending writes) on `Replica` and a describe that returns only replicas placement already holds (node, health, lag; no minted ids) in `crates/placement/src/replica.rs`, and fill `crates/node/src/handler/live_map.rs` shard rows from that describe so `GET /v1/cluster/map` reports `health` and `lag_ms` (empty shards when placement has no rows) per FR-024, FR-080, US2/AC5 (partial)
+- [X] T099 Append `PlacementEvent::ReplicaHealth` (and the describe snapshot it updates) through the node’s already-selected `RaftClusterStore` so every node resolves the same replica health and lag; keep the placement crate free of a controlplane dependency and do not put schemas or container definitions on the cluster log per data-model §17, plan R3, FR-016 (partial)

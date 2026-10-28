@@ -7,6 +7,10 @@ rust-version.workspace = true
 description = "ClickHouse native + HTTP handlers (002 HandlersComplete / slice 6)"
 publish = false
 
+[features]
+default = []
+query-distributed = ["spacestorage-query/query-distributed"]
+
 [dependencies]
 spacestorage-types = { path = "../types" }
 spacestorage-compat = { path = "../compat" }

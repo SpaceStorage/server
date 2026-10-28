@@ -8,12 +8,40 @@ pub fn execute_sql(session: &mut SessionState, sql: &str) -> ClickHouseReply {
     if sql.is_empty() {
         return ClickHouseReply::Ok;
     }
+    if let Err(e) = session
+        .limit_services
+        .limits()
+        .check_query_text(sql.len() as u64)
+    {
+        return ClickHouseReply::Error {
+            code: "limit_exceeded".into(),
+            message: e.to_string(),
+        };
+    }
     let upper = sql.to_ascii_uppercase();
     if upper.contains("DICTIONARY") {
         return dispatch(session, "DICTIONARY", &[]);
     }
     if upper.contains("GROUP BY") {
-        return dispatch(session, "GROUP_BY", &[]);
+        let parts: Vec<&str> = sql.split_whitespace().collect();
+        let table = parts
+            .iter()
+            .position(|p| p.eq_ignore_ascii_case("FROM"))
+            .and_then(|i| parts.get(i + 1))
+            .map(|t| t.trim_matches(|c| c == '`' || c == ';'))
+            .unwrap_or("t");
+        let group_col = upper
+            .find("GROUP BY")
+            .map(|pos| {
+                sql[pos + 8..]
+                    .trim()
+                    .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+                    .next()
+                    .unwrap_or("id")
+                    .trim_matches(|c| c == '`' || c == '"')
+            })
+            .unwrap_or("id");
+        return dispatch(session, "GROUP_BY", &[table, group_col, group_col]);
     }
     if upper.starts_with("CREATE") {
         let parts: Vec<&str> = sql.split_whitespace().collect();

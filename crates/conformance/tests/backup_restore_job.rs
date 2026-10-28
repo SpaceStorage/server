@@ -82,6 +82,7 @@ async fn backup_restore_roundtrip() {
             key_ref: None,
             dest_namespace: None,
             key_refs: vec![],
+            pitr_position: None,
         },
         &engine,
         dir.path().to_path_buf(),

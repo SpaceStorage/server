@@ -4,6 +4,7 @@
 //! Startup uses SCRAM-SHA-256 ([`auth`]); SQL is auto-commit only.
 
 mod auth;
+mod cancel_registry;
 mod serve;
 mod sql;
 mod wire;
@@ -15,7 +16,7 @@ pub use wire::FEATURE_NOT_SUPPORTED;
 
 pub const WIRE_VERSION: &str = "3.0";
 
-use spacestorage_compat::DialectProfile;
+use spacestorage_compat::{DialectProfile, LimitServices};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::sync::CancellationToken;
@@ -26,6 +27,7 @@ pub struct PostgresqlHandler {
     pub users: Arc<UserStore>,
     /// Release dialect (`016` / `015`). Wire classify uses this, not a hard-coded first-binary profile.
     pub profile: DialectProfile,
+    pub limit_services: LimitServices,
 }
 
 impl PostgresqlHandler {
@@ -38,10 +40,20 @@ impl PostgresqlHandler {
         users: Arc<UserStore>,
         profile: DialectProfile,
     ) -> Self {
+        Self::with_profile_limits(catalog, users, profile, LimitServices::built_in())
+    }
+
+    pub fn with_profile_limits(
+        catalog: SharedCatalog,
+        users: Arc<UserStore>,
+        profile: DialectProfile,
+        limit_services: LimitServices,
+    ) -> Self {
         Self {
             catalog,
             users,
             profile,
+            limit_services,
         }
     }
 
@@ -50,6 +62,17 @@ impl PostgresqlHandler {
         let profile = spacestorage_compat::profile_from_release(release)
             .unwrap_or(DialectProfile::FirstBinary);
         Self::with_profile(catalog, users, profile)
+    }
+
+    pub fn with_release_limits(
+        catalog: SharedCatalog,
+        users: Arc<UserStore>,
+        release: &str,
+        limit_services: LimitServices,
+    ) -> Self {
+        let profile = spacestorage_compat::profile_from_release(release)
+            .unwrap_or(DialectProfile::FirstBinary);
+        Self::with_profile_limits(catalog, users, profile, limit_services)
     }
 
     pub fn with_demo_users(catalog: SharedCatalog) -> Self {
@@ -67,6 +90,7 @@ impl PostgresqlHandler {
             Arc::clone(&self.catalog),
             self.profile,
             Arc::clone(&self.users),
+            self.limit_services.clone(),
         )
         .await;
     }
