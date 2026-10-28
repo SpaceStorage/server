@@ -36,7 +36,7 @@ What remains is the Deferred list in the tip milestone (invoicing export, multi-
 | `.specify/intent/01`–`16` | Per-feature intent input |
 | `specs/001`–`016` | Specs, plans, contracts, `tasks.md` |
 | `.cursor/skills/speckit-*` | Speckit commands for Cursor agents |
-| `docs/milestones/` | Slice ledgers `001`–`007`; product tip `009-full-product` |
+| `docs/milestones/` | Slice ledgers through `007`; follow-on `008-later-not-first`; product tip `009-full-product` |
 | `docs/agent-context-graph.md` | Slice ↔ spec ↔ crate map for agents |
 
 Product guide: [`docs/guide/index.md`](docs/guide/index.md) (product, architecture pictures, how to run, configuration parameters).
@@ -45,26 +45,24 @@ Agent instructions: [`AGENTS.md`](AGENTS.md) (Cursor-native). Stub: [`AGENT.md`]
 
 ## Profiles
 
-Default features on `spacestoraged` and `spacestorage-conformance` are **first-binary**. A plain `cargo build` is slices 1–5, not the tip.
+Build **`complete-product`**. That feature is the product tip [`009-full-product`](docs/milestones/009-full-product.md) and the merge gate: slices 1–11, live Raft over internodes TCP, and the later mounts (L0, legal-hold, named CDC, external KMS, the N/N+1 window, planetary composition, billing estimate).
 
-- **`first-binary`** (slices 1–5, tag `slices-1-5`): runtime, types, WAL, master key, PostgreSQL subset, Redis K/V, membership, internode, three-node quorum.
-- **`handlers-complete`** (through slice 6, tag `slices-1-6`): Cassandra, Elasticsearch, ClickHouse, S3, and WebDAV at the `015` MUST column.
-- **`complete-product`**: slices 1–11 (control plane, tenancy, query, observability, migration, admin UI, ingest) and the `008`/`009` mounts. Specs `001`–`016`. This is the merge gate. Product tip: `009-full-product`.
+`first-binary` and `handlers-complete` are older Cargo features kept so those slice gates still compile. They are not a second product. A plain `cargo build` still selects `first-binary`, because that remains the Cargo default.
 
 ## Build and test
 
 From this directory. Workspace `rust-version` is **1.88**.
 
 ```bash
-# first-binary daemon and CLI (default features: PostgreSQL + Redis)
-cargo build -p spacestoraged -p spacestorage
+cargo build -p spacestoraged -p spacestorage --features complete-product
+cargo test -p spacestorage-conformance --features complete-product
+```
 
-# tip profile
-cargo build -p spacestoraged --features complete-product
+Regression gates, same suite, older features:
 
+```bash
 cargo test -p spacestorage-conformance --features first-binary
 cargo test -p spacestorage-conformance --features handlers-complete
-cargo test -p spacestorage-conformance --features complete-product
 ```
 
 Milestone ledger validation:

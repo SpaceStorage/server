@@ -23,19 +23,15 @@ The complete product listens for stock clients on the ports you declare. One ent
 | `internode` | Node-to-node, including Raft | yes | yes |
 | `replication` | Replica traffic | yes | yes |
 
-A first-binary build refuses the names `cassandra`, `elasticsearch`, `clickhouse`, `s3`, and `webdav` at startup (`entrypoint_unknown_handler`).
+A first-binary build refuses the names `cassandra`, `elasticsearch`, `clickhouse`, `clickhouse-http`, `s3`, and `webdav` at startup (`entrypoint_unknown_handler`).
 
 Each protocol implements a documented MUST set. Verbs outside that set return a not-supported error for that protocol. They do not return an empty success. The verb tables live in `specs/015-compatibility-and-limits/contracts/`.
 
 ## Profiles
 
-Default Cargo features are **first-binary**. `cargo build -p spacestoraged` does not build the tip.
+Build **`complete-product`** on both `spacestoraged` and the `spacestorage` CLI. That is the product in [`009-full-product`](../milestones/009-full-product.md): every handler in the table above, slices 1–11, live Raft over internodes TCP, and the later mounts (L0, legal-hold, named CDC, external KMS, N/N+1, planetary composition, billing estimate).
 
-| Profile | Cargo feature | What you get |
-|---------|---------------|--------------|
-| First binary | `first-binary` (default) | Slices 1–5: runtime, types, WAL, master key, PostgreSQL subset, Redis K/V, membership, internode, three-node quorum |
-| Handlers complete | `handlers-complete` | First binary plus Cassandra, Elasticsearch, ClickHouse, S3, and WebDAV |
-| Complete product | `complete-product` | Slices 1–11 plus live Raft TCP and the later mounts (L0, legal-hold, named CDC, external KMS, N/N+1, planetary composition, billing estimate) |
+`first-binary` and `handlers-complete` remain Cargo features so the older slice gates still compile. A plain `cargo build -p spacestoraged` still selects `first-binary`.
 
 Merge gate:
 

@@ -5,13 +5,10 @@ Work from the repository root (`server/`). Workspace `rust-version` is 1.88.
 ## Build
 
 ```bash
-# First binary: PostgreSQL and Redis only. This is the default.
-cargo build -p spacestoraged -p spacestorage
-
-# Complete product, including the other five client protocols.
-cargo build -p spacestoraged --features complete-product
-cargo build -p spacestorage
+cargo build -p spacestoraged -p spacestorage --features complete-product
 ```
+
+A plain `cargo build -p spacestoraged` selects the `first-binary` default and leaves out the other handlers, the admin UI, and the later mounts.
 
 The daemon is `target/debug/spacestoraged`. The CLI is `target/debug/spacestorage`.
 
