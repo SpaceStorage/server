@@ -34,6 +34,8 @@ What remains is the Deferred list in the tip milestone (invoicing export, multi-
 | `docs/milestones/` | Slice ledgers `001`–`007`; product tip `009-full-product` |
 | `docs/agent-context-graph.md` | Slice ↔ spec ↔ crate map for agents |
 
+Product guide: [`docs/guide/index.md`](docs/guide/index.md) (product, architecture pictures, how to run, configuration parameters).
+
 Agent instructions: [`AGENTS.md`](AGENTS.md) (Cursor-native). Stub: [`AGENT.md`](AGENT.md).
 
 ## Profiles

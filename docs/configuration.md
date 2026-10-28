@@ -1,5 +1,7 @@
 # SpaceStorage node configuration
 
+The full parameter list, including `cluster`, `limits`, `storage`, `keys`, and `namespace`, is [`docs/guide/configuration.md`](guide/configuration.md). This page is the original runtime grammar from feature 001. The parser now accepts the later blocks, so the "unknown directive" list at the bottom of this page is historical.
+
 This document describes the nginx-style configuration grammar for `spacestoraged`
 and offline validation via `spacestorage validate`. It is derived from
 `specs/001-runtime-cli-api/contracts/config-grammar.md`.
