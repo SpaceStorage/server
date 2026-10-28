@@ -5,11 +5,11 @@
   <img alt="SpaceStorage" src="images/logo.svg" width="72" height="72">
 </picture>
 
-Operator documentation for the server in this repository. The product tip is [`docs/milestones/009-full-product`](../milestones/009-full-product.md).
+Operator documentation for the server in this repository.
 
 | Page | What it covers |
 |------|----------------|
-| [Product](product.md) | What the server is, which protocols it speaks, and the three build profiles |
+| [Product](product.md) | What the server is and which protocols it speaks |
 | [Architecture](architecture.md) | Process, datatype ladder, placement, and durability |
 | [Using the server](using.md) | Build, start, validate, clients, and the admin CLI |
 | [Configuration](configuration.md) | Grammar and every block the config parser accepts |

@@ -5,79 +5,43 @@
   <img alt="SpaceStorage" src="docs/guide/images/logo.svg" width="72" height="72">
 </picture>
 
-Rust / Tokio monolith for SpaceStorage: a multiparadigm database whose paradigms are **datatypes**, not bolted-on engines. Spec Kit project root is this directory (`server/`), not the parent monorepo.
+SpaceStorage is one Rust process, `spacestoraged`, that stores many datatypes and speaks several client protocols on separate ports. A datatype is the unit of behavior. Protocols are front doors onto the same planner and catalog. There is no sidecar database and no mandatory proxy: every live node accepts client requests.
 
-Parent layout: `spacestorage/` holds `server/` (this tree), `test/`, and `start` (original product-vision dump). Numbered intent under `.specify/intent/` wins for its domain after it exists.
+The admin CLI is a second binary, `spacestorage`. It checks config files and calls the node's admin HTTP API.
 
-## Status (honest)
+## Protocols
 
-**Tip** [`docs/milestones/009-full-product`](docs/milestones/009-full-product.md): live Raft over internodes TCP, plus production mounts for L0, legal-hold, named CDC, external KMS, the N/N+1 window, planetary composition, and billing estimate. Slices **1–11** are closed on [`007-complete-product`](docs/milestones/007-complete-product.md). [`008-later-not-first`](docs/milestones/008-later-not-first.md) is the record those mounts sit on.
+One entrypoint is one handler. The port is yours; the handler name is fixed.
 
-Merge gate:
+| Handler | Client |
+|---------|--------|
+| `postgresql` | `psql` and other PostgreSQL 3.0 clients |
+| `redis` | `redis-cli` (RESP2) |
+| `cassandra` | Cassandra native v4 and v5 |
+| `elasticsearch` | Elasticsearch HTTP |
+| `clickhouse` | ClickHouse native |
+| `clickhouse-http` | ClickHouse HTTP |
+| `s3` | S3 SigV4, path-style |
+| `webdav` | WebDAV |
+| `admin` | Admin TCP |
+| `admin-http` | Admin HTTP, UI, metrics |
+| `internode` | Node-to-node, including Raft |
+| `replication` | Replica traffic |
 
-```bash
-cargo test -p spacestorage-conformance --features complete-product
-```
+Verbs outside a protocol's supported set return a not-supported error. They do not return an empty success.
 
-Regression gates:
+## Run
 
-```bash
-cargo test -p spacestorage-conformance --features first-binary
-cargo test -p spacestorage-conformance --features handlers-complete
-```
-
-What remains is the Deferred list in the tip milestone (invoicing export, multi-process orchestration, further `/ui/*` polish, WAL cases past the Redis gate, per-node `ControlPlane` auto-bootstrap). Those are not unpaid slices.
-
-## Spec Kit
-
-| Path | Role |
-|------|------|
-| `.specify/memory/constitution.md` | Non-negotiable principles (Rust-only, async Tokio, monolith, …) |
-| `.specify/intent/01`–`16` | Per-feature intent input |
-| `specs/001`–`016` | Specs, plans, contracts, `tasks.md` |
-| `.cursor/skills/speckit-*` | Speckit commands for Cursor agents |
-| `docs/milestones/` | Slice ledgers through `007`; follow-on `008-later-not-first`; product tip `009-full-product` |
-| `docs/agent-context-graph.md` | Slice ↔ spec ↔ crate map for agents |
-
-Product guide: [`docs/guide/index.md`](docs/guide/index.md) (product, architecture pictures, how to run, configuration parameters).
-
-Agent instructions: [`AGENTS.md`](AGENTS.md) (Cursor-native). Stub: [`AGENT.md`](AGENT.md).
-
-## Profiles
-
-Build **`complete-product`**. That feature is the product tip [`009-full-product`](docs/milestones/009-full-product.md) and the merge gate: slices 1–11, live Raft over internodes TCP, and the later mounts (L0, legal-hold, named CDC, external KMS, the N/N+1 window, planetary composition, billing estimate).
-
-`first-binary` and `handlers-complete` are older Cargo features kept so those slice gates still compile. They are not a second product. A plain `cargo build` still selects `first-binary`, because that remains the Cargo default.
-
-## Build and test
-
-From this directory. Workspace `rust-version` is **1.88**.
+From this directory. Rust **1.88**.
 
 ```bash
 cargo build -p spacestoraged -p spacestorage --features complete-product
-cargo test -p spacestorage-conformance --features complete-product
 ```
 
-Regression gates, same suite, older features:
+`complete-product` is the build that includes every handler above, the admin UI, ingest, and the cluster. A plain `cargo build` leaves those out.
 
-```bash
-cargo test -p spacestorage-conformance --features first-binary
-cargo test -p spacestorage-conformance --features handlers-complete
-```
+Guide: [what the server is](docs/guide/product.md), [architecture](docs/guide/architecture.md), [start and clients](docs/guide/using.md), [configuration](docs/guide/configuration.md). Example configs are in `docs/examples/`.
 
-Milestone ledger validation:
+## For people changing the server
 
-```bash
-./scripts/check-milestone.sh
-# or: cargo test -p spacestorage-release-profile --test ledger
-```
-
-Slices 1–5 walkthrough: [`specs/016-mvp-and-nongoals/quickstart.md`](specs/016-mvp-and-nongoals/quickstart.md). Starters: `docs/examples/`. Full v1 proof (3-node, Redis, live Raft TCP, L0):
-
-```bash
-cargo test -p spacestorage-conformance --features complete-product --test quickstart quickstart_full_v1_three_node_raft_and_l0
-```
-
-## Constitution
-
-Read [`.specify/memory/constitution.md`](.specify/memory/constitution.md) before changing architecture or I/O. Blocking durability (fsync) stays off the async worker pool; write quorum acks wait for the durability contract, not an in-memory write alone.
+How the tree is specified and what is still deferred lives in [`AGENTS.md`](AGENTS.md): constitution, `specs/001`–`016`, and the milestone ledger. That is the map for writing the server, not for using it.

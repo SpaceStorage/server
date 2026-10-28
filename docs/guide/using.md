@@ -14,7 +14,7 @@ The daemon is `target/debug/spacestoraged`. The CLI is `target/debug/spacestorag
 
 ## A one-node lab
 
-The first-binary starter is [`docs/examples/first-binary-one-node.conf`](../examples/first-binary-one-node.conf). It expects three secret files and a data directory:
+The one-node example is [`docs/examples/first-binary-one-node.conf`](../examples/first-binary-one-node.conf). It expects three secret files and a data directory:
 
 ```bash
 mkdir -p /tmp/spacestorage/db-1 /tmp/spacestorage/etc
@@ -46,31 +46,25 @@ On this starter the ports are:
 | 7702 | `internode` |
 | 7703 | `replication` |
 
-A longer operator script for slices 1–5 is [`specs/016-mvp-and-nongoals/quickstart.md`](../../specs/016-mvp-and-nongoals/quickstart.md). The automated full-v1 proof (three nodes, Redis, live Raft TCP, L0) is:
-
-```bash
-cargo test -p spacestorage-conformance --features complete-product --test quickstart quickstart_full_v1_three_node_raft_and_l0
-```
-
 ## Clients
 
-PostgreSQL, first binary. `BEGIN`, `COPY`, and `DECLARE` are not in this profile and return `0A000`.
+PostgreSQL:
 
 ```bash
 psql "host=127.0.0.1 port=5432 dbname=postgres"
 ```
 
-Redis, first binary. `GET`, `SET`, `DEL`, `EXISTS`, `SCAN`, `AUTH`, `PING`, `SELECT`, and `TTL` are in the MUST set. `EVAL` and `CLUSTER` are not.
+Redis:
 
 ```bash
 redis-cli -h 127.0.0.1 -p 6379
 ```
 
-On a complete-product build, add an `entrypoint` for each extra handler (`cassandra`, `elasticsearch`, `clickhouse`, `clickhouse-http`, `s3`, `webdav`) and point the stock client at that port. The port number is yours. The handler name is fixed.
+The example config listens for PostgreSQL and Redis. Add an `entrypoint` for each other handler (`cassandra`, `elasticsearch`, `clickhouse`, `clickhouse-http`, `s3`, `webdav`) and point the stock client at that port. The port number is yours. The handler name is fixed.
 
 ## Admin CLI
 
-Most commands call admin HTTP. Pass the URL of the `admin-http` entrypoint. Several subcommands default to `http://127.0.0.1:8080`, which is **not** the port in the first-binary example. Use `--endpoint` to match the config (7701 in the example above).
+Most commands call admin HTTP. Pass the URL of the `admin-http` entrypoint. Several subcommands default to `http://127.0.0.1:8080`. Use `--endpoint` to match the config (7701 in the example above).
 
 ```bash
 export SPACESTORAGE_TOKEN="$(cat /tmp/spacestorage/etc/admin.token)"
