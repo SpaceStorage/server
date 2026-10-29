@@ -4,12 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Conformance suite (first-binary + handlers-complete gates)"
+description = "Conformance suite for the server"
 publish = false
 
 [features]
-default = ["first-binary"]
-first-binary = []
+default = ["migration-backup"]
 tenancy-quotas = [
     "spacestorage-node/tenancy-quotas",
     "spacestorage-query/tenancy-quotas",
@@ -18,12 +17,7 @@ tenancy-quotas = [
 # Optional 006 gates (SC-006 / SC-009 / SC-010).
 controlplane-leases = ["spacestorage-controlplane/controlplane-leases"]
 controlplane-ops = ["spacestorage-controlplane/controlplane-ops"]
-handlers-complete = [
-    "spacestorage-node/handlers-complete",
-    "spacestorage-release-profile/handlers-complete",
-]
 query-distributed = [
-    "handlers-complete",
     "spacestorage-release-profile/query-distributed",
     "spacestorage-query/query-distributed",
     "spacestorage-handler-postgresql/query-distributed",
@@ -35,15 +29,7 @@ observability-catalog = [
 migration-backup = [
     "observability-catalog",
     "spacestorage-release-profile/migration-backup",
-    "spacestorage-node/migration-backup",
     "spacestorage-migrate/migrate",
-]
-complete-product = [
-    "migration-backup",
-    "spacestorage-release-profile/complete-product",
-    "spacestorage-node/complete-product",
-    "spacestorage-admin-ui/ui",
-    "spacestorage-ingest/ingest",
 ]
 [dependencies]
 spacestorage-release-profile = { path = "../release-profile" }

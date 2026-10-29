@@ -1,6 +1,6 @@
 //! 015 limits / product_version fixture validation.
 
-use spacestorage_config::{parse_validate, ValidateOptions};
+use spacestorage_config::{ValidateOptions, parse_validate};
 use std::path::PathBuf;
 
 fn fixtures_dir() -> PathBuf {
@@ -20,10 +20,7 @@ fn limits_zero_rejected() {
         ValidateOptions::fixtures_offline(),
     )
     .unwrap_err();
-    assert!(
-        err.iter().any(|e| e.code == "limits_zero"),
-        "{err:?}"
-    );
+    assert!(err.iter().any(|e| e.code == "limits_zero"), "{err:?}");
 }
 
 #[test]
@@ -60,7 +57,10 @@ fn limits_raised_parses_kib_mib() {
     .expect("limits-raised.conf");
     assert_eq!(cfg.limits.limits.max_key, 4 * 1024);
     assert_eq!(cfg.limits.limits.max_value, 32 * 1024 * 1024);
-    assert_eq!(cfg.limits.provenance, spacestorage_compat::LimitProvenance::Configured);
+    assert_eq!(
+        cfg.limits.provenance,
+        spacestorage_compat::LimitProvenance::Configured
+    );
     assert_eq!(cfg.query.max_concurrent_per_node, Some(1024));
     assert_eq!(cfg.query.spill, Some(true));
 }

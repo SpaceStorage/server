@@ -322,20 +322,13 @@ fn system_snapshot(node: &Node) -> spacestorage_observability::NodeSystemSnapsho
 }
 
 fn tenancy_usage_series(node: &Node) -> Vec<spacestorage_observability::SeriesSnapshot> {
-    use spacestorage_observability::{help_for, LabelSet, SampleKind, SeriesSnapshot};
+    use spacestorage_observability::{LabelSet, SampleKind, SeriesSnapshot, help_for};
     use spacestorage_tenancy::QuotaUnit;
     let registry = node.tenancy.registry.lock();
     let mut out = Vec::new();
     for record in registry.list() {
-        for unit in [
-            QuotaUnit::Bytes,
-            QuotaUnit::Objects,
-            QuotaUnit::Connections,
-        ] {
-            let usage = node
-                .tenancy
-                .usage
-                .get(record.id, unit, &None);
+        for unit in [QuotaUnit::Bytes, QuotaUnit::Objects, QuotaUnit::Connections] {
+            let usage = node.tenancy.usage.get(record.id, unit, &None);
             let name = match unit {
                 QuotaUnit::Bytes => "spacestorage_namespace_usage_bytes",
                 QuotaUnit::Objects => "spacestorage_namespace_usage_objects",

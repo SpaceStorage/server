@@ -131,9 +131,7 @@ impl QuotaUsage {
         let key = (ns, Self::dtype_key(&spec.datatype));
         let mut buckets = self.ops_buckets.lock();
         let now = Instant::now();
-        let entry = buckets
-            .entry(key)
-            .or_insert((spec.limit, now, spec.limit));
+        let entry = buckets.entry(key).or_insert((spec.limit, now, spec.limit));
         if now.duration_since(entry.1) >= Duration::from_secs(1) {
             entry.0 = entry.2.min(spec.limit);
             entry.1 = now;
@@ -222,20 +220,16 @@ impl QuotaUsage {
             if record.deleted {
                 continue;
             }
-            let (bytes, objects, per_type) = per_ns
-                .get(&record.id)
-                .cloned()
-                .unwrap_or((0, 0, HashMap::new()));
+            let (bytes, objects, per_type) =
+                per_ns
+                    .get(&record.id)
+                    .cloned()
+                    .unwrap_or((0, 0, HashMap::new()));
             self.clear_bytes_objects(record.id);
             self.set(record.id, QuotaUnit::Bytes, &None, bytes);
             self.set(record.id, QuotaUnit::Objects, &None, objects);
             for (type_name, (tb, to)) in per_type {
-                self.set(
-                    record.id,
-                    QuotaUnit::Bytes,
-                    &Some(type_name.clone()),
-                    tb,
-                );
+                self.set(record.id, QuotaUnit::Bytes, &Some(type_name.clone()), tb);
                 self.set(record.id, QuotaUnit::Objects, &Some(type_name), to);
             }
         }
@@ -286,30 +280,28 @@ mod tests {
         let empty = registry
             .create(Verb::CLUSTER_ADMIN.bits(), "empty")
             .unwrap();
-        let used = registry
-            .create(Verb::CLUSTER_ADMIN.bits(), "used")
-            .unwrap();
+        let used = registry.create(Verb::CLUSTER_ADMIN.bits(), "used").unwrap();
         usage.set(used.id, QuotaUnit::Bytes, &None, 99);
         usage.set(used.id, QuotaUnit::Objects, &Some("redis".into()), 5);
         usage.set(used.id, QuotaUnit::Connections, &None, 3);
 
         usage.reconcile_from_catalog(
             &registry,
-            [(
-                "used".into(),
-                "redis".into(),
-                10u64,
-                2u64,
-            )]
-            .into_iter(),
+            [("used".into(), "redis".into(), 10u64, 2u64)].into_iter(),
         );
 
         assert_eq!(usage.get(empty.id, QuotaUnit::Bytes, &None), 0);
         assert_eq!(usage.get(empty.id, QuotaUnit::Objects, &None), 0);
         assert_eq!(usage.get(used.id, QuotaUnit::Bytes, &None), 10);
         assert_eq!(usage.get(used.id, QuotaUnit::Objects, &None), 2);
-        assert_eq!(usage.get(used.id, QuotaUnit::Objects, &Some("redis".into())), 2);
-        assert_eq!(usage.get(used.id, QuotaUnit::Objects, &Some("gone".into())), 0);
+        assert_eq!(
+            usage.get(used.id, QuotaUnit::Objects, &Some("redis".into())),
+            2
+        );
+        assert_eq!(
+            usage.get(used.id, QuotaUnit::Objects, &Some("gone".into())),
+            0
+        );
         assert_eq!(usage.get(used.id, QuotaUnit::Connections, &None), 3);
     }
 

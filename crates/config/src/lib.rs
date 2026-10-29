@@ -10,11 +10,12 @@ pub mod resolve;
 pub mod validate;
 
 pub use error::{ConfigError, ErrorCode};
-pub use model::{
-    buffer_spec, ExternalKmsDecl, NodeConfig, BUILTIN_BUFFERS,
-};
+pub use model::{BUILTIN_BUFFERS, ExternalKmsDecl, NodeConfig, buffer_spec};
 pub use reload_class::{ConfigDiff, ReloadClass};
-pub use validate::{parse_validate, ValidateOptions};
+pub use validate::{ValidateOptions, parse_validate};
+
+/// `namespace { quota { … } }` is accepted when this is true.
+pub const TENANCY_QUOTAS: bool = cfg!(feature = "tenancy-quotas");
 
 use std::path::Path;
 

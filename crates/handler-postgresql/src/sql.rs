@@ -45,8 +45,7 @@ pub(crate) fn parse_namespace_command(sql: &str) -> Option<NamespaceCommand> {
             Some(NamespaceCommand::Create((*name).trim_matches('"').into()))
         }
         [drop, database, name, ..]
-            if drop.eq_ignore_ascii_case("drop")
-                && database.eq_ignore_ascii_case("database") =>
+            if drop.eq_ignore_ascii_case("drop") && database.eq_ignore_ascii_case("database") =>
         {
             Some(NamespaceCommand::Drop((*name).trim_matches('"').into()))
         }
@@ -385,15 +384,7 @@ pub fn execute_sql_cancel(
     limits: &Limits,
 ) -> Result<ExecResult, ExecError> {
     execute_sql_cancel_tenancy(
-        profile,
-        catalog,
-        namespace,
-        session,
-        sql,
-        cancel,
-        limits,
-        None,
-        None,
+        profile, catalog, namespace, session, sql, cancel, limits, None, None,
     )
 }
 
@@ -458,14 +449,7 @@ pub fn execute_sql_cancel_tenancy(
         options.principal = Some(login.to_string());
     }
 
-    match engine.execute_blocking(
-        namespace,
-        session,
-        "postgresql",
-        req,
-        options,
-        cancel,
-    ) {
+    match engine.execute_blocking(namespace, session, "postgresql", req, options, cancel) {
         Ok(r) => {
             // Result size gate.
             let bytes: u64 = r
@@ -617,7 +601,11 @@ mod tests {
             assert_eq!(e.sqlstate, FEATURE_NOT_SUPPORTED, "{sql}");
         }
         execute_sql_session(p, &cat, "ns", s, "DECLARE c NO SCROLL CURSOR FOR SELECT 1").unwrap();
-        for sql in ["FETCH PRIOR FROM c", "FETCH ABSOLUTE 1 FROM c", "FETCH BACKWARD FROM c"] {
+        for sql in [
+            "FETCH PRIOR FROM c",
+            "FETCH ABSOLUTE 1 FROM c",
+            "FETCH BACKWARD FROM c",
+        ] {
             let e = execute_sql_session(p, &cat, "ns", s, sql).unwrap_err();
             assert_eq!(e.sqlstate, FEATURE_NOT_SUPPORTED, "{sql}");
         }

@@ -1,8 +1,8 @@
 //! MapReduce task emission (005 FR-026).
 
 use crate::catalog_exec::{QueryResult, SharedCatalog};
-use crate::error::ExecError;
 use crate::engines::shuffle::{ShuffleJob, ShuffleTransport};
+use crate::error::ExecError;
 use serde_json::Value;
 
 pub fn run(

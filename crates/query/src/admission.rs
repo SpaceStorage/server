@@ -52,11 +52,7 @@ impl AdmissionController {
     /// Acquire concurrent slots then memory. `spillable` (sort/hash/agg) MAY
     /// proceed past the memory cap when spill is on; concurrent overflow NEVER
     /// uses spill (FR-010).
-    pub fn try_acquire(
-        &self,
-        namespace: &str,
-        memory: u64,
-    ) -> Result<AdmissionToken, ExecError> {
+    pub fn try_acquire(&self, namespace: &str, memory: u64) -> Result<AdmissionToken, ExecError> {
         self.try_acquire_spillable(namespace, memory, false)
     }
 
@@ -158,7 +154,9 @@ mod tests {
         });
         let _hold = c2.try_acquire("ns", 1).unwrap();
         let err = c2.try_acquire_spillable("ns", 1, true).unwrap_err();
-        assert!(matches!(err, ExecError::Admission { limit, .. } if limit == "concurrent_queries_node"));
+        assert!(
+            matches!(err, ExecError::Admission { limit, .. } if limit == "concurrent_queries_node")
+        );
     }
 
     #[test]

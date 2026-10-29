@@ -20,7 +20,11 @@ async fn sc001_sc002_election_single_voter() {
     let st = cp.raft_status(GroupId::Cluster).await.unwrap();
     assert_eq!(st.leader, Some(id));
     assert!(st.role.contains("Leader"));
-    assert!(cp.elections_total.load(std::sync::atomic::Ordering::Relaxed) >= 1);
+    assert!(
+        cp.elections_total
+            .load(std::sync::atomic::Ordering::Relaxed)
+            >= 1
+    );
 }
 
 #[tokio::test]
@@ -39,7 +43,10 @@ async fn sc003_minority_or_not_leader_on_follower_write() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, Error::NotLeader { .. } | Error::Minority { .. } | Error::Msg(_)),
+        matches!(
+            err,
+            Error::NotLeader { .. } | Error::Minority { .. } | Error::Msg(_)
+        ),
         "got {err:?}"
     );
 }
@@ -125,9 +132,7 @@ async fn sc009_voter_replace_ops() {
         .await
         .unwrap();
     cp.admit_member(b, "n2").await.unwrap();
-    let _ = cp
-        .voter_op(MembershipOp::Replace { from: a, to: b })
-        .await;
+    let _ = cp.voter_op(MembershipOp::Replace { from: a, to: b }).await;
 }
 
 #[tokio::test]
@@ -156,7 +161,10 @@ async fn sc011_namespace_primary_metrics_agg() {
     cp.push_shared_metric(ns, "hits", 3.0);
     let snap = cp.namespace_metrics_snapshot(ns);
     assert!(snap.is_some());
-    assert_eq!(snap.unwrap().series.get("hits").copied().unwrap_or(0.0), 3.0);
+    assert_eq!(
+        snap.unwrap().series.get("hits").copied().unwrap_or(0.0),
+        3.0
+    );
 }
 
 #[tokio::test]

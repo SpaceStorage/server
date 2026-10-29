@@ -1,7 +1,7 @@
 //! Catalog exercise after owner-like increments (008 T035).
 
 use spacestorage_conformance::{boot_one_node, scrape_metrics};
-use spacestorage_observability::{LabelSet, help_for, DURATION_BUCKETS};
+use spacestorage_observability::{DURATION_BUCKETS, LabelSet, help_for};
 use tempfile::tempdir;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

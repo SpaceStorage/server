@@ -7,41 +7,16 @@ rust-version.workspace = true
 publish = false
 
 [features]
-default = ["first-binary"]
-first-binary = []
 tenancy-quotas = [
     "spacestorage-tenancy/tenancy-quotas",
     "spacestorage-config/tenancy-quotas",
-]
-handlers-complete = [
-    "dep:spacestorage-handler-cassandra",
-    "dep:spacestorage-handler-elasticsearch",
-    "dep:spacestorage-handler-clickhouse",
-    "dep:spacestorage-handler-s3",
-    "dep:spacestorage-handler-webdav",
-]
-migration-backup = [
-    "spacestorage-config/migration-backup",
-    "spacestorage-release-profile/migration-backup",
-    "spacestorage-migrate/migrate",
-]
-complete-product = [
-    "handlers-complete",
-    "migration-backup",
-    "spacestorage-config/complete-product",
-    "spacestorage-release-profile/complete-product",
-    "spacestorage-admin-ui/ui",
-    "spacestorage-ingest/ingest",
-    "spacestorage-query/query-distributed",
-    "spacestorage-handler-postgresql/query-distributed",
-    "spacestorage-handler-elasticsearch?/query-distributed",
-    "spacestorage-handler-clickhouse?/query-distributed",
+    "spacestorage-query/tenancy-quotas",
 ]
 [dependencies]
-spacestorage-config = { path = "../config" }
+spacestorage-config = { path = "../config", features = ["complete-product", "migration-backup"] }
 spacestorage-compat = { path = "../compat" }
 spacestorage-admin-proto = { path = "../admin-proto" }
-spacestorage-release-profile = { path = "../release-profile" }
+spacestorage-release-profile = { path = "../release-profile", features = ["complete-product"] }
 spacestorage-storage = { path = "../storage" }
 spacestorage-crypto = { path = "../crypto" }
 spacestorage-types = { path = "../types" }
@@ -49,19 +24,19 @@ spacestorage-authz = { path = "../authz" }
 spacestorage-membership = { path = "../membership" }
 spacestorage-internode = { path = "../internode" }
 spacestorage-replication = { path = "../replication" }
-spacestorage-handler-postgresql = { path = "../handler-postgresql" }
+spacestorage-handler-postgresql = { path = "../handler-postgresql", features = ["query-distributed"] }
 spacestorage-handler-redis = { path = "../handler-redis" }
-spacestorage-handler-cassandra = { path = "../handler-cassandra", optional = true }
-spacestorage-handler-elasticsearch = { path = "../handler-elasticsearch", optional = true }
-spacestorage-handler-clickhouse = { path = "../handler-clickhouse", optional = true }
-spacestorage-handler-s3 = { path = "../handler-s3", optional = true }
-spacestorage-handler-webdav = { path = "../handler-webdav", optional = true }
+spacestorage-handler-cassandra = { path = "../handler-cassandra" }
+spacestorage-handler-elasticsearch = { path = "../handler-elasticsearch", features = ["query-distributed"] }
+spacestorage-handler-clickhouse = { path = "../handler-clickhouse", features = ["query-distributed"] }
+spacestorage-handler-s3 = { path = "../handler-s3" }
+spacestorage-handler-webdav = { path = "../handler-webdav" }
 spacestorage-observability = { path = "../observability" }
-spacestorage-migrate = { path = "../migrate" }
+spacestorage-migrate = { path = "../migrate", features = ["migrate"] }
 spacestorage-backup = { path = "../backup" }
-spacestorage-admin-ui = { path = "../admin-ui" }
-spacestorage-ingest = { path = "../ingest" }
-spacestorage-query = { path = "../query" }
+spacestorage-admin-ui = { path = "../admin-ui", features = ["ui"] }
+spacestorage-ingest = { path = "../ingest", features = ["ingest"] }
+spacestorage-query = { path = "../query", features = ["query-distributed"] }
 spacestorage-controlplane = { path = "../controlplane" }
 spacestorage-placement = { path = "../placement" }
 spacestorage-tenancy = { path = "../tenancy" }

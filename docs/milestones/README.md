@@ -22,10 +22,10 @@
 //!
 //! ## CI
 //!
-//! Default CI remains `--features first-binary`. Full-product merge gate:
+//! The server is one build. Merge gate:
 //!
 //! ```bash
-//! cargo test -p spacestorage-conformance --features complete-product
+//! cargo test -p spacestorage-conformance
 //! cargo test -p spacestorage-release-profile --test ledger
 //! ```
 //!

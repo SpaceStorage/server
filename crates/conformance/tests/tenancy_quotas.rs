@@ -1,12 +1,8 @@
 //! `007` quota admission harness (slice 7).
 
 use spacestorage_admin_proto::{AdminOp, QuotaInput};
-use spacestorage_conformance::{
-    LAB_ADMIN_TOKEN, admin_tcp_json, boot_tenancy_one_node,
-};
-use spacestorage_query::{
-    CancelToken, LogicalRequest, PlannerEngine, QueryEngine, QueryOptions,
-};
+use spacestorage_conformance::{LAB_ADMIN_TOKEN, admin_tcp_json, boot_tenancy_one_node};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryEngine, QueryOptions};
 use spacestorage_tenancy::QuotaUnit;
 use spacestorage_types::{L3Model, StorageModeChoice};
 use std::sync::Arc;

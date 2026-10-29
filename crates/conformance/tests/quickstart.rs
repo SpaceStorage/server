@@ -8,17 +8,37 @@ use spacestorage_compat::DialectProfile;
 use spacestorage_conformance::{
     boot_one_node, boot_three_node, quorum_two_write, scrape_metrics, tcp_bound, validate_fixture,
 };
-use spacestorage_handler_postgresql::{FEATURE_NOT_SUPPORTED, execute_sql};
 use spacestorage_handler_redis::{RedisReply, SessionState, dispatch};
+use spacestorage_node::handler::Handler;
 use spacestorage_types::{L3Model, StorageModeChoice};
 use std::sync::Arc;
 use tempfile::tempdir;
 
 #[test]
 fn quickstart_step2_validate_rejects() {
-    // quickstart §2 — unknown handler + omitted transport
-    let cass = validate_fixture("invalid/unknown-handler-cassandra.conf").unwrap_err();
-    assert!(cass.iter().any(|e| e.code == "entrypoint_unknown_handler"));
+    use spacestorage_config::{ValidateOptions, parse_validate};
+    use spacestorage_conformance::fixtures_dir;
+    use spacestorage_node::HANDLER_NAMES;
+    let path = fixtures_dir().join("invalid/unknown-handler-cassandra.conf");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("handler cassandra;", "handler telnet;");
+    let unknown = parse_validate(
+        &text,
+        &path,
+        &[],
+        HANDLER_NAMES,
+        ValidateOptions {
+            check_secrets_readable: false,
+            ..ValidateOptions::complete_product()
+        },
+    )
+    .unwrap_err();
+    assert!(
+        unknown
+            .iter()
+            .any(|e| e.code == "entrypoint_unknown_handler")
+    );
     let transport = validate_fixture("invalid/omitted-transport.conf").unwrap_err();
     assert!(transport.iter().any(|e| e.code == "transport_undeclared"));
 }
@@ -34,12 +54,40 @@ async fn quickstart_steps_3_to_7_in_process() {
     let m = scrape_metrics(lab.ports.admin_http).await;
     assert!(m.contains("200") || m.contains("#"), "metrics: {m}");
 
-    // §4 PostgreSQL smoke — BEGIN/COMMIT/ROLLBACK/COPY → 0A000 (dialect unit path)
-    let cat = Arc::clone(&lab.node.catalog);
-    for sql in ["BEGIN", "COMMIT", "ROLLBACK", "COPY t FROM STDIN"] {
-        let err =
-            execute_sql(DialectProfile::FirstBinary, &cat, "demo", sql).expect_err("must refuse");
-        assert_eq!(err.sqlstate, FEATURE_NOT_SUPPORTED, "{sql} → {err:?}");
+    // §4 PostgreSQL on the booted node (complete-product), not execute_sql(FirstBinary).
+    {
+        let handlers = lab.node.handlers.read().expect("handlers");
+        for name in [
+            "postgresql",
+            "cassandra",
+            "elasticsearch",
+            "clickhouse",
+            "clickhouse-http",
+            "s3",
+            "webdav",
+        ] {
+            let handler = handlers
+                .get(name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            assert_eq!(
+                Handler::dialect(handler.as_ref()),
+                Some(DialectProfile::CompleteProduct),
+                "{name}"
+            );
+        }
+        let pg = handlers.get("postgresql").expect("postgresql");
+        let session = "qs-pg";
+        for sql in ["BEGIN", "COMMIT", "BEGIN", "ROLLBACK"] {
+            Handler::try_exec_sql(pg.as_ref(), session, sql)
+                .expect("postgresql sql")
+                .unwrap_or_else(|err| panic!("{sql} → {err:?}"));
+        }
+        Handler::try_exec_sql(pg.as_ref(), session, "CREATE TABLE t (id text, v text)")
+            .expect("postgresql sql")
+            .unwrap_or_else(|err| panic!("CREATE → {err:?}"));
+        Handler::try_exec_sql(pg.as_ref(), session, "COPY t FROM STDIN")
+            .expect("postgresql sql")
+            .unwrap_or_else(|err| panic!("COPY → {err:?}"));
     }
 
     // §5 Redis MUST + HGET/JSON.GET error (SC-006)
@@ -126,12 +174,11 @@ async fn quickstart_steps_3_to_7_in_process() {
 }
 
 /// Full v1 operator path: 3-node + Redis protocol + live Raft TCP + L0 later surface.
-#[cfg(feature = "complete-product")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn quickstart_full_v1_three_node_raft_and_l0() {
     use openraft::BasicNode;
     use spacestorage_controlplane::{
-        bootstrap_multi_voter, start_raft_peered_with_secret, PeerRaftRegistry, RegistryRaftHandler,
+        PeerRaftRegistry, RegistryRaftHandler, bootstrap_multi_voter, start_raft_peered_with_secret,
     };
     use spacestorage_internode::{RaftPeerHandler, RaftRpcKind};
     use spacestorage_types::StorageModeChoice;
@@ -178,7 +225,12 @@ async fn quickstart_full_v1_three_node_raft_and_l0() {
     async fn spawn_tcp(
         registry: Arc<PeerRaftRegistry>,
         secret: Arc<Vec<u8>>,
-    ) -> (Uuid, String, spacestorage_controlplane::ControlRaft, tokio::task::JoinHandle<()>) {
+    ) -> (
+        Uuid,
+        String,
+        spacestorage_controlplane::ControlRaft,
+        tokio::task::JoinHandle<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let dial = format!("{}:{}", addr.ip(), addr.port());
@@ -227,9 +279,7 @@ async fn quickstart_full_v1_three_node_raft_and_l0() {
                                 continue;
                             };
                             if let Ok(body) = h.handle_raft(kind, &frame.payload).await {
-                                let _ = stream
-                                    .write_all(&encode_frame(reg::MSG_ACK, &body))
-                                    .await;
+                                let _ = stream.write_all(&encode_frame(reg::MSG_ACK, &body)).await;
                             }
                         }
                     }

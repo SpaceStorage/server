@@ -1,13 +1,11 @@
 //! Kafka ingest ALO conformance (009 US3) — feature `complete-product`.
 
-#![cfg(feature = "complete-product")]
-
+use spacestorage_ingest::IngestRuntime;
 use spacestorage_ingest::declaration::{IngestAuthz, KafkaIngest};
 use spacestorage_ingest::format::PayloadFormat;
 use spacestorage_ingest::kafka::{AppendAck, FakeKafkaBroker, KafkaConsumer, KafkaMessage};
-use spacestorage_ingest::IngestRuntime;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 fn decl() -> KafkaIngest {

@@ -1,28 +1,31 @@
 //! Tenancy — namespaces, quotas, roles, policies, encryption attach (007).
 
 pub mod admit;
-pub mod namespace_control;
-pub mod session;
 pub mod encryption;
 pub mod error;
 pub mod name;
+pub mod namespace_control;
 pub mod ops;
 pub mod policy;
 pub mod quotas;
 pub mod registry;
 pub mod roles;
+pub mod session;
 pub mod usage;
+
+/// Slice-7 quota, custom role, and policy paths are compiled in.
+pub const TENANCY_QUOTAS: bool = cfg!(feature = "tenancy-quotas");
 
 pub use admit::admit;
 pub use error::{Result, TenancyError};
+pub use namespace_control::{NamespaceControl, PermissiveNamespaceControl};
 pub use ops::TenancyOp;
 pub use quotas::{QuotaSpec, QuotaUnit};
-pub use namespace_control::{NamespaceControl, PermissiveNamespaceControl};
 pub use registry::{NamespaceRecord, NamespaceRegistry};
-pub use roles::{admit_tenant_login, authorize_consuming, Role};
+pub use roles::{Role, admit_tenant_login, authorize_consuming};
 pub use session::bind_namespace_session;
-pub use usage::QuotaUsage;
 use std::collections::BTreeMap;
+pub use usage::QuotaUsage;
 
 /// Handle bundling registry + usage ledger.
 #[derive(Default)]

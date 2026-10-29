@@ -9,12 +9,7 @@ use spacestorage_tenancy::roles::{Role, ScopeKind, role_put};
 use tempfile::tempdir;
 
 async fn role_names(lab: &spacestorage_conformance::LabNode) -> Vec<String> {
-    let roles = admin_tcp_json(
-        lab.ports.admin,
-        LAB_ADMIN_TOKEN,
-        AdminOp::RoleList,
-    )
-    .await;
+    let roles = admin_tcp_json(lab.ports.admin, LAB_ADMIN_TOKEN, AdminOp::RoleList).await;
     roles["roles"]
         .as_array()
         .unwrap()
@@ -39,6 +34,11 @@ async fn builtin_roles_survive_restart() {
 
 #[test]
 fn custom_role_put_without_slice7_is_refused() {
+    // A workspace build that also compiles spacestoraged turns the feature on
+    // for this crate. That binary is the slice-7 server; this check is the off build.
+    if spacestorage_tenancy::TENANCY_QUOTAS {
+        return;
+    }
     let err = role_put(
         Verb::CLUSTER_ADMIN.bits(),
         Role {

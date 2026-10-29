@@ -32,7 +32,7 @@
 ### Track 3 — Operator path + merge gate
 
 - Quickstart: `quickstart_full_v1_three_node_raft_and_l0` (3-node + Redis + live Raft TCP + L0)
-- Merge gate remains: `cargo test -p spacestorage-conformance --features complete-product`
+- Merge gate: `cargo test -p spacestorage-conformance`
 
 ## Deferred (non-goals only)
 
@@ -48,9 +48,7 @@ Honest product non-goals — **not** `still_owed` slices:
 ## Gates
 
 ```bash
-cargo test -p spacestorage-conformance --features first-binary
-cargo test -p spacestorage-conformance --features handlers-complete
-cargo test -p spacestorage-conformance --features complete-product
+cargo test -p spacestorage-conformance
 ```
 
 ## Changelog
@@ -58,3 +56,4 @@ cargo test -p spacestorage-conformance --features complete-product
 - **2026-09-27 Track 1**: live TCP openraft peer RPC default mount + conformance proofs
 - **2026-09-27 Track 2**: production mounts for all seven later-not-first surfaces
 - **2026-09-27 Track 3**: full-v1 quickstart + this tip milestone
+- **2026-10-29**: conformance has no `first-binary`, `handlers-complete`, or `complete-product` features. The gate is `cargo test -p spacestorage-conformance`

@@ -3,22 +3,20 @@
 //! Speaks on-the-wire bytes via handler `serve` loops (duplex or TCP), not dispatch-only.
 //! Run: `cargo test -p spacestorage-conformance --features handlers-complete compat_wire`
 
-#![cfg(feature = "handlers-complete")]
-
 use bytes::BytesMut;
 use spacestorage_compat::{
-    classify_outcome, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
-};
-use spacestorage_handler_cassandra::wire::{
-    encode_frame, try_decode_frame, write_bytes, write_long_string, write_string_map, Frame,
-    OP_AUTH_RESPONSE, OP_ERROR, OP_OPTIONS, OP_QUERY, OP_READY, OP_RESULT, OP_STARTUP,
-    OP_SUPPORTED, VERSION_V4, VERSION_V5,
+    ClassifyOutcome, CompatError, DialectProfile, ProtocolId, classify_outcome,
 };
 use spacestorage_handler_cassandra::CassandraHandler;
+use spacestorage_handler_cassandra::wire::{
+    Frame, OP_AUTH_RESPONSE, OP_ERROR, OP_OPTIONS, OP_QUERY, OP_READY, OP_RESULT, OP_STARTUP,
+    OP_SUPPORTED, VERSION_V4, VERSION_V5, encode_frame, try_decode_frame, write_bytes,
+    write_long_string, write_string_map,
+};
 use spacestorage_handler_clickhouse::{ClickHouseHttpHandler, ClickHouseNativeHandler};
 use spacestorage_handler_elasticsearch::ElasticsearchHandler;
 use spacestorage_handler_s3::{
-    sign_request, SigV4Request, S3Handler, DEMO_ACCESS_KEY, DEMO_SECRET_KEY,
+    DEMO_ACCESS_KEY, DEMO_SECRET_KEY, S3Handler, SigV4Request, sign_request,
 };
 use spacestorage_handler_webdav::WebDavHandler;
 use spacestorage_types::ContainerCatalog;
@@ -97,9 +95,15 @@ async fn cass_handshake(
     let f = cass_read_frame(cr, acc).await;
     assert_eq!(f.opcode, OP_SUPPORTED);
 
-    cw.write_all(&encode_frame(version, 1, OP_STARTUP, 0, &cass_startup_body()))
-        .await
-        .unwrap();
+    cw.write_all(&encode_frame(
+        version,
+        1,
+        OP_STARTUP,
+        0,
+        &cass_startup_body(),
+    ))
+    .await
+    .unwrap();
     let _auth = cass_read_frame(cr, acc).await;
 
     cw.write_all(&encode_frame(
@@ -267,10 +271,8 @@ async fn wire_elasticsearch_http_must_search_agg_must_not() {
 
     client
         .write_all(
-            format!(
-                "PUT /docs HTTP/1.1\r\nHost: localhost\r\n{ES_AUTH}Content-Length: 0\r\n\r\n"
-            )
-            .as_bytes(),
+            format!("PUT /docs HTTP/1.1\r\nHost: localhost\r\n{ES_AUTH}Content-Length: 0\r\n\r\n")
+                .as_bytes(),
         )
         .await
         .unwrap();
@@ -384,10 +386,8 @@ async fn wire_elasticsearch_delete_cat_list_must() {
 
     client
         .write_all(
-            format!(
-                "PUT /docs HTTP/1.1\r\nHost: localhost\r\n{ES_AUTH}Content-Length: 0\r\n\r\n"
-            )
-            .as_bytes(),
+            format!("PUT /docs HTTP/1.1\r\nHost: localhost\r\n{ES_AUTH}Content-Length: 0\r\n\r\n")
+                .as_bytes(),
         )
         .await
         .unwrap();
@@ -472,9 +472,7 @@ async fn wire_elasticsearch_ilm_must_not() {
     let handler = ElasticsearchHandler::with_demo(cat);
     let (mut client, server) = tokio::io::duplex(8192);
     tokio::spawn(async move {
-        handler
-            .serve(server, CancellationToken::new())
-            .await;
+        handler.serve(server, CancellationToken::new()).await;
     });
 
     client
@@ -487,7 +485,10 @@ async fn wire_elasticsearch_ilm_must_not() {
         .await
         .unwrap();
     let resp = http_read(&mut client).await;
-    assert!(!resp.contains("200 OK") || resp.contains("compat_must_not"), "{resp}");
+    assert!(
+        !resp.contains("200 OK") || resp.contains("compat_must_not"),
+        "{resp}"
+    );
     assert!(
         resp.contains("compat_must_not") || resp.contains("CompatMustNot") || resp.contains("400"),
         "{resp}"
@@ -502,9 +503,7 @@ async fn wire_elasticsearch_ingest_must_not() {
     let handler = ElasticsearchHandler::with_demo(cat);
     let (mut client, server) = tokio::io::duplex(8192);
     tokio::spawn(async move {
-        handler
-            .serve(server, CancellationToken::new())
-            .await;
+        handler.serve(server, CancellationToken::new()).await;
     });
 
     client
@@ -994,7 +993,10 @@ async fn wire_webdav_must_propfind_lock_must_not() {
         resp.contains("compat_must_not") || resp.contains("501") || resp.contains("403"),
         "{resp}"
     );
-    assert!(!resp.contains("200 OK") || resp.contains("compat_must_not"), "{resp}");
+    assert!(
+        !resp.contains("200 OK") || resp.contains("compat_must_not"),
+        "{resp}"
+    );
 
     cancel.cancel();
 }

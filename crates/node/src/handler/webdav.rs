@@ -23,9 +23,7 @@ impl WebDavPortHandler {
         catalog: Arc<RwLock<ContainerCatalog>>,
         limit_services: LimitServices,
     ) -> Self {
-        Self {
-            inner: WebDavHandler::with_limits(catalog, limit_services),
-        }
+        speak(WebDavHandler::with_limits(catalog, limit_services))
     }
 
     pub fn with_tenancy(
@@ -33,10 +31,13 @@ impl WebDavPortHandler {
         limit_services: LimitServices,
         tenancy: Arc<spacestorage_tenancy::Tenancy>,
     ) -> Self {
-        Self {
-            inner: WebDavHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
-        }
+        speak(WebDavHandler::with_limits(catalog, limit_services).with_tenancy(tenancy))
     }
+}
+
+fn speak(mut inner: WebDavHandler) -> WebDavPortHandler {
+    inner.profile = super::client_dialect();
+    WebDavPortHandler { inner }
 }
 
 #[async_trait]
@@ -55,5 +56,23 @@ impl Handler for WebDavPortHandler {
 
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         self.inner.serve(stream, cancel).await;
+    }
+
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        Some(self.inner.profile)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spacestorage_compat::DialectProfile;
+    use spacestorage_types::ContainerCatalog;
+
+    #[test]
+    fn port_speaks_complete_product() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let h = WebDavPortHandler::new(cat);
+        assert_eq!(h.dialect(), Some(DialectProfile::CompleteProduct));
     }
 }

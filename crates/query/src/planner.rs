@@ -79,7 +79,10 @@ pub fn refuse_unsupported(container: &str, ty: &str, op: &str) -> Result<(), Exe
     }
 }
 
-pub fn plan(request: LogicalRequest, options: QueryOptions) -> Result<(LogicalPlan, PhysicalPlan), ExecError> {
+pub fn plan(
+    request: LogicalRequest,
+    options: QueryOptions,
+) -> Result<(LogicalPlan, PhysicalPlan), ExecError> {
     let id = Uuid::now_v7();
     let (containers, ops, tasks) = analyze(&request)?;
     let logical = LogicalPlan {
@@ -158,16 +161,15 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
                 tasks.extend(t);
             }
         }
-        LogicalRequest::Aggregate { container, func, .. } => {
+        LogicalRequest::Aggregate {
+            container, func, ..
+        } => {
             containers.push(container.clone());
             ops.push(format!("agg:{func:?}"));
             tasks.push(spillable_task(EngineKind::Aggregate, 4 * 1024 * 1024));
         }
         LogicalRequest::Join {
-            left,
-            right,
-            kind,
-            ..
+            left, right, kind, ..
         } => {
             containers.push(left.clone());
             containers.push(right.clone());

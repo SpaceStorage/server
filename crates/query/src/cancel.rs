@@ -1,8 +1,8 @@
 //! Cancel + timeout token plumbing (005).
 
 use crate::error::ExecError;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tokio::time::timeout;
@@ -78,7 +78,11 @@ where
 }
 
 /// Soft check used by execute loops (deadline already elapsed → Timeout).
-pub fn check_deadline(start: Instant, deadline: Duration, token: &CancelToken) -> Result<(), ExecError> {
+pub fn check_deadline(
+    start: Instant,
+    deadline: Duration,
+    token: &CancelToken,
+) -> Result<(), ExecError> {
     token.check()?;
     if start.elapsed() >= deadline {
         Err(ExecError::Timeout)

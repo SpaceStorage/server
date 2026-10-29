@@ -272,11 +272,7 @@ pub fn resolve(
                 }
                 "entrypoint" => {
                     let mut ep = EntrypointDecl {
-                        name: b
-                            .args
-                            .first()
-                            .map(|a| a.as_str())
-                            .unwrap_or_default(),
+                        name: b.args.first().map(|a| a.as_str()).unwrap_or_default(),
                         address: "127.0.0.1".into(),
                         port: 0,
                         handler: String::new(),
@@ -415,16 +411,12 @@ pub fn resolve(
                                             d.args.first().map(|a| a.as_str());
                                     }
                                     "token_file" => {
-                                        cfg.cluster.token_file =
-                                            d.args.first().map(|a| a.as_str());
+                                        cfg.cluster.token_file = d.args.first().map(|a| a.as_str());
                                     }
                                     "join" => {
                                         // Flag: `join;` → Some(""); optional arg preserved.
                                         cfg.cluster.join = Some(
-                                            d.args
-                                                .first()
-                                                .map(|a| a.as_str())
-                                                .unwrap_or_default(),
+                                            d.args.first().map(|a| a.as_str()).unwrap_or_default(),
                                         );
                                     }
                                     "join_token_file" => {
@@ -817,7 +809,8 @@ pub fn resolve(
                                         match d.name.as_str() {
                                             "max_wait" => {
                                                 if let Some(Arg::DurationMs(ms)) = d.args.first() {
-                                                    cfg.storage.group_commit_max_wait_ms = Some(*ms);
+                                                    cfg.storage.group_commit_max_wait_ms =
+                                                        Some(*ms);
                                                 }
                                             }
                                             "max_bytes" => {
@@ -1025,9 +1018,7 @@ pub fn resolve(
                                                 "certificate" => {
                                                     cert = d.args.first().map(|a| a.as_str())
                                                 }
-                                                "key" => {
-                                                    key = d.args.first().map(|a| a.as_str())
-                                                }
+                                                "key" => key = d.args.first().map(|a| a.as_str()),
                                                 _ => {}
                                             }
                                         }
@@ -1059,8 +1050,7 @@ pub fn resolve(
                                 "enabled" => {
                                     if let Some(a) = d.args.first() {
                                         let v = a.as_str();
-                                        cfg.jobs.enabled =
-                                            v == "on" || v == "true" || v == "1";
+                                        cfg.jobs.enabled = v == "on" || v == "true" || v == "1";
                                     }
                                 }
                                 "catchup_concurrency" => {

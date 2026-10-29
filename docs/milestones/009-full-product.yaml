@@ -12,4 +12,4 @@ deferred_nongoals:
   - new-slice-dod-debt
   - auto-bootstrap-controlplane-on-every-membership-start
 changelog_ref: docs/milestones/009-full-product.md
-merge_gate: "cargo test -p spacestorage-conformance --features complete-product"
+merge_gate: "cargo test -p spacestorage-conformance"

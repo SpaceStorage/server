@@ -57,7 +57,11 @@ pub struct BufferedWrite {
 }
 
 impl Transaction {
-    pub fn begin(session: SessionId, protocol: impl Into<String>, isolation: IsolationLevel) -> Self {
+    pub fn begin(
+        session: SessionId,
+        protocol: impl Into<String>,
+        isolation: IsolationLevel,
+    ) -> Self {
         Self {
             id: Uuid::now_v7(),
             session,

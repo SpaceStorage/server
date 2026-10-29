@@ -30,6 +30,23 @@ pub trait Handler: Send + Sync {
     ) {
         self.serve(stream, cancel).await
     }
+
+    /// Dialect copied onto each new client session. `None` for non-protocol handlers.
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        None
+    }
+
+    /// One statement through the handler the node registered, on `session`.
+    /// `None` when this handler has no SQL path.
+    fn try_exec_sql(&self, _session: &str, _sql: &str) -> Option<Result<(), (String, String)>> {
+        None
+    }
+}
+
+/// Dialect every client protocol on this process speaks.
+pub(crate) fn client_dialect() -> spacestorage_compat::DialectProfile {
+    spacestorage_compat::profile_from_release(crate::CLIENT_RELEASE)
+        .expect("CLIENT_RELEASE maps to a dialect")
 }
 
 pub struct HandlerRegistry {
@@ -69,10 +86,10 @@ impl Default for HandlerRegistry {
     }
 }
 
-pub mod controlplane_namespaces;
 pub mod admin_http;
 pub mod admin_tcp;
 pub mod console_backend;
+pub mod controlplane_namespaces;
 pub mod echo;
 pub mod fabric;
 pub mod live_map;
@@ -80,15 +97,9 @@ pub mod postgresql;
 pub mod redis;
 pub mod stub_cluster;
 
-#[cfg(feature = "handlers-complete")]
 pub mod cassandra;
-#[cfg(feature = "handlers-complete")]
 pub mod clickhouse;
-#[cfg(feature = "handlers-complete")]
 pub mod elasticsearch;
-#[cfg(feature = "handlers-complete")]
 pub mod s3;
-#[cfg(feature = "complete-product")]
 pub mod syslog;
-#[cfg(feature = "handlers-complete")]
 pub mod webdav;

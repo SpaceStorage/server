@@ -1,6 +1,6 @@
 //! Authenticated session bind: tenant login + namespace connection quota (007).
 
-use crate::{admit_tenant_login, ConnectionQuotaHold, Result, Tenancy, TenancyError};
+use crate::{ConnectionQuotaHold, Result, Tenancy, TenancyError, admit_tenant_login};
 use std::sync::Arc;
 
 /// After credential verification: `admit_tenant_login` then optional `connections` quota.
@@ -39,9 +39,7 @@ pub fn ensure_namespace_registered(tenancy: &Tenancy, name: &str) -> Result<()> 
     if tenancy.registry.lock().get_by_name(name).is_some() {
         Ok(())
     } else {
-        Err(TenancyError::NamespaceNotFound {
-            name: name.into(),
-        })
+        Err(TenancyError::NamespaceNotFound { name: name.into() })
     }
 }
 

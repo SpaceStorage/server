@@ -385,8 +385,8 @@ pub async fn start_controlplane(node: Arc<Node>) -> Result<(), String> {
             )
             .map_err(|error| format!("bootstrap role admin: {error}"))?;
             cp.append_tenancy(spacestorage_tenancy::TenancyOp::RolePut { role })
-            .await
-            .map_err(|error| format!("bootstrap role admin: {error}"))?;
+                .await
+                .map_err(|error| format!("bootstrap role admin: {error}"))?;
         }
         if !snapshot.tenancy_roles.contains_key("replication") {
             let role = spacestorage_tenancy::roles::prepare_role_put(
@@ -395,8 +395,8 @@ pub async fn start_controlplane(node: Arc<Node>) -> Result<(), String> {
             )
             .map_err(|error| format!("bootstrap role replication: {error}"))?;
             cp.append_tenancy(spacestorage_tenancy::TenancyOp::RolePut { role })
-            .await
-            .map_err(|error| format!("bootstrap role replication: {error}"))?;
+                .await
+                .map_err(|error| format!("bootstrap role replication: {error}"))?;
         }
     }
     node.tenancy
@@ -744,12 +744,12 @@ fn spawn_tenancy_usage_reconcile(node: Arc<Node>) {
 fn wire_quota_delta_fanout(node: Arc<Node>) {
     let fabric = Arc::clone(&node.fabric);
     let node_cb = Arc::clone(&node);
-    node.tenancy.usage.set_delta_notify(Some(Arc::new(
-        move |delta| {
+    node.tenancy
+        .usage
+        .set_delta_notify(Some(Arc::new(move |delta| {
             let peers = quota_delta_peer_addrs(node_cb.as_ref());
             spacestorage_internode::spawn_broadcast(Arc::clone(&fabric), peers, delta);
-        },
-    )));
+        })));
 }
 
 fn quota_delta_peer_addrs(node: &Node) -> Vec<String> {

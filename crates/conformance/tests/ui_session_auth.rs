@@ -1,16 +1,20 @@
 //! UI `/ui/*` uses `014` SessionToken (AuthLogin), not interim static-token→admin.
 
-#![cfg(feature = "complete-product")]
-
-use spacestorage_authz::SessionTokenStore;
 use spacestorage_admin_ui::{AdminUiState, UiPrincipal};
+use spacestorage_authz::SessionTokenStore;
 use std::sync::Arc;
 use std::time::Duration;
 
 #[test]
 fn session_token_resolves_cluster_admin_for_ui() {
     let mut store = SessionTokenStore::new();
-    let (tok, _) = store.issue(uuid::Uuid::now_v7(), "admin", true, 1, Duration::from_secs(60));
+    let (tok, _) = store.issue(
+        uuid::Uuid::now_v7(),
+        "admin",
+        true,
+        1,
+        Duration::from_secs(60),
+    );
     let store = Arc::new(std::sync::RwLock::new(store));
     let store2 = Arc::clone(&store);
     let ui = AdminUiState {

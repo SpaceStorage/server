@@ -103,6 +103,7 @@ fn base_cfg(
             handler: "admin-http".into(),
             transport,
             tls,
+            ingest: None,
         }],
         buffers: BTreeMap::new(),
         cluster: ClusterDecl::default(),
@@ -118,6 +119,7 @@ fn base_cfg(
         log_syslog: None,
         jobs: spacestorage_config::model::JobsDecl::default(),
         kafka_ingests: Vec::new(),
+        namespaces: Vec::new(),
     }
 }
 
@@ -152,7 +154,7 @@ async fn boot_http_node(
         let http_port = unique_port().await;
         let cfg = base_cfg(http_port, token, transport.clone(), tls.clone());
         let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-        let node = Node::boot_first_binary(conf.clone(), cfg, threads, source);
+        let node = Node::boot(conf.clone(), cfg, threads, source);
         let run = tokio::spawn({
             let n = node.clone();
             async move { n.run().await }
@@ -267,7 +269,7 @@ async fn expired_cert_fails_startup() {
         }),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let err = node.run().await.expect_err("expired cert must fail bind");
     assert!(
         err.contains("expired") || err.contains("certificate"),
@@ -294,7 +296,7 @@ async fn missing_cert_files_fail_startup() {
         }),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let err = node.run().await.expect_err("missing cert must fail");
     assert!(
         err.contains("cannot read") || err.contains("certificate"),

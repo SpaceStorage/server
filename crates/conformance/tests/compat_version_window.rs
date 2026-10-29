@@ -1,8 +1,6 @@
 //! N/N+1 compat_version_window mixed fixture (full v1 Track 2).
 
-#![cfg(feature = "complete-product")]
-
-use spacestorage_compat::{evaluate_peer_join, ProductVersion, UpgradeJoin};
+use spacestorage_compat::{ProductVersion, UpgradeJoin, evaluate_peer_join};
 use spacestorage_membership::{JoinAck, JoinRequest, MembershipService, MembershipStartOpts};
 use std::collections::BTreeMap;
 use tempfile::tempdir;

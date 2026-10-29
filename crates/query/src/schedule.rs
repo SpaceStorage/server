@@ -3,8 +3,8 @@
 use crate::admission::{AdmissionController, AdmissionToken};
 use crate::error::ExecError;
 use crate::options::Concurrency;
-use crate::planner::{plan_is_spillable, PhysicalPlan};
-use crate::rank::{rank_nodes, RankKey};
+use crate::planner::{PhysicalPlan, plan_is_spillable};
+use crate::rank::{RankKey, rank_nodes};
 
 pub struct ScheduleOutcome {
     pub token: AdmissionToken,

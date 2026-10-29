@@ -1,7 +1,5 @@
 //! External KMS live unwrap conformance (full v1 Track 2).
 
-#![cfg(feature = "complete-product")]
-
 use spacestorage_crypto::{ExternalKmsProvider, MasterProvider};
 
 #[tokio::test]

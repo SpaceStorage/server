@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /// Compile-time / status hint for the default build.
-pub const RELEASE_PROFILE: &str = "first-binary";
+pub const RELEASE_PROFILE: &str = "complete-product";
 
 pub fn first_binary_handlers() -> HandlerBuildSet {
     ReleaseProfile::FirstBinary.handler_set()
@@ -42,7 +42,6 @@ pub fn first_binary_handler_names() -> &'static [&'static str] {
 }
 
 /// Expanded known list when `--features handlers-complete` is enabled.
-#[cfg(feature = "handlers-complete")]
 pub fn handlers_complete_handler_names() -> &'static [&'static str] {
     &[
         "admin",
@@ -382,18 +381,17 @@ async fn boot_from_template(
     let conf_path = work.join("node.conf");
     std::fs::write(&conf_path, &text).unwrap();
 
-    let handlers = first_binary_handler_names();
     let (cfg, _) = parse_validate(
         &text,
         &conf_path,
         &[],
-        handlers,
-        ValidateOptions::first_binary(),
+        spacestorage_node::HANDLER_NAMES,
+        ValidateOptions::complete_product(),
     )
     .unwrap_or_else(|e| panic!("validate {}: {e:?}", conf_path.display()));
 
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf_path.clone(), cfg, threads, source);
+    let node = Node::boot(conf_path.clone(), cfg, threads, source);
     let run = {
         let n = node.clone();
         tokio::spawn(async move { n.run().await })
@@ -422,7 +420,8 @@ pub async fn boot_one_node(root: &Path) -> LabNode {
 pub async fn boot_tenancy_one_node(root: &Path) -> LabNode {
     let work = root.join("tenancy");
     let ports = PortMap::ephemeral().await;
-    let template = std::fs::read_to_string(fixtures_dir().join("first-binary-one-node.conf")).unwrap();
+    let template =
+        std::fs::read_to_string(fixtures_dir().join("first-binary-one-node.conf")).unwrap();
     let template = inject_cluster_directive(&template, "starter_namespace acme");
     let lab = boot_from_template(template, work, ports, None, None, None).await;
     lab.wait_ready(Duration::from_secs(10)).await;
@@ -449,8 +448,7 @@ pub async fn admin_tcp_json(port: u16, token: &str, op: AdminOp) -> serde_json::
     let hello = serde_json::json!({"proto_version": 1, "token": token, "client": "conformance"});
     stream
         .write_all(
-            &spacestorage_admin_proto::encode_frame(&serde_json::to_vec(&hello).unwrap())
-                .unwrap(),
+            &spacestorage_admin_proto::encode_frame(&serde_json::to_vec(&hello).unwrap()).unwrap(),
         )
         .await
         .unwrap();
@@ -698,10 +696,10 @@ pub fn validate_fixture(rel: &str) -> Result<(), Vec<spacestorage_config::Config
         &text,
         &path,
         &[],
-        first_binary_handler_names(),
+        spacestorage_node::HANDLER_NAMES,
         ValidateOptions {
             check_secrets_readable: false,
-            ..ValidateOptions::first_binary()
+            ..ValidateOptions::complete_product()
         },
     )
     .map(|_| ())
@@ -715,10 +713,10 @@ pub fn validate_tenancy_fixture(rel: &str) -> Result<(), Vec<spacestorage_config
         &text,
         &path,
         &[],
-        first_binary_handler_names(),
+        spacestorage_node::HANDLER_NAMES,
         ValidateOptions {
             check_secrets_readable: false,
-            ..ValidateOptions::first_binary()
+            ..ValidateOptions::complete_product()
         },
     )
     .map(|_| ())

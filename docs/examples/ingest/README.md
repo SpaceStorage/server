@@ -20,4 +20,3 @@ Default UI poll interval: **2 s** (`?interval=` 1–10).
 - Kafka declare: `NAMESPACE_ADMIN`+`WRITE` or `CLUSTER_ADMIN` (`WRITE` alone → `ingest_write_only`)
 - Syslog bind: `CLUSTER_ADMIN` only (`ingest_syslog_cluster_only`)
 
-A build without `--features complete-product` rejects these configs with `UiIngestSlice11Required`.

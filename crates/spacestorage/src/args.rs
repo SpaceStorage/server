@@ -199,8 +199,13 @@ pub enum Command {
 
 #[derive(Subcommand, Debug)]
 pub enum NamespaceAction {
-    Create { name: String },
-    Rename { name: String, new_name: String },
+    Create {
+        name: String,
+    },
+    Rename {
+        name: String,
+        new_name: String,
+    },
     Delete {
         name: String,
         #[arg(long)]

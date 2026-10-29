@@ -23,7 +23,7 @@ The complete product listens for stock clients on the ports you declare. One ent
 | `internode` | Node-to-node, including Raft |
 | `replication` | Replica traffic |
 
-Build with `--features complete-product`. Without that flag the binary refuses `cassandra`, `elasticsearch`, `clickhouse`, `clickhouse-http`, `s3`, and `webdav` at startup.
+`cargo build -p spacestoraged -p spacestorage` is this server. There is no smaller build.
 
 A verb outside the supported set for that protocol returns a not-supported error. It does not return an empty success. The verb tables are in `specs/015-compatibility-and-limits/contracts/`.
 

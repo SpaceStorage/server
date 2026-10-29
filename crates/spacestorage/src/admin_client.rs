@@ -5,11 +5,7 @@ use crate::http_client;
 use spacestorage_admin_proto::{AdminOp, ErrorBody};
 use std::process::ExitCode;
 
-pub fn run_admin_op(
-    endpoint: &str,
-    op: AdminOp,
-    output: Option<&str>,
-) -> ExitCode {
+pub fn run_admin_op(endpoint: &str, op: AdminOp, output: Option<&str>) -> ExitCode {
     let token = std::env::var("SPACESTORAGE_TOKEN").ok();
     match http_client::request(
         "POST",

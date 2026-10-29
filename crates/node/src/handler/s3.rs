@@ -23,9 +23,7 @@ impl S3PortHandler {
         catalog: Arc<RwLock<ContainerCatalog>>,
         limit_services: LimitServices,
     ) -> Self {
-        Self {
-            inner: S3Handler::with_limits(catalog, limit_services),
-        }
+        speak(S3Handler::with_limits(catalog, limit_services))
     }
 
     pub fn with_tenancy(
@@ -33,10 +31,13 @@ impl S3PortHandler {
         limit_services: LimitServices,
         tenancy: Arc<spacestorage_tenancy::Tenancy>,
     ) -> Self {
-        Self {
-            inner: S3Handler::with_limits(catalog, limit_services).with_tenancy(tenancy),
-        }
+        speak(S3Handler::with_limits(catalog, limit_services).with_tenancy(tenancy))
     }
+}
+
+fn speak(mut inner: S3Handler) -> S3PortHandler {
+    inner.profile = super::client_dialect();
+    S3PortHandler { inner }
 }
 
 #[async_trait]
@@ -55,5 +56,23 @@ impl Handler for S3PortHandler {
 
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         self.inner.serve(stream, cancel).await;
+    }
+
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        Some(self.inner.profile)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spacestorage_compat::DialectProfile;
+    use spacestorage_types::ContainerCatalog;
+
+    #[test]
+    fn port_speaks_complete_product() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let h = S3PortHandler::new(cat);
+        assert_eq!(h.dialect(), Some(DialectProfile::CompleteProduct));
     }
 }

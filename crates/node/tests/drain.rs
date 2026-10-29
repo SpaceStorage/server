@@ -62,6 +62,7 @@ fn config_with_echo(
         log_syslog: None,
         jobs: spacestorage_config::model::JobsDecl::default(),
         kafka_ingests: Vec::new(),
+        namespaces: Vec::new(),
     }
 }
 
@@ -99,7 +100,7 @@ async fn inflight_completes_within_drain_timeout() {
         Duration::from_secs(3),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let run = tokio::spawn({
         let n = node.clone();
         async move { n.run().await }
@@ -156,7 +157,7 @@ async fn drain_timeout_records_timed_out() {
         Duration::from_millis(200),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let run = tokio::spawn({
         let n = node.clone();
         async move { n.run().await }
@@ -195,7 +196,7 @@ async fn second_force_abort_during_drain() {
         Duration::from_secs(30),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let run = tokio::spawn({
         let n = node.clone();
         async move { n.run().await }
@@ -232,7 +233,7 @@ async fn stop_before_ready_aborts_without_ready() {
         Duration::from_secs(2),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     // Abort before run binds / becomes ready.
     node.cancel.cancel();
     node.force_cancel.cancel();
@@ -266,7 +267,7 @@ async fn admin_reachable_while_draining() {
         Duration::from_secs(10),
     );
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let run = tokio::spawn({
         let n = node.clone();
         async move { n.run().await }

@@ -1,6 +1,6 @@
 //! Invalid raft / exclusive-data fixtures (006 T072) — exit validate with errors.
 
-use spacestorage_config::{parse_validate, ValidateOptions};
+use spacestorage_config::{ValidateOptions, parse_validate};
 use std::path::PathBuf;
 
 fn fixtures_dir() -> PathBuf {

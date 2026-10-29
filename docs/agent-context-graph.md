@@ -32,8 +32,7 @@ flowchart TB
 | Specs | `specs/001`–`016` | Spec, plan, contracts, `tasks.md` |
 | Milestones | `docs/milestones/` | Slice ledger `007-complete-product` (slices 1–11 closed). Product tip `009-full-product` |
 | Code | `crates/` | Implementation |
-| Gate | `cargo test -p spacestorage-conformance --features first-binary` | First-binary DoD signal |
-| Full product | `cargo test -p spacestorage-conformance --features complete-product` | Slices 1–11 merge gate |
+| Gate | `cargo test -p spacestorage-conformance` | One-server merge gate |
 
 ## Slice ladder → specs
 

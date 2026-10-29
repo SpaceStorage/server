@@ -1,10 +1,8 @@
 //! Syslog ingest 1:1 conformance (009 US3) — feature `complete-product`.
 
-#![cfg(feature = "complete-product")]
-
-use spacestorage_config::{parse_validate, ErrorCode, ValidateOptions};
+use spacestorage_config::{ErrorCode, ValidateOptions, parse_validate};
 use spacestorage_ingest::declaration::{IngestAuthz, SyslogIngestBind};
-use spacestorage_ingest::syslog::SyslogHandler;
+use spacestorage_ingest::syslog::{IngestOutcome, SyslogHandler};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -45,7 +43,7 @@ fn two_syslog_ports_isolated() {
     )
     .unwrap();
     let line = r#"<34>1 2024-01-01T00:00:00Z host app - - - only-a"#;
-    assert!(a.ingest_line(line));
+    assert_eq!(a.ingest_line(line), IngestOutcome::Ok);
     assert!(!b.stored.lock().iter().any(|r| r.message.contains("only-a")));
     assert!(a.stored.lock().iter().any(|r| r.message.contains("only-a")));
 }
@@ -62,8 +60,14 @@ fn rfc5424_and_3164_stored() {
         Arc::new(|_| {}),
     )
     .unwrap();
-    assert!(h.ingest_line(r#"<34>1 2024-01-01T00:00:00Z host app 1 mid - hello5424"#));
-    assert!(h.ingest_line("<34>Oct 11 22:14:15 mymachine su: hello3164"));
+    assert_eq!(
+        h.ingest_line(r#"<34>1 2024-01-01T00:00:00Z host app 1 mid - hello5424"#),
+        IngestOutcome::Ok
+    );
+    assert_eq!(
+        h.ingest_line("<34>Oct 11 22:14:15 mymachine su: hello3164"),
+        IngestOutcome::Ok
+    );
     let msgs: Vec<_> = h.stored.lock().iter().map(|r| r.message.clone()).collect();
     assert!(msgs.iter().any(|m| m.contains("hello5424")));
     assert!(msgs.iter().any(|m| m.contains("hello3164")));
@@ -78,7 +82,10 @@ fn non_cluster_admin_bind_refused() {
         type_name: "log_stream".into(),
     };
     let authz = IngestAuthz::namespace_admin_with_write("acme", "events");
-    assert_eq!(bind.authorize_bind(&authz).unwrap_err().code(), "ingest_syslog_cluster_only");
+    assert_eq!(
+        bind.authorize_bind(&authz).unwrap_err().code(),
+        "ingest_syslog_cluster_only"
+    );
 }
 
 #[test]
@@ -86,9 +93,7 @@ fn missing_target_and_empty_brokers_fixtures() {
     let root = fixtures_root();
     let text = std::fs::read_to_string(root.join("invalid/syslog-missing-target.conf")).unwrap();
     // Minimal wrapper — fixture may be a fragment; validate via complete_product opts with syslog known.
-    let _wrapped = format!(
-        "node {{ name n1; }}\ndisable admin;\ndisable admin-http;\n{text}"
-    );
+    let _wrapped = format!("node {{ name n1; }}\ndisable admin;\ndisable admin-http;\n{text}");
     // If fragment only has ingest child, skip; use structured check:
     let bind = SyslogIngestBind {
         entrypoint: "x".into(),
@@ -98,7 +103,8 @@ fn missing_target_and_empty_brokers_fixtures() {
     };
     assert_eq!(bind.validate().unwrap_err().code(), "ingest_missing_target");
 
-    let kafka_empty = std::fs::read_to_string(root.join("invalid/kafka-empty-brokers.conf")).unwrap_or_default();
+    let kafka_empty =
+        std::fs::read_to_string(root.join("invalid/kafka-empty-brokers.conf")).unwrap_or_default();
     let _ = kafka_empty;
     let err = parse_validate(
         r#"
@@ -130,13 +136,14 @@ ingest kafka bad {
 }
 
 #[test]
-fn first_binary_refuses_kafka_and_syslog() {
+fn slice11_reject_option_refuses_kafka_and_syslog() {
     let root = fixtures_root();
-    for name in ["invalid/kafka-on-first-binary.conf", "invalid/syslog-on-first-binary.conf"] {
+    for name in [
+        "invalid/kafka-on-first-binary.conf",
+        "invalid/syslog-on-first-binary.conf",
+    ] {
         let text = std::fs::read_to_string(root.join(name)).unwrap();
-        let wrapped = format!(
-            "node {{ name n1; }}\ndisable admin;\ndisable admin-http;\n{text}"
-        );
+        let wrapped = format!("node {{ name n1; }}\ndisable admin;\ndisable admin-http;\n{text}");
         let err = parse_validate(
             &wrapped,
             std::path::Path::new(name),

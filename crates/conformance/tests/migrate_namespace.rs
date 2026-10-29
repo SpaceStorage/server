@@ -43,7 +43,13 @@ fn copy_leaves_source_move_drops() {
     let authz = AuthzContext::cluster_admin();
     let body = serde_json::to_value(base_spec()).unwrap();
     let job = svc
-        .start(JobKind::DataMigration, Uuid::nil(), Strategy::Live, body, &authz)
+        .start(
+            JobKind::DataMigration,
+            Uuid::nil(),
+            Strategy::Live,
+            body,
+            &authz,
+        )
         .unwrap();
     let done = runner
         .run_live(
@@ -73,7 +79,13 @@ fn copy_leaves_source_move_drops() {
     move_spec.policy = MigratePolicy::Move;
     let body2 = serde_json::to_value(&move_spec).unwrap();
     let job2 = svc
-        .start(JobKind::DataMigration, Uuid::nil(), Strategy::Live, body2, &authz)
+        .start(
+            JobKind::DataMigration,
+            Uuid::nil(),
+            Strategy::Live,
+            body2,
+            &authz,
+        )
         .unwrap();
     runner
         .run_live(

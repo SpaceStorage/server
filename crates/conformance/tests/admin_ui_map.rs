@@ -1,7 +1,5 @@
 //! Admin UI cluster map conformance (009 US1) — feature `complete-product`.
 
-#![cfg(feature = "complete-product")]
-
 use spacestorage_admin_ui::{
     ClusterMapView, ContainerMapEntry, MapAuthz, MapComposer, MapScope, MigrationProgress,
     NodeMapEntry, ReplicaMapEntry, ShardMapEntry, TopologySnapshot, UiPrincipal,
@@ -95,7 +93,10 @@ fn namespace_admin_scope_hides_other_tenants() {
 #[test]
 fn unprivileged_forbidden() {
     let c = MapComposer::with_topology(lag_topology());
-    assert!(c.compose(&UiPrincipal::unprivileged("x").map_authz(), None).is_err());
+    assert!(
+        c.compose(&UiPrincipal::unprivileged("x").map_authz(), None)
+            .is_err()
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! Contract fixture tests for metrics / observability config (008 T016).
 
-use spacestorage_config::{parse_validate, ErrorCode, ValidateOptions};
+use spacestorage_config::{ErrorCode, ValidateOptions, parse_validate};
 use std::path::Path;
 
 fn load(rel: &str) -> String {
@@ -59,14 +59,8 @@ fn kafka_empty_brokers_invalid() {
         require_master_key: false,
         ..opts
     };
-    let err = parse_validate(
-        &text,
-        Path::new("kafka-empty-brokers.conf"),
-        &[],
-        &[],
-        opts,
-    )
-    .unwrap_err();
+    let err =
+        parse_validate(&text, Path::new("kafka-empty-brokers.conf"), &[], &[], opts).unwrap_err();
     assert!(
         err.iter()
             .any(|e| e.code == ErrorCode::SinkConfigInvalid.as_str()),

@@ -1,5 +1,5 @@
 use crate::error::{ConfigError, ErrorCode};
-use crate::model::{buffer_spec, NodeConfig, Transport, BUILTIN_BUFFERS};
+use crate::model::{BUILTIN_BUFFERS, NodeConfig, Transport, buffer_spec};
 use crate::parser;
 use crate::resolve;
 use std::collections::{BTreeMap, BTreeSet};
@@ -677,10 +677,7 @@ pub fn validate(
             || cfg.metrics.audit_log
             || cfg.log_kafka.is_some()
             || cfg.log_syslog.is_some()
-            || cfg
-                .entrypoints
-                .iter()
-                .any(|e| e.handler == "metrics");
+            || cfg.entrypoints.iter().any(|e| e.handler == "metrics");
         if slice9 {
             errors.push(ConfigError::new(
                 file,
@@ -710,7 +707,11 @@ pub fn validate(
                 file,
                 0,
                 0,
-                if has_kafka { "ingest.kafka" } else { "handler.syslog" },
+                if has_kafka {
+                    "ingest.kafka"
+                } else {
+                    "handler.syslog"
+                },
                 ErrorCode::UiIngestSlice11Required,
                 "UI / Kafka / syslog ingest require slice 11 (complete-product)",
             ));
@@ -726,7 +727,10 @@ pub fn validate(
                     0,
                     "entrypoint.ingest",
                     ErrorCode::IngestMissingTarget,
-                    format!("syslog entrypoint '{}' missing ingest {{ namespace; container; }}", ep.name),
+                    format!(
+                        "syslog entrypoint '{}' missing ingest {{ namespace; container; }}",
+                        ep.name
+                    ),
                 )),
                 Some(ing) if ing.namespace.is_empty() || ing.container.is_empty() => {
                     errors.push(ConfigError::new(
@@ -735,7 +739,10 @@ pub fn validate(
                         0,
                         "entrypoint.ingest",
                         ErrorCode::IngestMissingTarget,
-                        format!("syslog entrypoint '{}' missing namespace/container", ep.name),
+                        format!(
+                            "syslog entrypoint '{}' missing namespace/container",
+                            ep.name
+                        ),
                     ));
                 }
                 _ => {}

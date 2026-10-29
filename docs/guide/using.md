@@ -5,10 +5,8 @@ Work from the repository root (`server/`). Workspace `rust-version` is 1.88.
 ## Build
 
 ```bash
-cargo build -p spacestoraged -p spacestorage --features complete-product
+cargo build -p spacestoraged -p spacestorage
 ```
-
-A plain `cargo build -p spacestoraged` leaves out the other handlers, the admin UI, and the later mounts.
 
 The daemon is `target/debug/spacestoraged`. The CLI is `target/debug/spacestorage`.
 
@@ -82,7 +80,7 @@ Exit code 4 from namespace, quota, and role commands means `NotClusterAdmin`, `C
 | `validate <file>` | Parse and check a config. Exit 2 on a hard error |
 | `status` | Node status |
 | `namespaces` / `namespace` | List, create, rename, delete, describe |
-| `quotas set` | Replace a namespace quota (complete product, `tenancy-quotas`) |
+| `quotas set` | Replace a namespace quota |
 | `roles` | List roles |
 | `executions` / `explain` / `jobs` | Query engine |
 | `migrate` / `transform` / `backup` / `restore` / `job` | Data movement |

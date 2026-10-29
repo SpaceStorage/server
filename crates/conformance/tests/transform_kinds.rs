@@ -3,8 +3,8 @@
 #![cfg(feature = "migration-backup")]
 
 use spacestorage_migrate::{
-    resolve_mapping, AuthzContext, ContainerRef, JobKind, JobService, QuotaView, RewriteKind,
-    Strategy, TransformSpec,
+    AuthzContext, ContainerRef, JobKind, JobService, QuotaView, RewriteKind, Strategy,
+    TransformSpec, resolve_mapping,
 };
 use spacestorage_storage::{ContentStore, StorageMode};
 use std::collections::HashMap;

@@ -56,6 +56,7 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
         log_syslog: None,
         jobs: spacestorage_config::model::JobsDecl::default(),
         kafka_ingests: Vec::new(),
+        namespaces: Vec::new(),
     }
 }
 
@@ -149,7 +150,7 @@ async fn status_config_threads_buffers_match_across_transports() {
     let http_port = ephemeral_port().await;
     let cfg = lab_config(admin_port, http_port, token_path.to_str().unwrap());
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let run = tokio::spawn({
         let n = node.clone();
         async move { n.run().await }

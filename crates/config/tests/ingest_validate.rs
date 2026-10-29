@@ -1,6 +1,6 @@
 //! Config validate for ingest (009).
 
-use spacestorage_config::{parse_validate, ErrorCode, ValidateOptions};
+use spacestorage_config::{ErrorCode, ValidateOptions, parse_validate};
 
 #[test]
 fn kafka_empty_brokers() {

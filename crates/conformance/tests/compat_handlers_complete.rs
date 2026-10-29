@@ -2,15 +2,13 @@
 //!
 //! Run: `CARGO_TARGET_DIR=target cargo test -p spacestorage-conformance --features handlers-complete`
 
-#![cfg(feature = "handlers-complete")]
-
 use spacestorage_compat::{
-    classify_outcome, ClassifyOutcome, CompatError, DialectProfile, ProtocolId,
+    ClassifyOutcome, CompatError, DialectProfile, ProtocolId, classify_outcome,
 };
-use spacestorage_handler_cassandra::{CassandraReply, SessionState as CassSession, dispatch as cass};
-use spacestorage_handler_clickhouse::{
-    ClickHouseReply, SessionState as ChSession, dispatch as ch,
+use spacestorage_handler_cassandra::{
+    CassandraReply, SessionState as CassSession, dispatch as cass,
 };
+use spacestorage_handler_clickhouse::{ClickHouseReply, SessionState as ChSession, dispatch as ch};
 use spacestorage_handler_elasticsearch::{EsReply, SessionState as EsSession, dispatch as es};
 use spacestorage_handler_s3::{S3Reply, SessionState as S3Session, dispatch as s3};
 use spacestorage_handler_webdav::{SessionState as DavSession, WebDavReply, dispatch as dav};
@@ -45,7 +43,10 @@ fn fb_still_forbids_hc_handlers() {
         "s3",
         "webdav",
     ] {
-        assert!(set.is_forbidden(h), "{h} must stay forbidden in FirstBinary");
+        assert!(
+            set.is_forbidden(h),
+            "{h} must stay forbidden in FirstBinary"
+        );
     }
 }
 
@@ -53,8 +54,14 @@ fn fb_still_forbids_hc_handlers() {
 fn cassandra_must_smoke_and_lwt_must_not() {
     let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
     let mut s = CassSession::demo(cat);
-    assert!(matches!(cass(&mut s, "CREATE", &["TABLE", "t"]), CassandraReply::Ok));
-    assert!(matches!(cass(&mut s, "INSERT", &["t", "1", "a"]), CassandraReply::Ok));
+    assert!(matches!(
+        cass(&mut s, "CREATE", &["TABLE", "t"]),
+        CassandraReply::Ok
+    ));
+    assert!(matches!(
+        cass(&mut s, "INSERT", &["t", "1", "a"]),
+        CassandraReply::Ok
+    ));
     match cass(&mut s, "SELECT", &["t", "1"]) {
         CassandraReply::Rows(r) => assert_eq!(r[0].1, "a"),
         other => panic!("{other:?}"),
@@ -69,7 +76,10 @@ fn cassandra_must_smoke_and_lwt_must_not() {
 fn elasticsearch_crud_search_and_agg_ilm_refuse() {
     let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
     let mut s = EsSession::demo(cat);
-    assert!(matches!(es(&mut s, "CREATE_INDEX", &["docs"]), EsReply::Ok(_)));
+    assert!(matches!(
+        es(&mut s, "CREATE_INDEX", &["docs"]),
+        EsReply::Ok(_)
+    ));
     assert!(matches!(
         es(&mut s, "INDEX", &["docs", "1", r#"{"title":"hello"}"#]),
         EsReply::Ok(_)
@@ -137,13 +147,22 @@ fn s3_must_smoke_and_versioning_refuse() {
     let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
     let mut s = S3Session::demo(cat);
     assert!(matches!(s3(&mut s, "CREATEBUCKET", &["b"]), S3Reply::Ok));
-    assert!(matches!(s3(&mut s, "PUTOBJECT", &["b", "k", "v"]), S3Reply::Ok));
+    assert!(matches!(
+        s3(&mut s, "PUTOBJECT", &["b", "k", "v"]),
+        S3Reply::Ok
+    ));
     match s3(&mut s, "GETOBJECT", &["b", "k"]) {
         S3Reply::Body(b) => assert_eq!(b, b"v"),
         other => panic!("{other:?}"),
     }
-    assert!(matches!(s3(&mut s, "LISTOBJECTSV2", &["b"]), S3Reply::Xml(_)));
-    assert!(matches!(s3(&mut s, "DELETEOBJECT", &["b", "k"]), S3Reply::Ok));
+    assert!(matches!(
+        s3(&mut s, "LISTOBJECTSV2", &["b"]),
+        S3Reply::Xml(_)
+    ));
+    assert!(matches!(
+        s3(&mut s, "DELETEOBJECT", &["b", "k"]),
+        S3Reply::Ok
+    ));
     match s3(&mut s, "VERSIONING", &["b"]) {
         S3Reply::Error { code, .. } => assert_eq!(code, "compat_must_not"),
         other => panic!("{other:?}"),
@@ -155,7 +174,10 @@ fn webdav_must_smoke_and_lock_refuse() {
     let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
     let mut s = DavSession::demo(cat);
     assert!(matches!(dav(&mut s, "MKCOL", &["/dir"]), WebDavReply::Ok));
-    assert!(matches!(dav(&mut s, "PUT", &["/dir/f", "hi"]), WebDavReply::Ok));
+    assert!(matches!(
+        dav(&mut s, "PUT", &["/dir/f", "hi"]),
+        WebDavReply::Ok
+    ));
     match dav(&mut s, "GET", &["/dir/f"]) {
         WebDavReply::Body(b) => assert_eq!(b, b"hi"),
         other => panic!("{other:?}"),
@@ -168,7 +190,10 @@ fn webdav_must_smoke_and_lock_refuse() {
         dav(&mut s, "MOVE", &["/dir/f", "/dir/g"]),
         WebDavReply::Ok
     ));
-    assert!(matches!(dav(&mut s, "DELETE", &["/dir/g"]), WebDavReply::Ok));
+    assert!(matches!(
+        dav(&mut s, "DELETE", &["/dir/g"]),
+        WebDavReply::Ok
+    ));
     match dav(&mut s, "LOCK", &["/x"]) {
         WebDavReply::Error { code, .. } => assert_eq!(code, "compat_must_not"),
         other => panic!("{other:?}"),
@@ -198,22 +223,34 @@ fn classify_must_not_before_ir_named_codes() {
 
 #[test]
 fn handshake_mismatch_refuse_under_one_second() {
-    use spacestorage_protocol_core::{detect_signature, ProtocolFamily, SignatureMatch};
+    use spacestorage_protocol_core::{ProtocolFamily, SignatureMatch, detect_signature};
     use std::time::{Duration, Instant};
 
     let start = Instant::now();
     let cases = [
-        (ProtocolFamily::Cassandra, &b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"[..]),
+        (
+            ProtocolFamily::Cassandra,
+            &b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"[..],
+        ),
         (ProtocolFamily::S3, &b"*1\r\n$4\r\nPING\r\n"[..]),
-        (ProtocolFamily::WebDav, &b"\x04\x00\x00\x01\x05\x00\x00\x00\x00"[..]),
-        (ProtocolFamily::ClickHouseNative, &b"GET / HTTP/1.1\r\n\r\n"[..]),
+        (
+            ProtocolFamily::WebDav,
+            &b"\x04\x00\x00\x01\x05\x00\x00\x00\x00"[..],
+        ),
+        (
+            ProtocolFamily::ClickHouseNative,
+            &b"GET / HTTP/1.1\r\n\r\n"[..],
+        ),
         (ProtocolFamily::Elasticsearch, &b"*1\r\n$4\r\nPING\r\n"[..]),
         (ProtocolFamily::Redis, &b"GET / HTTP/1.1\r\n\r\n"[..]),
         (ProtocolFamily::Postgresql, &b"GET / HTTP/1.1\r\n\r\n"[..]),
     ];
     for (fam, bytes) in cases {
         assert!(
-            matches!(detect_signature(fam, bytes), SignatureMatch::Mismatch { .. }),
+            matches!(
+                detect_signature(fam, bytes),
+                SignatureMatch::Mismatch { .. }
+            ),
             "{fam:?} should mismatch"
         );
     }

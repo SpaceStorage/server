@@ -8,10 +8,8 @@ description = "SpaceStorage release profile, slice ledger, and product non-goal 
 publish = false
 
 [features]
-default = ["first-binary"]
-first-binary = []
-handlers-complete = []
-control-plane-tenancy-authz = ["handlers-complete"]
+default = ["complete-product"]
+control-plane-tenancy-authz = []
 # Slice 8: shared planner beyond CRUD (BEGIN/COPY/join/agg/MapReduce/subscribe).
 query-distributed = ["control-plane-tenancy-authz"]
 observability-catalog = ["query-distributed"]

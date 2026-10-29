@@ -1,6 +1,8 @@
 //! Access policies (slice 7 / tenancy-quotas).
 
-use crate::error::{Result, TenancyError};
+use crate::error::Result;
+#[cfg(not(feature = "tenancy-quotas"))]
+use crate::error::TenancyError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

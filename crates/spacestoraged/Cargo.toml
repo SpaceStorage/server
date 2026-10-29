@@ -10,18 +10,9 @@ publish = false
 name = "spacestoraged"
 path = "src/main.rs"
 
-[features]
-default = ["first-binary"]
-first-binary = []
-handlers-complete = ["spacestorage-node/handlers-complete"]
-complete-product = [
-    "handlers-complete",
-    "spacestorage-node/complete-product",
-]
-
 [dependencies]
 spacestorage-config = { path = "../config" }
-spacestorage-node = { path = "../node" }
+spacestorage-node = { path = "../node", features = ["tenancy-quotas"] }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

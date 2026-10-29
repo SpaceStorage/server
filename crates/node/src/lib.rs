@@ -108,7 +108,7 @@ impl Node {
         self.handlers.read().unwrap().names()
     }
 
-    pub fn boot_first_binary(
+    pub fn boot(
         config_path: PathBuf,
         cfg: NodeConfig,
         worker_threads: u32,
@@ -145,8 +145,8 @@ impl Node {
             1,
         ));
         let metrics = Arc::new(spacestorage_observability::Metrics::default());
-        let slice10 = cfg.jobs.enabled || cfg!(feature = "migration-backup");
-        let slice11 = cfg!(feature = "complete-product");
+        let slice10 = true;
+        let slice11 = true;
         let jobs = Arc::new(
             spacestorage_migrate::JobService::new(slice10).with_metrics(Arc::clone(&metrics)),
         );
@@ -264,17 +264,10 @@ impl Node {
                     config.load().limits.limits.clone()
                 })
             };
-            // 002 first-binary: real async protocol handlers (replace byte-sink stubs).
             reg.register(Arc::new(
                 postgresql::PostgresqlPortHandler::with_namespace_control(
                     Arc::clone(&node.catalog),
-                    if cfg!(feature = "complete-product") {
-                        "complete-product"
-                    } else if cfg!(feature = "handlers-complete") {
-                        "handlers-complete"
-                    } else {
-                        "first-binary"
-                    },
+                    CLIENT_RELEASE,
                     limit_services.clone(),
                     Arc::clone(&node.controlplane),
                     Arc::clone(&node.tenancy),
@@ -287,79 +280,66 @@ impl Node {
                 Arc::clone(&node.tenancy),
             )))
             .unwrap();
-            #[cfg(feature = "handlers-complete")]
-            {
-                reg.register(Arc::new(
-                    crate::handler::cassandra::CassandraPortHandler::with_namespace_control(
-                        Arc::clone(&node.catalog),
-                        limit_services.clone(),
-                        Arc::clone(&node.controlplane),
-                        Arc::clone(&node.tenancy),
-                    ),
-                ))
-                .unwrap();
-                reg.register(Arc::new(
-                    crate::handler::elasticsearch::ElasticsearchPortHandler::with_tenancy(
-                        Arc::clone(&node.catalog),
-                        limit_services.clone(),
-                        Arc::clone(&node.tenancy),
-                    ),
-                ))
-                .unwrap();
-                reg.register(Arc::new(
-                    crate::handler::clickhouse::ClickHousePortHandler::with_namespace_control(
-                        Arc::clone(&node.catalog),
-                        limit_services.clone(),
-                        Arc::clone(&node.controlplane),
-                        Arc::clone(&node.tenancy),
-                    ),
-                ))
-                .unwrap();
-                reg.register(Arc::new(
-                    crate::handler::clickhouse::ClickHouseHttpPortHandler::with_namespace_control(
-                        Arc::clone(&node.catalog),
-                        limit_services.clone(),
-                        Arc::clone(&node.controlplane),
-                        Arc::clone(&node.tenancy),
-                    ),
-                ))
-                .unwrap();
-                reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_tenancy(
+            reg.register(Arc::new(
+                crate::handler::cassandra::CassandraPortHandler::with_namespace_control(
+                    Arc::clone(&node.catalog),
+                    limit_services.clone(),
+                    Arc::clone(&node.controlplane),
+                    Arc::clone(&node.tenancy),
+                ),
+            ))
+            .unwrap();
+            reg.register(Arc::new(
+                crate::handler::elasticsearch::ElasticsearchPortHandler::with_tenancy(
                     Arc::clone(&node.catalog),
                     limit_services.clone(),
                     Arc::clone(&node.tenancy),
-                )))
-                .unwrap();
-                reg.register(Arc::new(
-                    crate::handler::webdav::WebDavPortHandler::with_tenancy(
-                        Arc::clone(&node.catalog),
-                        limit_services.clone(),
-                        Arc::clone(&node.tenancy),
-                    ),
-                ))
-                .unwrap();
-            }
-            #[cfg(not(feature = "handlers-complete"))]
-            {
-                let _ = limit_services;
-            }
-            #[cfg(feature = "complete-product")]
-            {
-                reg.register(Arc::new(crate::handler::syslog::SyslogPortHandler {
-                    node: Arc::clone(&node),
-                }))
-                .unwrap();
-            }
+                ),
+            ))
+            .unwrap();
+            reg.register(Arc::new(
+                crate::handler::clickhouse::ClickHousePortHandler::with_namespace_control(
+                    Arc::clone(&node.catalog),
+                    limit_services.clone(),
+                    Arc::clone(&node.controlplane),
+                    Arc::clone(&node.tenancy),
+                ),
+            ))
+            .unwrap();
+            reg.register(Arc::new(
+                crate::handler::clickhouse::ClickHouseHttpPortHandler::with_namespace_control(
+                    Arc::clone(&node.catalog),
+                    limit_services.clone(),
+                    Arc::clone(&node.controlplane),
+                    Arc::clone(&node.tenancy),
+                ),
+            ))
+            .unwrap();
+            reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_tenancy(
+                Arc::clone(&node.catalog),
+                limit_services.clone(),
+                Arc::clone(&node.tenancy),
+            )))
+            .unwrap();
+            reg.register(Arc::new(
+                crate::handler::webdav::WebDavPortHandler::with_tenancy(
+                    Arc::clone(&node.catalog),
+                    limit_services.clone(),
+                    Arc::clone(&node.tenancy),
+                ),
+            ))
+            .unwrap();
+            reg.register(Arc::new(crate::handler::syslog::SyslogPortHandler {
+                node: Arc::clone(&node),
+            }))
+            .unwrap();
+            let _ = limit_services;
         }
-        // Wire console to shared 005 catalog / 001 config (T050).
-        #[cfg(feature = "complete-product")]
-        {
-            let backend = Arc::new(crate::handler::console_backend::CatalogConsoleBackend::new(
-                Arc::clone(&node),
-            ));
-            if let Ok(mut ui) = node.admin_ui.write() {
-                ui.console.set_backend(backend);
-            }
+        let backend = Arc::new(crate::handler::console_backend::CatalogConsoleBackend::new(
+            Arc::clone(&node),
+        ));
+        if let Ok(mut ui) = node.admin_ui.write() {
+            ui.console.set_backend(backend);
         }
         node
     }
@@ -478,10 +458,7 @@ impl Node {
         }
         info!(state = "ready", "node ready");
 
-        #[cfg(feature = "complete-product")]
-        {
-            let _kafka_sup = crate::kafka_runtime::bootstrap_kafka(&self).await;
-        }
+        let _kafka_sup = crate::kafka_runtime::bootstrap_kafka(&self).await;
 
         // Wait until drain is requested (stop / SIGTERM / SIGINT) or external cancel.
         // Drain does **not** cancel accept loops yet — admin stays reachable (FR-015 / T088).
@@ -509,44 +486,32 @@ impl Node {
     }
 }
 
-pub fn first_binary_handler_names() -> Vec<&'static str> {
-    vec![
-        "admin",
-        "admin-http",
-        "internode",
-        "replication",
-        "postgresql",
-        "redis",
-        "echo",
-    ]
-}
+/// Release string this process speaks on every client protocol.
+pub const CLIENT_RELEASE: &str = "complete-product";
 
-/// Known handlers when built with `--features handlers-complete` (slice 6).
-pub fn handlers_complete_handler_names() -> Vec<&'static str> {
-    let mut v = first_binary_handler_names();
-    v.extend([
-        "cassandra",
-        "elasticsearch",
-        "clickhouse",
-        "clickhouse-http",
-        "s3",
-        "webdav",
-    ]);
-    v
-}
+/// Namespace quotas are on only when `spacestoraged` enables `tenancy-quotas`
+/// and that feature reaches config and the query engine.
+pub const TENANCY_QUOTAS: bool = cfg!(feature = "tenancy-quotas")
+    && spacestorage_config::TENANCY_QUOTAS
+    && spacestorage_query::TENANCY_QUOTAS;
 
-pub fn complete_product_handler_names() -> Vec<&'static str> {
-    handlers_complete_handler_names()
-}
+pub const HANDLER_NAMES: &[&str] = &[
+    "admin",
+    "admin-http",
+    "internode",
+    "replication",
+    "postgresql",
+    "redis",
+    "echo",
+    "cassandra",
+    "elasticsearch",
+    "clickhouse",
+    "clickhouse-http",
+    "s3",
+    "webdav",
+    "syslog",
+];
 
-/// Active build's known-handler list (FB by default; expands with `handlers-complete`).
 pub fn built_handler_names() -> Vec<&'static str> {
-    #[cfg(feature = "handlers-complete")]
-    {
-        handlers_complete_handler_names()
-    }
-    #[cfg(not(feature = "handlers-complete"))]
-    {
-        first_binary_handler_names()
-    }
+    HANDLER_NAMES.to_vec()
 }

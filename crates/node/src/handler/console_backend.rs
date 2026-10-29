@@ -6,9 +6,7 @@ use spacestorage_admin_ui::{
     APPLICATION_UI, ConsoleAuthz, ConsoleBackend, ConsoleConfigRequest, ConsoleCreateContainer,
     ConsoleError, ConsoleQueryRequest, MAX_PAGE_BYTES, MAX_PAGE_ROWS,
 };
-use spacestorage_query::{
-    CancelToken, LogicalRequest, PlannerEngine,
-};
+use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,11 +26,8 @@ impl CatalogConsoleBackend {
     }
 
     fn engine(&self) -> PlannerEngine {
-        PlannerEngine::with_distributed(
-            Arc::clone(&self.node.catalog),
-            cfg!(feature = "complete-product"),
-        )
-        .with_tenancy(Arc::clone(&self.node.tenancy))
+        PlannerEngine::with_distributed(Arc::clone(&self.node.catalog), true)
+            .with_tenancy(Arc::clone(&self.node.tenancy))
     }
 
     fn query_options(&self, authz: &ConsoleAuthz) -> spacestorage_query::QueryOptions {

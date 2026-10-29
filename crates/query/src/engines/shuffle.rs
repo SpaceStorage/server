@@ -20,9 +20,7 @@ pub struct ShuffleJob {
 
 impl ShuffleJob {
     pub fn new() -> Self {
-        Self {
-            id: Uuid::now_v7(),
-        }
+        Self { id: Uuid::now_v7() }
     }
 }
 
@@ -83,14 +81,15 @@ impl ShuffleTransport {
     pub fn pull(&self, job: &ShuffleJob, partition: u32) -> Result<Vec<Vec<u8>>, ExecError> {
         self.check_peer()?;
         let st = self.inner.lock();
-        Ok(st.parts.get(&(job.id, partition)).cloned().unwrap_or_default())
+        Ok(st
+            .parts
+            .get(&(job.id, partition))
+            .cloned()
+            .unwrap_or_default())
     }
 
     pub fn abort(&self, job: &ShuffleJob, stage: &str) {
-        self.inner
-            .lock()
-            .aborted
-            .insert(job.id, stage.to_string());
+        self.inner.lock().aborted.insert(job.id, stage.to_string());
     }
 
     /// Retry until timeout; never hang past `deadline`.

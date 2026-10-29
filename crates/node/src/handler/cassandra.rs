@@ -25,9 +25,7 @@ impl CassandraPortHandler {
         catalog: Arc<RwLock<ContainerCatalog>>,
         limit_services: LimitServices,
     ) -> Self {
-        Self {
-            inner: CassandraHandler::with_limits(catalog, limit_services),
-        }
+        speak(CassandraHandler::with_limits(catalog, limit_services))
     }
 
     pub fn with_tenancy(
@@ -35,9 +33,7 @@ impl CassandraPortHandler {
         limit_services: LimitServices,
         tenancy: Arc<spacestorage_tenancy::Tenancy>,
     ) -> Self {
-        Self {
-            inner: CassandraHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
-        }
+        speak(CassandraHandler::with_limits(catalog, limit_services).with_tenancy(tenancy))
     }
 
     pub fn with_namespace_control(
@@ -53,12 +49,17 @@ impl CassandraPortHandler {
             tenancy: Arc::clone(&tenancy),
             catalog: Arc::clone(&catalog),
         });
-        Self {
-            inner: CassandraHandler::with_limits(catalog, limit_services)
+        speak(
+            CassandraHandler::with_limits(catalog, limit_services)
                 .with_tenancy(tenancy)
                 .with_namespace_control(control),
-        }
+        )
     }
+}
+
+fn speak(mut inner: CassandraHandler) -> CassandraPortHandler {
+    inner.profile = super::client_dialect();
+    CassandraPortHandler { inner }
 }
 
 #[async_trait]
@@ -77,5 +78,23 @@ impl Handler for CassandraPortHandler {
 
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         self.inner.serve(stream, cancel).await;
+    }
+
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        Some(self.inner.profile)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spacestorage_compat::DialectProfile;
+    use spacestorage_types::ContainerCatalog;
+
+    #[test]
+    fn port_speaks_complete_product() {
+        let cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let h = CassandraPortHandler::new(cat);
+        assert_eq!(h.dialect(), Some(DialectProfile::CompleteProduct));
     }
 }

@@ -55,8 +55,7 @@ fn parse_http_url(url: &str) -> Result<(String, u16, String), String> {
     let (host, port) = if let Some((h, p)) = hostport.split_once(':') {
         (
             h.to_string(),
-            p.parse::<u16>()
-                .map_err(|e| format!("bad port: {e}"))?,
+            p.parse::<u16>().map_err(|e| format!("bad port: {e}"))?,
         )
     } else {
         (hostport.to_string(), 80)

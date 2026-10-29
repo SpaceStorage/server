@@ -3,6 +3,9 @@
 //! Repository crate name is `spacestorage-query` (`crates/query`). Spec tasks
 //! historically said `crates/exec`; this crate is that engine.
 
+/// Hard quota admit is compiled in when dependents enable `tenancy-quotas`.
+pub const TENANCY_QUOTAS: bool = cfg!(feature = "tenancy-quotas");
+
 pub mod admission;
 pub mod cancel;
 pub mod catalog_exec;
@@ -24,10 +27,8 @@ pub mod engines;
 
 pub use admission::{AdmissionController, AdmissionLimits, AdmissionToken};
 pub use cancel::CancelToken;
-pub use catalog_exec::{
-    ensure_container, object_put, object_scan, QueryResult, SharedCatalog,
-};
-pub use engine::{lower_sql, PlannerEngine, QueryEngine};
+pub use catalog_exec::{QueryResult, SharedCatalog, ensure_container, object_put, object_scan};
+pub use engine::{PlannerEngine, QueryEngine, lower_sql};
 pub use error::{ExecError, PartUnavailable};
 pub use local::LocalEngine;
 pub use options::{Concurrency, IsolationLevel, QueryOptions, Sourced};

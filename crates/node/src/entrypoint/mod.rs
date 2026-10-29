@@ -51,7 +51,6 @@ pub async fn bind_all(node: Arc<Node>) -> Result<Vec<tokio::task::JoinHandle<()>
         };
 
         // Syslog plaintext: also bind UDP on the same address (TLS = TCP only).
-        #[cfg(feature = "complete-product")]
         if ep.handler == "syslog" && ep.transport != Transport::Tls {
             let node_u = node.clone();
             let cancel_u = node.cancel.clone();

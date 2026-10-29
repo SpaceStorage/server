@@ -1,9 +1,7 @@
 //! `007` namespace registry on the first binary (SC-001, SC-009, SC-010).
 
 use spacestorage_admin_proto::AdminOp;
-use spacestorage_conformance::{
-    LAB_ADMIN_TOKEN, admin_tcp_json, boot_tenancy_one_node,
-};
+use spacestorage_conformance::{LAB_ADMIN_TOKEN, admin_tcp_json, boot_tenancy_one_node};
 use spacestorage_handler_postgresql::refuse_database_open;
 use tempfile::tempdir;
 
@@ -12,12 +10,7 @@ async fn starter_acme_and_cluster_crud() {
     let dir = tempdir().unwrap();
     let lab = boot_tenancy_one_node(dir.path()).await;
 
-    let list = admin_tcp_json(
-        lab.ports.admin,
-        LAB_ADMIN_TOKEN,
-        AdminOp::NamespaceList,
-    )
-    .await;
+    let list = admin_tcp_json(lab.ports.admin, LAB_ADMIN_TOKEN, AdminOp::NamespaceList).await;
     let names: Vec<_> = list["namespaces"]
         .as_array()
         .unwrap()
@@ -35,12 +28,7 @@ async fn starter_acme_and_cluster_crud() {
     )
     .await;
 
-    let list2 = admin_tcp_json(
-        lab.ports.admin,
-        LAB_ADMIN_TOKEN,
-        AdminOp::NamespaceList,
-    )
-    .await;
+    let list2 = admin_tcp_json(lab.ports.admin, LAB_ADMIN_TOKEN, AdminOp::NamespaceList).await;
     let names2: Vec<_> = list2["namespaces"]
         .as_array()
         .unwrap()

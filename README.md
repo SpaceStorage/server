@@ -35,10 +35,10 @@ Verbs outside a protocol's supported set return a not-supported error. They do n
 From this directory. Rust **1.88**.
 
 ```bash
-cargo build -p spacestoraged -p spacestorage --features complete-product
+cargo build -p spacestoraged -p spacestorage
 ```
 
-`complete-product` is the build that includes every handler above, the admin UI, ingest, and the cluster. A plain `cargo build` leaves those out.
+That build is the server: every handler above, the admin UI, ingest, and the cluster.
 
 Guide: [what the server is](docs/guide/product.md), [architecture](docs/guide/architecture.md), [start and clients](docs/guide/using.md), [configuration](docs/guide/configuration.md). Example configs are in `docs/examples/`.
 

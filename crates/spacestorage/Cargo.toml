@@ -11,26 +11,17 @@ name = "spacestorage"
 path = "src/main.rs"
 
 [dependencies]
-spacestorage-config = { path = "../config" }
+spacestorage-config = { path = "../config", features = ["tenancy-quotas"] }
 spacestorage-admin-proto = { path = "../admin-proto" }
-spacestorage-migrate = { path = "../migrate" }
-spacestorage-admin-ui = { path = "../admin-ui" }
-spacestorage-ingest = { path = "../ingest" }
+spacestorage-migrate = { path = "../migrate", features = ["migrate"] }
+spacestorage-admin-ui = { path = "../admin-ui", features = ["ui"] }
+spacestorage-ingest = { path = "../ingest", features = ["ingest"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
-
-[features]
-default = []
-migration-backup = ["spacestorage-migrate/migrate"]
-complete-product = [
-    "migration-backup",
-    "spacestorage-admin-ui/ui",
-    "spacestorage-ingest/ingest",
-]
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

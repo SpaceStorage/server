@@ -1,8 +1,6 @@
 //! Billing money formula conformance (full v1 Track 2) — no invoicing.
 
-#![cfg(feature = "complete-product")]
-
-use spacestorage_observability::{estimate_charge, BillingRates, UsageSnapshot};
+use spacestorage_observability::{BillingRates, UsageSnapshot, estimate_charge};
 
 #[test]
 fn billing_estimate_from_usage_snapshot() {

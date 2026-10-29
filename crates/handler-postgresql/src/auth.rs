@@ -79,9 +79,7 @@ pub fn refuse_database_open(
     } else {
         Err((
             "42501".into(),
-            format!(
-                "AccessDenied{{verb=bind, datatype=database, namespace={requested_database}}}"
-            ),
+            format!("AccessDenied{{verb=bind, datatype=database, namespace={requested_database}}}"),
         ))
     }
 }

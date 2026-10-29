@@ -1,10 +1,10 @@
 use clap::Parser;
-use spacestorage_config::{load_file, ValidateOptions};
-use spacestorage_node::{built_handler_names, logging, runtime, Node};
+use spacestorage_config::{ValidateOptions, load_file};
+use spacestorage_node::{Node, built_handler_names, logging, runtime};
 use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, reload, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, reload};
 
 #[derive(Parser, Debug)]
 #[command(name = "spacestoraged", about = "SpaceStorage node daemon")]
@@ -15,6 +15,11 @@ struct Args {
     set: Vec<String>,
 }
 
+const _: () = assert!(
+    spacestorage_node::TENANCY_QUOTAS,
+    "spacestoraged must enable tenancy-quotas through config and the query engine"
+);
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let handlers = built_handler_names();
@@ -22,7 +27,7 @@ fn main() -> anyhow::Result<()> {
         &args.config,
         &args.set,
         &handlers,
-        ValidateOptions::first_binary(),
+        ValidateOptions::complete_product(),
     )
     .map_err(|errs| {
         for e in &errs {
@@ -44,7 +49,7 @@ fn main() -> anyhow::Result<()> {
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
     let rt = runtime::build_runtime(threads);
     rt.block_on(async move {
-        let node = Node::boot_first_binary(args.config.clone(), cfg, threads, source);
+        let node = Node::boot(args.config.clone(), cfg, threads, source);
         node.run().await.map_err(|e| anyhow::anyhow!(e))
     })
 }

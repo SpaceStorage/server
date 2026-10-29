@@ -5,8 +5,13 @@ mod http_client;
 mod output;
 
 use clap::Parser;
-use spacestorage_config::{load_file, ValidateOptions};
+use spacestorage_config::{ValidateOptions, load_file};
 use std::process::ExitCode;
+
+const _: () = assert!(
+    spacestorage_config::TENANCY_QUOTAS,
+    "spacestorage validate must accept quota blocks the daemon accepts"
+);
 
 fn main() -> ExitCode {
     let args = args::Cli::parse();
@@ -62,11 +67,6 @@ fn main() -> ExitCode {
             ExitCode::from(exit::USAGE)
         }
         args::Command::Job { action, endpoint } => {
-            if !cfg!(feature = "migration-backup") {
-                let _ = spacestorage_migrate::stub_service();
-                eprintln!("MigrateSlice10Required: data_* jobs require slice 10");
-                return ExitCode::from(exit::SLICE10_REQUIRED);
-            }
             let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
             let token = std::env::var("SPACESTORAGE_TOKEN").ok();
             job_cli(&endpoint, token.as_deref(), action)
@@ -80,12 +80,6 @@ fn main() -> ExitCode {
             strategy,
             endpoint,
         } => {
-            if !cfg!(feature = "migration-backup") {
-                eprintln!(
-                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
-                );
-                return ExitCode::from(exit::SLICE10_REQUIRED);
-            }
             let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
             let token = std::env::var("SPACESTORAGE_TOKEN").ok();
             let (ns, container) = split_ns_container(&from);
@@ -115,12 +109,6 @@ fn main() -> ExitCode {
             retain_source,
             endpoint,
         } => {
-            if !cfg!(feature = "migration-backup") {
-                eprintln!(
-                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
-                );
-                return ExitCode::from(exit::SLICE10_REQUIRED);
-            }
             let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
             let token = std::env::var("SPACESTORAGE_TOKEN").ok();
             let (ns, container) = split_ns_container(&from);
@@ -157,12 +145,6 @@ fn main() -> ExitCode {
             pitr,
             endpoint,
         } => {
-            if !cfg!(feature = "migration-backup") {
-                eprintln!(
-                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
-                );
-                return ExitCode::from(exit::SLICE10_REQUIRED);
-            }
             let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
             let token = std::env::var("SPACESTORAGE_TOKEN").ok();
             let scope = if let Some(c) = container {
@@ -184,12 +166,6 @@ fn main() -> ExitCode {
             key_ref,
             endpoint,
         } => {
-            if !cfg!(feature = "migration-backup") {
-                eprintln!(
-                    "MigrateSlice10Required: enable migration-backup profile / jobs.enabled"
-                );
-                return ExitCode::from(exit::SLICE10_REQUIRED);
-            }
             let endpoint = endpoint.unwrap_or_else(|| "http://127.0.0.1:8080".into());
             let token = std::env::var("SPACESTORAGE_TOKEN").ok();
             let mut body = serde_json::json!({
@@ -209,23 +185,14 @@ fn main() -> ExitCode {
             ExitCode::from(exit::USAGE)
         }
         args::Command::Ui { endpoint } => {
-            if cfg!(feature = "complete-product") {
-                print!("{}", spacestorage_admin_ui::ui_cli_hint(&endpoint));
-                ExitCode::from(exit::OK)
-            } else {
-                eprintln!("UiIngestSlice11Required: enable complete-product profile");
-                ExitCode::from(exit::CONFIG_INVALID)
-            }
+            print!("{}", spacestorage_admin_ui::ui_cli_hint(&endpoint));
+            ExitCode::from(exit::OK)
         }
         args::Command::Ingest {
             action,
             endpoint,
             token,
         } => {
-            if !cfg!(feature = "complete-product") {
-                eprintln!("UiIngestSlice11Required: enable complete-product profile");
-                return ExitCode::from(exit::CONFIG_INVALID);
-            }
             let token = token.or_else(|| std::env::var("SPACESTORAGE_TOKEN").ok());
             match action {
                 args::IngestAction::Syslog => {
@@ -298,9 +265,7 @@ fn main() -> ExitCode {
                 ExitCode::from(exit::OK)
             }
             Some(args::ControllersVoters::Grow { group, add }) => {
-                println!(
-                    "POST {endpoint}/v1/admin op=voter_grow group={group} add={add:?}"
-                );
+                println!("POST {endpoint}/v1/admin op=voter_grow group={group} add={add:?}");
                 ExitCode::from(exit::OK)
             }
             Some(args::ControllersVoters::Shrink { group, remove }) => {
@@ -369,11 +334,9 @@ fn main() -> ExitCode {
                 None,
             )
         }
-        args::Command::Roles { endpoint } => admin_client::run_admin_op(
-            &endpoint,
-            spacestorage_admin_proto::AdminOp::RoleList,
-            None,
-        ),
+        args::Command::Roles { endpoint } => {
+            admin_client::run_admin_op(&endpoint, spacestorage_admin_proto::AdminOp::RoleList, None)
+        }
     }
 }
 
@@ -412,12 +375,7 @@ fn print_http_job(r: http_client::HttpResponse) -> ExitCode {
     }
 }
 
-fn post_job(
-    endpoint: &str,
-    token: Option<&str>,
-    path: &str,
-    body: &serde_json::Value,
-) -> ExitCode {
+fn post_job(endpoint: &str, token: Option<&str>, path: &str, body: &serde_json::Value) -> ExitCode {
     let payload = body.to_string();
     match http_client::request("POST", endpoint, path, token, Some(&payload)) {
         Ok(r) => print_http_job(r),
@@ -430,14 +388,15 @@ fn post_job(
 
 fn job_cli(endpoint: &str, token: Option<&str>, action: args::JobAction) -> ExitCode {
     match action {
-        args::JobAction::List => match http_client::request("GET", endpoint, "/v1/jobs", token, None)
-        {
-            Ok(r) => print_http_job(r),
-            Err(e) => {
-                eprintln!("{e}");
-                ExitCode::from(exit::CONNECT)
+        args::JobAction::List => {
+            match http_client::request("GET", endpoint, "/v1/jobs", token, None) {
+                Ok(r) => print_http_job(r),
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
             }
-        },
+        }
         args::JobAction::Status { id } => {
             match http_client::request("GET", endpoint, &format!("/v1/jobs/{id}"), token, None) {
                 Ok(r) => print_http_job(r),
@@ -480,43 +439,35 @@ fn job_cli(endpoint: &str, token: Option<&str>, action: args::JobAction) -> Exit
     }
 }
 
-fn ingest_kafka(
-    endpoint: &str,
-    token: Option<&str>,
-    action: args::IngestKafkaAction,
-) -> ExitCode {
+fn ingest_kafka(endpoint: &str, token: Option<&str>, action: args::IngestKafkaAction) -> ExitCode {
     match action {
-        args::IngestKafkaAction::List => match http_client::request(
-            "GET",
-            endpoint,
-            "/v1/ingest/kafka",
-            token,
-            None,
-        ) {
-            Ok(r) if r.status == 200 => {
-                print!("{}", r.body);
-                if !r.body.ends_with('\n') {
-                    println!();
+        args::IngestKafkaAction::List => {
+            match http_client::request("GET", endpoint, "/v1/ingest/kafka", token, None) {
+                Ok(r) if r.status == 200 => {
+                    print!("{}", r.body);
+                    if !r.body.ends_with('\n') {
+                        println!();
+                    }
+                    ExitCode::from(exit::OK)
                 }
-                ExitCode::from(exit::OK)
+                Ok(r) if r.status == 403 => {
+                    eprintln!("{}", r.body);
+                    ExitCode::from(exit::UNAUTHORIZED)
+                }
+                Ok(r) if r.status == 401 => {
+                    eprintln!("{}", r.body);
+                    ExitCode::from(exit::UNAUTHORIZED)
+                }
+                Ok(r) => {
+                    eprintln!("HTTP {}: {}", r.status, r.body);
+                    ExitCode::from(exit::CONNECT)
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::from(exit::CONNECT)
+                }
             }
-            Ok(r) if r.status == 403 => {
-                eprintln!("{}", r.body);
-                ExitCode::from(exit::UNAUTHORIZED)
-            }
-            Ok(r) if r.status == 401 => {
-                eprintln!("{}", r.body);
-                ExitCode::from(exit::UNAUTHORIZED)
-            }
-            Ok(r) => {
-                eprintln!("HTTP {}: {}", r.status, r.body);
-                ExitCode::from(exit::CONNECT)
-            }
-            Err(e) => {
-                eprintln!("{e}");
-                ExitCode::from(exit::CONNECT)
-            }
-        },
+        }
         args::IngestKafkaAction::Add {
             namespace,
             container,

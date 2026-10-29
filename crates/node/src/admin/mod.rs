@@ -73,9 +73,7 @@ impl AdminService {
                 tenancy_quota_replace(node, name, quotas).await
             }
             AdminOp::RoleList => tenancy_role_list(node).await,
-            AdminOp::RoleBindingList { namespace } => {
-                tenancy_binding_list(node, namespace).await
-            }
+            AdminOp::RoleBindingList { namespace } => tenancy_binding_list(node, namespace).await,
             AdminOp::VoterReplace { group, from, to } => {
                 controlplane_voter_op(
                     node,
@@ -132,18 +130,19 @@ async fn tenancy_namespace_create(
     name: String,
 ) -> Result<serde_json::Value, ErrorBody> {
     let cp = require_cp(node).await?;
-    cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceCreate {
-        name: name.clone(),
-    })
-    .await
-    .map_err(cp_err)?;
+    cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceCreate { name: name.clone() })
+        .await
+        .map_err(cp_err)?;
     sync_tenancy_cache(node, &cp);
-    serde_json::to_value(cp.tenancy_namespace_by_name(&name).expect("applied after commit"))
-        .map_err(|error| ErrorBody {
-            code: "serialization".into(),
-            message: error.to_string(),
-            details: serde_json::json!({}),
-        })
+    serde_json::to_value(
+        cp.tenancy_namespace_by_name(&name)
+            .expect("applied after commit"),
+    )
+    .map_err(|error| ErrorBody {
+        code: "serialization".into(),
+        message: error.to_string(),
+        details: serde_json::json!({}),
+    })
 }
 
 async fn tenancy_namespace_rename(
@@ -152,11 +151,13 @@ async fn tenancy_namespace_rename(
     new_name: String,
 ) -> Result<serde_json::Value, ErrorBody> {
     let cp = require_cp(node).await?;
-    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
-        code: "NamespaceNotFound".into(),
-        message: format!("NamespaceNotFound{{name={name}}}"),
-        details: serde_json::json!({ "name": name }),
-    })?;
+    let record = cp
+        .tenancy_namespace_by_name(&name)
+        .ok_or_else(|| ErrorBody {
+            code: "NamespaceNotFound".into(),
+            message: format!("NamespaceNotFound{{name={name}}}"),
+            details: serde_json::json!({ "name": name }),
+        })?;
     cp.append_tenancy(spacestorage_tenancy::TenancyOp::NamespaceRename {
         id: record.id,
         new_name: new_name.clone(),
@@ -177,18 +178,18 @@ async fn tenancy_namespace_delete(
     cascade: bool,
 ) -> Result<serde_json::Value, ErrorBody> {
     let cp = require_cp(node).await?;
-    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
-        code: "NamespaceNotFound".into(),
-        message: format!("NamespaceNotFound{{name={name}}}"),
-        details: serde_json::json!({ "name": name }),
-    })?;
+    let record = cp
+        .tenancy_namespace_by_name(&name)
+        .ok_or_else(|| ErrorBody {
+            code: "NamespaceNotFound".into(),
+            message: format!("NamespaceNotFound{{name={name}}}"),
+            details: serde_json::json!({ "name": name }),
+        })?;
     if let Some(message) =
         crate::namespace_catalog::namespace_delete_cascade_required(&name, cascade, &node.catalog)
     {
-        let containers = crate::namespace_catalog::container_ids_for_namespace(
-            &node.catalog,
-            &name,
-        );
+        let containers =
+            crate::namespace_catalog::container_ids_for_namespace(&node.catalog, &name);
         return Err(ErrorBody {
             code: "CascadeRequired".into(),
             message,
@@ -210,11 +211,13 @@ async fn tenancy_namespace_describe(
     name: String,
 ) -> Result<serde_json::Value, ErrorBody> {
     let cp = require_cp(node).await?;
-    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
-        code: "NamespaceNotFound".into(),
-        message: format!("NamespaceNotFound{{name={name}}}"),
-        details: serde_json::json!({ "name": name }),
-    })?;
+    let record = cp
+        .tenancy_namespace_by_name(&name)
+        .ok_or_else(|| ErrorBody {
+            code: "NamespaceNotFound".into(),
+            message: format!("NamespaceNotFound{{name={name}}}"),
+            details: serde_json::json!({ "name": name }),
+        })?;
     let containers: Vec<_> = node
         .catalog
         .read()
@@ -246,17 +249,18 @@ async fn tenancy_quota_replace(
         });
     }
     let cp = require_cp(node).await?;
-    let record = cp.tenancy_namespace_by_name(&name).ok_or_else(|| ErrorBody {
-        code: "NamespaceNotFound".into(),
-        message: format!("NamespaceNotFound{{name={name}}}"),
-        details: serde_json::json!({}),
-    })?;
+    let record = cp
+        .tenancy_namespace_by_name(&name)
+        .ok_or_else(|| ErrorBody {
+            code: "NamespaceNotFound".into(),
+            message: format!("NamespaceNotFound{{name={name}}}"),
+            details: serde_json::json!({}),
+        })?;
     let quotas = quotas
         .into_iter()
         .map(|quota| {
             Ok(spacestorage_tenancy::QuotaSpec {
-                unit: spacestorage_tenancy::QuotaUnit::parse(&quota.unit)
-                    .map_err(tenancy_err)?,
+                unit: spacestorage_tenancy::QuotaUnit::parse(&quota.unit).map_err(tenancy_err)?,
                 limit: quota.limit,
                 datatype: quota.datatype,
             })
@@ -453,7 +457,7 @@ fn status(node: &Node) -> Status {
         entrypoints: entrypoint_statuses(node),
         buffers: node.buffers.reports(),
         drain_timed_out: node.stats.drain_timed_out(),
-        release_profile: Some(ReleaseProfile::FirstBinary.as_str().into()),
+        release_profile: Some(ReleaseProfile::CompleteProduct.as_str().into()),
         handlers: Some(node.handler_names()),
     }
 }
@@ -527,7 +531,7 @@ fn config(node: &Node) -> EffectiveConfig {
         buffers: node.buffers.reports(),
         pending_restart: node.effective.pending_restart(),
         settings: settings_report(node),
-        release_profile: Some(ReleaseProfile::FirstBinary.as_str().into()),
+        release_profile: Some(ReleaseProfile::CompleteProduct.as_str().into()),
     }
 }
 

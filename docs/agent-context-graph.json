@@ -73,5 +73,5 @@
     ["002", "015-fb"],
     ["011", "012", "004"]
   ],
-  "gate_first_binary": "cargo test -p spacestorage-conformance --features first-binary"
+  "gate_first_binary": "cargo test -p spacestorage-conformance"
 }

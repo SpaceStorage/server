@@ -114,8 +114,7 @@ Out of scope for residual passes unless explicitly requested: inventing new slic
 ## Status discipline
 
 - Tip ledger: slices 1–11 **closed**; full-v1 tip [`docs/milestones/009-full-product`](docs/milestones/009-full-product.md).
-- `cargo test -p spacestorage-conformance --features complete-product` is the full-matrix merge gate.
-- First-binary / handlers-complete profiles remain regression gates (`--features first-binary` / `handlers-complete`).
+- `cargo test -p spacestorage-conformance` is the merge gate. The daemon and CLI have one build; there is no smaller feature set.
 - Prefer marking incomplete residuals accurately over marking tasks `[X]` early or claiming unpaid slices.
 
 ## Where truth lives

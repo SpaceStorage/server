@@ -119,6 +119,18 @@ impl PostgresqlHandler {
             .map(|_| ())
             .map_err(|e| (e.sqlstate, e.message))
     }
+
+    /// Same dialect and catalog as [`Self::serve`], on an explicit session.
+    pub fn exec_sql_session(
+        &self,
+        namespace: &str,
+        session: &str,
+        sql: &str,
+    ) -> Result<(), (String, String)> {
+        sql::execute_sql_session(self.profile, &self.catalog, namespace, session, sql)
+            .map(|_| ())
+            .map_err(|e| (e.sqlstate, e.message))
+    }
 }
 
 #[cfg(test)]

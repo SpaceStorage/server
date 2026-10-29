@@ -25,9 +25,10 @@ impl ClickHousePortHandler {
         catalog: Arc<RwLock<ContainerCatalog>>,
         limit_services: LimitServices,
     ) -> Self {
-        Self {
-            inner: ClickHouseNativeHandler::with_limits(catalog, limit_services),
-        }
+        speak_native(ClickHouseNativeHandler::with_limits(
+            catalog,
+            limit_services,
+        ))
     }
 
     pub fn with_tenancy(
@@ -35,10 +36,9 @@ impl ClickHousePortHandler {
         limit_services: LimitServices,
         tenancy: Arc<spacestorage_tenancy::Tenancy>,
     ) -> Self {
-        Self {
-            inner: ClickHouseNativeHandler::with_limits(catalog, limit_services)
-                .with_tenancy(tenancy),
-        }
+        speak_native(
+            ClickHouseNativeHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
+        )
     }
 
     pub fn with_namespace_control(
@@ -54,12 +54,17 @@ impl ClickHousePortHandler {
             tenancy: Arc::clone(&tenancy),
             catalog: Arc::clone(&catalog),
         });
-        Self {
-            inner: ClickHouseNativeHandler::with_limits(catalog, limit_services)
+        speak_native(
+            ClickHouseNativeHandler::with_limits(catalog, limit_services)
                 .with_tenancy(tenancy)
                 .with_namespace_control(control),
-        }
+        )
     }
+}
+
+fn speak_native(mut inner: ClickHouseNativeHandler) -> ClickHousePortHandler {
+    inner.profile = super::client_dialect();
+    ClickHousePortHandler { inner }
 }
 
 #[async_trait]
@@ -79,6 +84,10 @@ impl Handler for ClickHousePortHandler {
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         self.inner.serve(stream, cancel).await;
     }
+
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        Some(self.inner.profile)
+    }
 }
 
 pub struct ClickHouseHttpPortHandler {
@@ -94,9 +103,7 @@ impl ClickHouseHttpPortHandler {
         catalog: Arc<RwLock<ContainerCatalog>>,
         limit_services: LimitServices,
     ) -> Self {
-        Self {
-            inner: ClickHouseHttpHandler::with_limits(catalog, limit_services),
-        }
+        speak_http(ClickHouseHttpHandler::with_limits(catalog, limit_services))
     }
 
     pub fn with_tenancy(
@@ -104,9 +111,9 @@ impl ClickHouseHttpPortHandler {
         limit_services: LimitServices,
         tenancy: Arc<spacestorage_tenancy::Tenancy>,
     ) -> Self {
-        Self {
-            inner: ClickHouseHttpHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
-        }
+        speak_http(
+            ClickHouseHttpHandler::with_limits(catalog, limit_services).with_tenancy(tenancy),
+        )
     }
 
     pub fn with_namespace_control(
@@ -122,12 +129,17 @@ impl ClickHouseHttpPortHandler {
             tenancy: Arc::clone(&tenancy),
             catalog: Arc::clone(&catalog),
         });
-        Self {
-            inner: ClickHouseHttpHandler::with_limits(catalog, limit_services)
+        speak_http(
+            ClickHouseHttpHandler::with_limits(catalog, limit_services)
                 .with_tenancy(tenancy)
                 .with_namespace_control(control),
-        }
+        )
     }
+}
+
+fn speak_http(mut inner: ClickHouseHttpHandler) -> ClickHouseHttpPortHandler {
+    inner.profile = super::client_dialect();
+    ClickHouseHttpPortHandler { inner }
 }
 
 #[async_trait]
@@ -146,5 +158,48 @@ impl Handler for ClickHouseHttpPortHandler {
 
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         self.inner.serve(stream, cancel).await;
+    }
+
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        Some(self.inner.profile)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spacestorage_compat::DialectProfile;
+    use spacestorage_handler_clickhouse::{ClickHouseReply, SessionState, dispatch};
+    use spacestorage_types::ContainerCatalog;
+
+    #[test]
+    fn both_ports_run_group_by() {
+        let native_cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let http_cat = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let native = ClickHousePortHandler::new(Arc::clone(&native_cat));
+        let http = ClickHouseHttpPortHandler::new(Arc::clone(&http_cat));
+        assert_eq!(native.dialect(), Some(DialectProfile::CompleteProduct));
+        assert_eq!(http.dialect(), Some(DialectProfile::CompleteProduct));
+        for (profile, mut session) in [
+            (
+                native.dialect().unwrap(),
+                SessionState::demo_native(native_cat),
+            ),
+            (http.dialect().unwrap(), SessionState::demo_http(http_cat)),
+        ] {
+            session.profile = profile;
+            assert!(matches!(
+                dispatch(&mut session, "CREATE", &["TABLE", "t"]),
+                ClickHouseReply::Ok
+            ));
+            assert!(matches!(
+                dispatch(&mut session, "INSERT", &["t", "1", r#"{"id":"a","n":1}"#]),
+                ClickHouseReply::Ok
+            ));
+            match dispatch(&mut session, "GROUP_BY", &["t", "id", "n"]) {
+                ClickHouseReply::Rows(_) | ClickHouseReply::Ok => {}
+                other => panic!("{other:?}"),
+            }
+        }
     }
 }

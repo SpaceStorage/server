@@ -115,7 +115,7 @@ pub fn authorize_consuming(
     if login == "admin" {
         return Ok(());
     }
-    use crate::policy::{evaluate, AccessPolicy};
+    use crate::policy::{AccessPolicy, evaluate};
     let policy = record.policies.iter().find_map(|raw| {
         let p: AccessPolicy = serde_json::from_value(raw.clone()).ok()?;
         if p.datatype == datatype {
@@ -260,27 +260,18 @@ mod tests {
             container_ids: Vec::new(),
         };
         let mut record = NamespaceRecord::new("acme").unwrap();
-        record.policies = vec![serde_json::to_value(AccessPolicy {
-            datatype: "log_stream".into(),
-            allow_verbs: Verb::READ.bits(),
-        })
-        .unwrap()];
-        let err = authorize_consuming(
-            "reader",
-            &role,
-            &record,
-            "kv_store",
-            Verb::WRITE.bits(),
-        )
-        .unwrap_err();
+        record.policies = vec![
+            serde_json::to_value(AccessPolicy {
+                datatype: "log_stream".into(),
+                allow_verbs: Verb::READ.bits(),
+            })
+            .unwrap(),
+        ];
+        let err = authorize_consuming("reader", &role, &record, "kv_store", Verb::WRITE.bits())
+            .unwrap_err();
         assert!(matches!(err, TenancyError::AccessDenied { .. }));
-        assert!(authorize_consuming(
-            "reader",
-            &role,
-            &record,
-            "log_stream",
-            Verb::READ.bits(),
-        )
-        .is_ok());
+        assert!(
+            authorize_consuming("reader", &role, &record, "log_stream", Verb::READ.bits(),).is_ok()
+        );
     }
 }

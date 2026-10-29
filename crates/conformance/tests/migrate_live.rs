@@ -93,8 +93,6 @@ fn anti_affinity_refuses_before_copy() {
         strategy: Strategy::Live,
         force_unsatisfiable: true,
     };
-    let err = spec
-        .validate(&AuthzContext::cluster_admin())
-        .unwrap_err();
+    let err = spec.validate(&AuthzContext::cluster_admin()).unwrap_err();
     assert_eq!(err.code(), "ConstraintUnsatisfiable");
 }

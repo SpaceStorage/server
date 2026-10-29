@@ -94,9 +94,7 @@ pub fn diff(running: &NodeConfig, incoming: &NodeConfig) -> ConfigDiff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{
-        ClusterDecl, KeysDecl, NodeConfig, QueryDecl, QueryDefaults, StorageDecl,
-    };
+    use crate::model::{ClusterDecl, KeysDecl, NodeConfig, QueryDecl, QueryDefaults, StorageDecl};
     use spacestorage_compat::{EffectiveLimits, Limits};
     use std::collections::BTreeMap;
     use std::time::Duration;

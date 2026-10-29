@@ -18,10 +18,7 @@ fn inline_key_material_is_forbidden_at_validate() {
         "persistent",
     )
     .unwrap_err();
-    assert!(
-        err.to_string().contains("KeyMaterialForbidden"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("KeyMaterialForbidden"), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

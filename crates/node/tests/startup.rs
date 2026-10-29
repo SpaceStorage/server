@@ -52,6 +52,7 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
         log_syslog: None,
         jobs: spacestorage_config::model::JobsDecl::default(),
         kafka_ingests: Vec::new(),
+        namespaces: Vec::new(),
     }
 }
 
@@ -72,7 +73,7 @@ async fn startup_reaches_ready_and_http_status() {
 
     let cfg = lab_config(admin_port, http_port, token.to_str().unwrap());
     let (threads, source) = runtime::resolve_worker_threads(cfg.threads);
-    let node = Node::boot_first_binary(conf, cfg, threads, source);
+    let node = Node::boot(conf, cfg, threads, source);
     let node2 = node.clone();
     let run = tokio::spawn(async move { node2.run().await });
 
@@ -99,7 +100,7 @@ async fn startup_reaches_ready_and_http_status() {
     let text = String::from_utf8_lossy(&buf);
     assert!(text.contains("HTTP/1.1 200"), "response: {text}");
     assert!(text.contains("\"state\":\"ready\"") || text.contains("\"state\": \"ready\""));
-    assert!(text.contains("first-binary"));
+    assert!(text.contains("complete-product"));
 
     node.cancel.cancel();
     let _ = run.await;

@@ -86,13 +86,13 @@ mod tests {
         let err = admit(
             &usage,
             &ns,
-            &[
-                (ns.quotas[0].clone(), 10),
-                (ns.quotas[1].clone(), 5),
-            ],
+            &[(ns.quotas[0].clone(), 10), (ns.quotas[1].clone(), 5)],
         )
         .unwrap_err();
-        assert!(matches!(err, crate::error::TenancyError::QuotaExceeded { .. }));
+        assert!(matches!(
+            err,
+            crate::error::TenancyError::QuotaExceeded { .. }
+        ));
         assert_eq!(usage.get(ns.id, QuotaUnit::Bytes, &None), 0);
         assert_eq!(usage.get(ns.id, QuotaUnit::Objects, &None), 0);
         let published = deltas.lock();

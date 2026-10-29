@@ -4,9 +4,7 @@
 
 use spacestorage_compat::DialectProfile;
 use spacestorage_handler_postgresql::execute_sql;
-use spacestorage_query::{
-    engines::subscribe, CancelToken, JobState, PlannerEngine,
-};
+use spacestorage_query::{CancelToken, JobState, PlannerEngine, engines::subscribe};
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};
 

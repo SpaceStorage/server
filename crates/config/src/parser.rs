@@ -27,7 +27,7 @@ fn recover(lx: &mut Lexer<'_>) {
     loop {
         match lx.next_token() {
             Ok(t) if matches!(t.kind, TokenKind::Semi | TokenKind::RBrace | TokenKind::Eof) => {
-                break
+                break;
             }
             Ok(_) => {}
             Err(_) => {

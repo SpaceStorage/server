@@ -1,8 +1,6 @@
 //! Admin UI console conformance (009 US2) — feature `complete-product`.
 
-#![cfg(feature = "complete-product")]
-
-use spacestorage_admin_ui::{ConsoleAuthz, ConsoleService, APPLICATION_UI};
+use spacestorage_admin_ui::{APPLICATION_UI, ConsoleAuthz, ConsoleService};
 
 #[test]
 fn namespace_admin_create_insert_browse() {
@@ -41,10 +39,7 @@ fn namespace_admin_cluster_config_forbidden() {
         ..Default::default()
     };
     let err = svc
-        .config(
-            &authz,
-            br#"{"scope":"cluster","settings":{"x":1}}"#,
-        )
+        .config(&authz, br#"{"scope":"cluster","settings":{"x":1}}"#)
         .unwrap_err();
     assert_eq!(err.code(), "forbidden");
 }
@@ -59,12 +54,7 @@ fn oversized_browse_payload_too_large() {
     // Fill beyond MAX_PAGE_BYTES via many large rows.
     let big = "x".repeat(200_000);
     for i in 0..10 {
-        svc.insert_row(
-            "acme",
-            "blob",
-            &i.to_string(),
-            serde_json::json!(big),
-        );
+        svc.insert_row("acme", "blob", &i.to_string(), serde_json::json!(big));
     }
     let err = svc
         .query(

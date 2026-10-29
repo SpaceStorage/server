@@ -29,9 +29,7 @@ pub enum ExecError {
         current: u64,
         max: u64,
     },
-    #[error(
-        "snapshot_unsupported{{type:{0}}}; allowed: READ COMMITTED, SNAPSHOT"
-    )]
+    #[error("snapshot_unsupported{{type:{0}}}; allowed: READ COMMITTED, SNAPSHOT")]
     SnapshotUnsupported(String),
     #[error("isolation: {0}")]
     Isolation(String),

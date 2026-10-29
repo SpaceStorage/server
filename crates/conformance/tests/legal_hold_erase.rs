@@ -1,7 +1,5 @@
 //! Legal-hold / erase conformance + migrate gate (full v1 Track 2).
 
-#![cfg(feature = "complete-product")]
-
 use parking_lot::Mutex;
 use spacestorage_migrate::erase_with_legal;
 use spacestorage_storage::{EraseRequest, LegalHold, LegalHoldStore};

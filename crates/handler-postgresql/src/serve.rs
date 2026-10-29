@@ -1,14 +1,12 @@
 //! Async PostgreSQL `Handler::serve` (Constitution II) — simple + extended.
 
-use crate::auth::{
-    ScramExchange, UserStore, begin_scram, finish_scram, refuse_database_open,
-};
+use crate::NamespaceControl;
+use crate::auth::{ScramExchange, UserStore, begin_scram, finish_scram, refuse_database_open};
 use crate::cancel_registry;
 use crate::sql::{
     ExecResult, NamespaceCommand, SharedCatalog, drop_session_portals, execute_sql,
     execute_sql_cancel_tenancy, parse_namespace_command,
 };
-use crate::NamespaceControl;
 use crate::wire::{
     FEATURE_NOT_SUPPORTED, FrontendMessage, try_read_message, try_read_startup, write_auth_ok,
     write_auth_sasl, write_auth_sasl_continue, write_auth_sasl_final, write_backend_key_data,

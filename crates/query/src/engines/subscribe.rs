@@ -1,7 +1,7 @@
 //! Subscribe / async job lifecycle (005 FR-014).
 
 use crate::cancel::CancelToken;
-use crate::catalog_exec::{execute_adhoc_sql, QueryResult, SharedCatalog};
+use crate::catalog_exec::{QueryResult, SharedCatalog, execute_adhoc_sql};
 use crate::error::ExecError;
 use crate::subscribe::{JobRegistry, JobState, Subscription};
 use uuid::Uuid;
@@ -19,7 +19,11 @@ pub fn submit(
     let id = jobs.submit(sub);
     jobs.set_state(id, JobState::Running);
     // Run synchronously for unit/conformance (background spawn is node wiring).
-    if cancel.is_cancelled() || jobs.get(id).map(|j| j.state == JobState::Cancelled).unwrap_or(false)
+    if cancel.is_cancelled()
+        || jobs
+            .get(id)
+            .map(|j| j.state == JobState::Cancelled)
+            .unwrap_or(false)
     {
         jobs.set_state(id, JobState::Cancelled);
         return Ok(id);

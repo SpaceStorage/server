@@ -1,7 +1,5 @@
 //! Named CDC conformance (full v1 Track 2).
 
-#![cfg(feature = "complete-product")]
-
 use spacestorage_types::{CdcCatalog, CdcEvent, CdcOp};
 
 #[test]

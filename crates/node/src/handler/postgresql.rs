@@ -8,8 +8,8 @@ use spacestorage_handler_postgresql::{PostgresqlHandler, UserStore};
 use spacestorage_types::ContainerCatalog;
 use tokio_util::sync::CancellationToken;
 
-use crate::handler::{ClientStream, Handler};
 use crate::handler::controlplane_namespaces::ControlPlaneNamespaces;
+use crate::handler::{ClientStream, Handler};
 
 pub struct PostgresqlPortHandler {
     inner: PostgresqlHandler,
@@ -71,15 +71,8 @@ impl PostgresqlPortHandler {
     }
 }
 
-/// Dialect name for this node's Cargo features (`016` release profile).
 fn builtin_release() -> &'static str {
-    if cfg!(feature = "complete-product") {
-        "complete-product"
-    } else if cfg!(feature = "handlers-complete") {
-        "handlers-complete"
-    } else {
-        "first-binary"
-    }
+    crate::CLIENT_RELEASE
 }
 
 #[async_trait]
@@ -99,11 +92,20 @@ impl Handler for PostgresqlPortHandler {
     async fn serve(&self, stream: ClientStream, cancel: CancellationToken) {
         self.inner.serve(stream, cancel).await;
     }
+
+    fn dialect(&self) -> Option<spacestorage_compat::DialectProfile> {
+        Some(self.inner.profile)
+    }
+
+    fn try_exec_sql(&self, session: &str, sql: &str) -> Option<Result<(), (String, String)>> {
+        Some(self.inner.exec_sql_session("demo", session, sql))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "tenancy-quotas")]
     use spacestorage_tenancy::{QuotaSpec, QuotaUnit, Tenancy};
 
     #[test]
@@ -111,6 +113,12 @@ mod tests {
         let cat = Arc::new(RwLock::new(spacestorage_types::ContainerCatalog::new()));
         let h = PostgresqlPortHandler::new(cat);
         assert_eq!(h.inner.profile.as_str(), builtin_release());
+        h.try_exec_sql("port-begin", "BEGIN")
+            .unwrap()
+            .expect("BEGIN");
+        h.try_exec_sql("port-begin", "ROLLBACK")
+            .unwrap()
+            .expect("ROLLBACK");
     }
 
     #[cfg(feature = "tenancy-quotas")]

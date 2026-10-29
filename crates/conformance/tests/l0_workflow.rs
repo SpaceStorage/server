@@ -1,8 +1,6 @@
 //! L0 creatable workflow conformance (full v1 Track 2).
 
-#![cfg(feature = "complete-product")]
-
-use spacestorage_types::{L0Catalog, StorageModeChoice, L0_CREATABLE};
+use spacestorage_types::{L0_CREATABLE, L0Catalog, StorageModeChoice};
 
 #[test]
 fn l0_hash_table_workflow_create_put_get() {
@@ -21,7 +19,8 @@ fn l0_all_creatable_and_wal_refused() {
         cat.create("ns", format!("c{i}"), t, StorageModeChoice::Memory)
             .unwrap();
     }
-    assert!(cat
-        .create("ns", "w", "wal", StorageModeChoice::Persistent)
-        .is_err());
+    assert!(
+        cat.create("ns", "w", "wal", StorageModeChoice::Persistent)
+            .is_err()
+    );
 }

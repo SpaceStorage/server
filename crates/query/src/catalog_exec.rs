@@ -43,28 +43,22 @@ pub fn execute_adhoc_sql(
         "DELETE" => delete_rows(catalog, namespace, sql),
         "SET" => {
             if let Some(_isolation) = parse_set_transaction_isolation(sql)? {
-                return Err(ExecError::Msg(
-                    "set_transaction_requires_active_txn".into(),
-                ));
+                return Err(ExecError::Msg("set_transaction_requires_active_txn".into()));
             }
             Ok(QueryResult {
                 tag: verb,
                 ..Default::default()
             })
         }
-        "SHOW" | "DISCARD" | "RESET" | "PREPARE" | "EXECUTE" | "DEALLOCATE" => {
-            Ok(QueryResult {
-                tag: verb,
-                ..Default::default()
-            })
-        }
+        "SHOW" | "DISCARD" | "RESET" | "PREPARE" | "EXECUTE" | "DEALLOCATE" => Ok(QueryResult {
+            tag: verb,
+            ..Default::default()
+        }),
         other => Err(ExecError::NotSupported(other.into())),
     }
 }
 
-fn compat_isolation_to_query(
-    level: spacestorage_compat::IsolationLevel,
-) -> IsolationLevel {
+fn compat_isolation_to_query(level: spacestorage_compat::IsolationLevel) -> IsolationLevel {
     match level {
         spacestorage_compat::IsolationLevel::ReadCommitted => IsolationLevel::ReadCommitted,
         spacestorage_compat::IsolationLevel::Snapshot => IsolationLevel::Snapshot,
@@ -73,17 +67,15 @@ fn compat_isolation_to_query(
 
 fn map_isolation_refuse(err: spacestorage_compat::CompatError) -> ExecError {
     match err {
-        spacestorage_compat::CompatError::SerializableNongoal => ExecError::Isolation(
-            "serializable_nongoal; allowed: READ COMMITTED, SNAPSHOT".into(),
-        ),
+        spacestorage_compat::CompatError::SerializableNongoal => {
+            ExecError::Isolation("serializable_nongoal; allowed: READ COMMITTED, SNAPSHOT".into())
+        }
         other => ExecError::Isolation(other.to_string()),
     }
 }
 
 /// Parse `SET TRANSACTION ISOLATION LEVEL …` when present.
-pub fn parse_set_transaction_isolation(
-    sql: &str,
-) -> Result<Option<IsolationLevel>, ExecError> {
+pub fn parse_set_transaction_isolation(sql: &str) -> Result<Option<IsolationLevel>, ExecError> {
     let upper = sql.trim().trim_end_matches(';').to_ascii_uppercase();
     if !upper.starts_with("SET") || !upper.contains("TRANSACTION") || !upper.contains("ISOLATION") {
         return Ok(None);
@@ -93,7 +85,8 @@ pub fn parse_set_transaction_isolation(
         return Ok(None);
     };
     let level_text = sql[pos + level_marker.len()..].trim().trim_end_matches(';');
-    let mapped = spacestorage_compat::map_sql_isolation(level_text).map_err(map_isolation_refuse)?;
+    let mapped =
+        spacestorage_compat::map_sql_isolation(level_text).map_err(map_isolation_refuse)?;
     Ok(Some(compat_isolation_to_query(mapped)))
 }
 
@@ -157,7 +150,11 @@ fn count_insert_value_rows(sql: &str) -> u64 {
     rows.max(1)
 }
 
-fn create_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn create_table(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
     if is_create_foreign_table(&upper) {
         return Err(ExecError::NotSupported("FDW".into()));
@@ -179,7 +176,9 @@ fn create_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Q
             .collect(),
     };
     if schema.fields.is_empty() {
-        return Err(ExecError::Msg("syntax error: CREATE TABLE requires columns".into()));
+        return Err(ExecError::Msg(
+            "syntax error: CREATE TABLE requires columns".into(),
+        ));
     }
     let mut cat = catalog.write().expect("catalog");
     match cat.create(
@@ -202,7 +201,11 @@ fn create_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Q
     }
 }
 
-fn drop_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn drop_table(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
     if is_drop_foreign_table(&upper) {
         return Err(ExecError::NotSupported("FDW".into()));
@@ -232,7 +235,11 @@ fn is_drop_foreign_table(upper: &str) -> bool {
     upper.starts_with("DROP FOREIGN TABLE")
 }
 
-fn alter_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn alter_table(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.trim().trim_end_matches(';').to_ascii_uppercase();
     if !upper.starts_with("ALTER TABLE") {
         return Err(ExecError::NotSupported("ALTER without TABLE".into()));
@@ -278,8 +285,14 @@ fn alter_table(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
             domain: ValueDomain::Utf8,
             nullable: true,
         });
-        cat.alter(namespace, &name, None, Some(ContainerSchema { fields }), None)
-            .map_err(|e| ExecError::Msg(e.to_string()))?;
+        cat.alter(
+            namespace,
+            &name,
+            None,
+            Some(ContainerSchema { fields }),
+            None,
+        )
+        .map_err(|e| ExecError::Msg(e.to_string()))?;
         return Ok(QueryResult {
             tag: "ALTER TABLE".into(),
             ..Default::default()
@@ -325,7 +338,11 @@ fn first_ident(s: &str) -> Result<String, ExecError> {
     Ok(name)
 }
 
-fn insert_row(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn insert_row(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
     let name = extract_table_name_after(&upper, sql, "INTO")?;
     let values = parse_values(sql)?;
@@ -359,8 +376,12 @@ fn insert_row(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Que
             map.insert(col.clone(), Value::String(v.clone()));
         }
     }
-    let key = values.first().cloned().unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-    let bytes = serde_json::to_vec(&Value::Object(map)).map_err(|e| ExecError::Msg(e.to_string()))?;
+    let key = values
+        .first()
+        .cloned()
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let bytes =
+        serde_json::to_vec(&Value::Object(map)).map_err(|e| ExecError::Msg(e.to_string()))?;
     cat.put(id, &key, bytes)
         .map_err(|e| ExecError::Msg(e.to_string()))?;
     Ok(QueryResult {
@@ -369,7 +390,11 @@ fn insert_row(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Que
     })
 }
 
-fn select_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn select_rows(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
     // JOIN / aggregate require query-distributed (slice 8)
     if upper.contains(" JOIN ") {
@@ -379,7 +404,9 @@ fn select_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
         }
         #[cfg(not(feature = "query-distributed"))]
         {
-            return Err(ExecError::NotSupported("join requires query-distributed".into()));
+            return Err(ExecError::NotSupported(
+                "join requires query-distributed".into(),
+            ));
         }
     }
     if let Some(agg) = detect_agg(&upper) {
@@ -517,7 +544,11 @@ fn aggregate_select(
 }
 
 #[cfg(feature = "query-distributed")]
-fn join_select(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn join_select(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
     let kind = if upper.contains(" LEFT JOIN ") {
         JoinKind::Left
@@ -543,11 +574,7 @@ fn join_select(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
         .find(join_kw)
         .ok_or_else(|| ExecError::Msg("join: missing JOIN".into()))?;
     let after_j = &sql[jpos + join_kw.len()..];
-    let right = after_j
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let right = after_j.split_whitespace().next().unwrap_or("").to_string();
     let on_pos = upper
         .find(" ON ")
         .ok_or_else(|| ExecError::Msg("join: missing ON".into()))?;
@@ -573,17 +600,15 @@ fn join_select(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
         .trim_matches(';')
         .to_string();
     crate::engines::join::run(
-        catalog,
-        namespace,
-        &left,
-        &right,
-        kind,
-        &left_key,
-        &right_key,
+        catalog, namespace, &left, &right, kind, &left_key, &right_key,
     )
 }
 
-fn update_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn update_rows(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let name = extract_ident_after_verb(sql, "UPDATE")?;
     let set = parse_set_clause(sql)?;
     let where_eq = parse_simple_where(sql);
@@ -626,7 +651,11 @@ fn update_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<Qu
     })
 }
 
-fn delete_rows(catalog: &SharedCatalog, namespace: &str, sql: &str) -> Result<QueryResult, ExecError> {
+fn delete_rows(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    sql: &str,
+) -> Result<QueryResult, ExecError> {
     let upper = sql.to_ascii_uppercase();
     let name = extract_table_name_after(&upper, sql, "FROM")?;
     let where_eq = parse_simple_where(sql);
@@ -676,7 +705,7 @@ pub fn ensure_container(
             return Ok(QueryResult {
                 tag: "ENSURE".into(),
                 ..Default::default()
-            })
+            });
         }
         Err(TypeError::NotFound) => {}
         Err(e) => return Err(ExecError::Msg(e.to_string())),
@@ -751,7 +780,10 @@ pub fn object_get(
     let c = cat
         .describe(namespace, container)
         .map_err(|e| ExecError::Msg(e.to_string()))?;
-    match cat.get(c.id, key).map_err(|e| ExecError::Msg(e.to_string()))? {
+    match cat
+        .get(c.id, key)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+    {
         Some(v) => Ok(QueryResult {
             tag: "GET 1".into(),
             columns: vec!["key".into(), "value".into()],
@@ -870,7 +902,8 @@ pub fn copy_in(
             .first()
             .and_then(|c| c.clone())
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let bytes = serde_json::to_vec(&Value::Object(map)).map_err(|e| ExecError::Msg(e.to_string()))?;
+        let bytes =
+            serde_json::to_vec(&Value::Object(map)).map_err(|e| ExecError::Msg(e.to_string()))?;
         cat.put(id, &key, bytes)
             .map_err(|e| ExecError::Msg(e.to_string()))?;
         n += 1;
@@ -888,11 +921,7 @@ pub fn copy_out(
     format: CopyFormat,
 ) -> Result<QueryResult, ExecError> {
     let _ = format;
-    let scan = select_rows(
-        catalog,
-        namespace,
-        &format!("SELECT * FROM {container}"),
-    )?;
+    let scan = select_rows(catalog, namespace, &format!("SELECT * FROM {container}"))?;
     Ok(QueryResult {
         tag: format!("COPY {}", scan.rows.len()),
         columns: scan.columns,
@@ -908,7 +937,11 @@ fn cell(obj: &Value, col: &str) -> Option<String> {
     })
 }
 
-fn extract_table_name_after(upper: &str, original: &str, keyword: &str) -> Result<String, ExecError> {
+fn extract_table_name_after(
+    upper: &str,
+    original: &str,
+    keyword: &str,
+) -> Result<String, ExecError> {
     let kw = keyword.to_ascii_uppercase();
     let pos = upper
         .find(&kw)
@@ -950,7 +983,10 @@ fn parse_column_list(sql: &str) -> Vec<String> {
         Some(i) => i + 1,
         None => return vec![],
     };
-    let end = sql[start..].find(')').map(|i| start + i).unwrap_or(sql.len());
+    let end = sql[start..]
+        .find(')')
+        .map(|i| start + i)
+        .unwrap_or(sql.len());
     sql[start..end]
         .split(',')
         .filter_map(|p| {
@@ -1013,19 +1049,14 @@ mod adhoc_usage_tests {
 
 #[cfg(test)]
 mod ddl_exec_tests {
-    use super::{execute_adhoc_sql, SharedCatalog};
+    use super::{SharedCatalog, execute_adhoc_sql};
     use crate::error::ExecError;
     use spacestorage_types::ContainerCatalog;
     use std::sync::{Arc, RwLock};
 
     fn catalog_with_table() -> SharedCatalog {
         let cat: SharedCatalog = Arc::new(RwLock::new(ContainerCatalog::new()));
-        execute_adhoc_sql(
-            &cat,
-            "ns",
-            "CREATE TABLE t (id text, v text)",
-        )
-        .unwrap();
+        execute_adhoc_sql(&cat, "ns", "CREATE TABLE t (id text, v text)").unwrap();
         cat
     }
 
@@ -1092,26 +1123,29 @@ mod ddl_exec_tests {
 
 #[cfg(test)]
 mod isolation_exec_tests {
-    use super::{execute_adhoc_sql, parse_set_transaction_isolation, SharedCatalog};
+    use super::{SharedCatalog, execute_adhoc_sql, parse_set_transaction_isolation};
     use crate::options::IsolationLevel;
     use spacestorage_types::ContainerCatalog;
     use std::sync::{Arc, RwLock};
 
     #[test]
     fn parse_repeatable_read_and_serializable() {
-        let iso = parse_set_transaction_isolation(
-            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
-        )
-        .unwrap()
-        .unwrap();
+        let iso =
+            parse_set_transaction_isolation("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                .unwrap()
+                .unwrap();
         assert_eq!(iso, IsolationLevel::Snapshot);
-        assert!(parse_set_transaction_isolation("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            .unwrap_err()
-            .code()
-            .contains("isolation"));
-        assert!(parse_set_transaction_isolation("SET search_path = public")
-            .unwrap()
-            .is_none());
+        assert!(
+            parse_set_transaction_isolation("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                .unwrap_err()
+                .code()
+                .contains("isolation")
+        );
+        assert!(
+            parse_set_transaction_isolation("SET search_path = public")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1123,7 +1157,10 @@ mod isolation_exec_tests {
             "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
         )
         .unwrap_err();
-        assert!(err.to_string().contains("set_transaction_requires_active_txn"));
+        assert!(
+            err.to_string()
+                .contains("set_transaction_requires_active_txn")
+        );
     }
 }
 
