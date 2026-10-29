@@ -63,7 +63,7 @@ flowchart BT
   l0 --> l1 --> l2 --> l3 --> l4
 ```
 
-L3 models in the first binary include Relational Table, Document Store, and K/V Store. New models are new types, not a second engine. L0 creatable types and L4 planetary compositions are complete-product surfaces (`spacestorage l0`, `spacestorage composition`).
+L3 models include Relational Table, Document Store, and K/V Store. New models are new types, not a second engine. L0 creatable types and L4 planetary compositions are reached with `spacestorage l0` and `spacestorage composition`.
 
 Isolation is a closed set: `READ COMMITTED` (default) and `SNAPSHOT` when the type is snapshot-capable. `SERIALIZABLE` is refused. Cassandra consistency is not rewritten into SQL isolation.
 

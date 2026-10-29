@@ -182,7 +182,7 @@ namespace acme {
 }
 ```
 
-`quota` on a first-binary build (no `tenancy-quotas` feature) is `Slice7Required`. A negative quota argument is `QuotaNegative`. `private_metrics on` and `private_logs on` are `ObservabilityRequired`. Export of those streams belongs to observability, not to this file.
+A negative quota argument is `QuotaNegative`. `private_metrics on` and `private_logs on` are `ObservabilityRequired` until metrics and logs export are part of the build. Export of those streams belongs to observability, not to this file.
 
 `container NAME { encryption { key "…"; } }` with any key bytes is `KeyMaterialForbidden`. Encryption is declared with a `key_ref`, not with inline key material. That check runs at validate for a `container` block.
 
@@ -215,10 +215,10 @@ Top-level `labels`, `memory`, `replication`, and `types` are accepted so older f
 
 ## Examples
 
-| File | Profile |
-|------|---------|
-| [`docs/examples/first-binary-one-node.conf`](../examples/first-binary-one-node.conf) | One node, PostgreSQL and Redis |
-| [`docs/examples/first-binary-three-node/`](../examples/first-binary-three-node/) | Three nodes |
+| File | What it shows |
+|------|----------------|
+| [`docs/examples/one-node.conf`](../examples/one-node.conf) | One node, PostgreSQL and Redis |
+| [`docs/examples/three-node/`](../examples/three-node/) | Three nodes |
 | [`docs/examples/node.conf`](../examples/node.conf) | Runtime grammar sample |
 | [`docs/examples/compat/`](../examples/compat/) | Limits |
 | [`docs/examples/durability/`](../examples/durability/) | Drives |

@@ -8,13 +8,13 @@ Work from the repository root (`server/`). Workspace `rust-version` is 1.88.
 cargo build -p spacestoraged -p spacestorage --features complete-product
 ```
 
-A plain `cargo build -p spacestoraged` selects the `first-binary` default and leaves out the other handlers, the admin UI, and the later mounts.
+A plain `cargo build -p spacestoraged` leaves out the other handlers, the admin UI, and the later mounts.
 
 The daemon is `target/debug/spacestoraged`. The CLI is `target/debug/spacestorage`.
 
 ## A one-node lab
 
-The one-node example is [`docs/examples/first-binary-one-node.conf`](../examples/first-binary-one-node.conf). It expects three secret files and a data directory:
+The one-node example is [`docs/examples/one-node.conf`](../examples/one-node.conf). It expects three secret files and a data directory:
 
 ```bash
 mkdir -p /tmp/spacestorage/db-1 /tmp/spacestorage/etc
@@ -29,8 +29,8 @@ Point `admin.token_file`, `cluster.master_key_file`, `cluster.token_file`, and `
 Check the file, then start:
 
 ```bash
-spacestorage validate docs/examples/first-binary-one-node.conf
-spacestoraged --config docs/examples/first-binary-one-node.conf
+spacestorage validate docs/examples/one-node.conf
+spacestoraged --config docs/examples/one-node.conf
 ```
 
 `--set key=value` overrides a dotted setting for that process. Example: `--set runtime.threads=4`. You cannot add an entrypoint with `--set`.
