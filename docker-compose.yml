@@ -1,0 +1,87 @@
+# Three-node SpaceStorage cluster for local smoke checks.
+# Image is built when the stack starts (pull_policy: build).
+#
+#   docker compose up --build
+#
+# Host ports (A / B / C):
+#   PostgreSQL  5432 / 5433 / 5434
+#   Redis       6379 / 6380 / 6381
+#   admin-http  7701 / 7801 / 7901
+
+name: spacestorage-three-node
+
+x-node: &node
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: spacestorage:local
+  pull_policy: build
+  volumes:
+    - secrets:/etc/spacestorage/secrets
+  restart: unless-stopped
+
+services:
+  db-a:
+    <<: *node
+    hostname: db-a
+    environment:
+      NODE_ROLE: bootstrap
+      NODE_NAME: db-a
+      CONFIG: /etc/spacestorage/three-node/a.conf
+    volumes:
+      - secrets:/etc/spacestorage/secrets
+      - data-a:/var/lib/spacestorage
+    ports:
+      - "5432:5432"
+      - "6379:6379"
+      - "7701:7701"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://db-a:7701/v1/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 36
+      start_period: 20s
+
+  db-b:
+    <<: *node
+    hostname: db-b
+    environment:
+      NODE_ROLE: join
+      NODE_NAME: db-b
+      CONFIG: /etc/spacestorage/three-node/b.conf
+      SEED_HTTP: http://db-a:7701
+    volumes:
+      - secrets:/etc/spacestorage/secrets
+      - data-b:/var/lib/spacestorage
+    ports:
+      - "5433:5432"
+      - "6380:6379"
+      - "7801:7701"
+    depends_on:
+      db-a:
+        condition: service_healthy
+
+  db-c:
+    <<: *node
+    hostname: db-c
+    environment:
+      NODE_ROLE: join
+      NODE_NAME: db-c
+      CONFIG: /etc/spacestorage/three-node/c.conf
+      SEED_HTTP: http://db-a:7701
+    volumes:
+      - secrets:/etc/spacestorage/secrets
+      - data-c:/var/lib/spacestorage
+    ports:
+      - "5434:5432"
+      - "6381:6379"
+      - "7901:7701"
+    depends_on:
+      db-a:
+        condition: service_healthy
+
+volumes:
+  secrets:
+  data-a:
+  data-b:
+  data-c:

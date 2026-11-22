@@ -1,0 +1,16 @@
+target/
+.git/
+.cursor/
+.specify/
+**/*.rs.bk
+**/*.log
+.idea/
+.vscode/
+.DS_Store
+*.tmp
+*.swp
+.env*
+docs/milestones/
+specs/
+scripts/
+agent-transcripts/
