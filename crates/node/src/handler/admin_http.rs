@@ -5,7 +5,7 @@ use crate::handler::ClientStream;
 use crate::lifecycle::NodeState;
 use async_trait::async_trait;
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -18,6 +18,19 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use tracing::debug;
 
+use super::session_auth::{
+    self, auth_mutate, auth_read, caller_audit_read, caller_cluster_admin, caller_namespace_scoped,
+    clear_session_cookie, session_view_json, set_session_cookie, AuthCaller,
+};
+use super::ui_reads::{
+    build_job_rows, build_monitoring_panel, build_namespace_detail, build_namespace_list_rows,
+    build_node_detail, build_node_list_rows, build_overview_input, find_job_row, section_refusal,
+};
+use spacestorage_admin_ui::shell::{parse_limit, LimitError, PageParams};
+use spacestorage_admin_ui::{
+    compose_job_detail, compose_jobs_list, compose_monitoring_panel, compose_namespace_detail,
+    compose_namespace_list, compose_node_detail, compose_nodes_list, merge_audit_page,
+};
 use super::Handler;
 
 pub struct AdminHttpHandler {
@@ -79,9 +92,33 @@ fn router(node: Arc<Node>) -> Router {
         .route("/v1/restore", post(restore_alias))
         .route("/v1/snapshots", get(snapshots_stub))
         .route("/v1/auth/login", post(auth_login))
+        .route("/v1/auth/session", get(auth_session))
+        .route("/v1/auth/logout", post(auth_logout))
+        .route("/v1/ui/overview", get(get_ui_overview))
+        .route("/v1/ui/namespaces", get(get_ui_namespaces))
+        .route("/v1/ui/namespaces/{name}", get(get_ui_namespace_detail))
+        .route("/v1/ui/nodes", get(get_ui_nodes))
+        .route("/v1/ui/nodes/{id}", get(get_ui_node_detail))
+        .route("/v1/ui/monitoring", get(get_ui_monitoring))
+        .route("/v1/ui/monitoring/namespaces/{name}", get(get_ui_monitoring_ns))
+        .route("/v1/ui/jobs", get(get_ui_jobs))
+        .route("/v1/ui/jobs/{id}", get(get_ui_job_detail))
+        .route("/v1/ui/audit", get(get_ui_audit))
         .route("/ui", get(ui_root))
-        .route("/ui/cluster", get(ui_cluster))
-        .route("/ui/console", get(ui_console))
+        .route("/ui/overview", get(ui_overview))
+        .route("/ui/namespaces", get(ui_shell_page))
+        .route("/ui/namespaces/{*tail}", get(ui_shell_page))
+        .route("/ui/nodes", get(ui_shell_page))
+        .route("/ui/nodes/{*tail}", get(ui_shell_page))
+        .route("/ui/monitoring", get(ui_shell_page))
+        .route("/ui/monitoring/namespaces/{*tail}", get(ui_shell_page))
+        .route("/ui/jobs", get(ui_shell_page))
+        .route("/ui/jobs/{*tail}", get(ui_shell_page))
+        .route("/ui/audit", get(ui_shell_page))
+        .route("/ui/map", get(ui_map_page))
+        .route("/ui/browse", get(ui_browse_page))
+        .route("/ui/cluster", get(ui_cluster_redirect))
+        .route("/ui/console", get(ui_console_redirect))
         .route("/ui/assets/{*name}", get(ui_asset))
         .route("/v1/cluster/map", get(cluster_map))
         .route("/v1/console/query", post(console_query))
@@ -112,14 +149,115 @@ fn router(node: Arc<Node>) -> Router {
         .with_state(node)
 }
 
+fn admin_op_requires_cluster_admin(op: &AdminOp) -> bool {
+    matches!(
+        op,
+        AdminOp::NamespaceList
+            | AdminOp::NamespaceCreate { .. }
+            | AdminOp::NamespaceRename { .. }
+            | AdminOp::NamespaceDelete { .. }
+            | AdminOp::QuotaReplace { .. }
+            | AdminOp::Reload
+            | AdminOp::Stop { .. }
+            | AdminOp::RoleList
+            | AdminOp::RoleBindingList { .. }
+            | AdminOp::VoterReplace { .. }
+            | AdminOp::VoterGrow { .. }
+            | AdminOp::VoterShrink { .. }
+            | AdminOp::JoinTokenMint { .. }
+            | AdminOp::Membership
+            | AdminOp::Drain { .. }
+            | AdminOp::Undrain { .. }
+    )
+}
+
+fn tenant_isolation_forbidden() -> ErrorBody {
+    ErrorBody {
+        code: "forbidden".into(),
+        message: "not permitted for this principal".into(),
+        details: serde_json::json!({}),
+    }
+}
+
+fn session_may_read_namespace(caller: &AuthCaller, name: &str) -> bool {
+    match caller {
+        AuthCaller::AdminToken => true,
+        AuthCaller::Session(s) if s.cluster_admin => true,
+        AuthCaller::Session(s) => s.namespace_scopes.iter().any(|n| n == name),
+    }
+}
+
+fn authorize_admin_op(caller: &AuthCaller, op: &AdminOp) -> Result<(), ErrorBody> {
+    if caller_namespace_scoped(caller) && admin_op_requires_cluster_admin(op) {
+        return Err(ErrorBody {
+            code: "forbidden".into(),
+            message: "operation requires CLUSTER_ADMIN".into(),
+            details: serde_json::json!({}),
+        });
+    }
+    match op {
+        AdminOp::Leases { .. } if caller_namespace_scoped(caller) => {
+            Err(tenant_isolation_forbidden())
+        }
+        AdminOp::NamespaceDescribe { name }
+            if caller_namespace_scoped(caller) && !session_may_read_namespace(caller, name) =>
+        {
+            Err(tenant_isolation_forbidden())
+        }
+        AdminOp::AuditList { .. } if !caller_audit_read(caller) => Err(ErrorBody {
+            code: "forbidden".into(),
+            message: "audit_list requires AUDIT_READ or CLUSTER_ADMIN".into(),
+            details: serde_json::json!({}),
+        }),
+        AdminOp::Drain { .. } | AdminOp::Undrain { .. } if !caller_cluster_admin(caller) => {
+            Err(ErrorBody {
+                code: "forbidden".into(),
+                message: "drain requires CLUSTER_ADMIN".into(),
+                details: serde_json::json!({}),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+fn record_ui_api_request(node: &Node, status: StatusCode) {
+    use spacestorage_observability::{help_for, LabelSet};
+    let mut labels = LabelSet::new();
+    let _ = labels.insert("application", spacestorage_admin_ui::APPLICATION_UI);
+    let _ = labels.insert("protocol", "admin-http");
+    node.metrics.registry().inc(
+        "spacestorage_api_requests_total",
+        labels.clone(),
+        help_for("spacestorage_api_requests_total"),
+        1,
+    );
+    if status.is_client_error() || status.is_server_error() {
+        node.metrics.registry().inc(
+            "spacestorage_api_request_errors_total",
+            labels,
+            help_for("spacestorage_api_request_errors_total"),
+            1,
+        );
+    }
+}
+
+fn with_ui_json(node: &Node, resp: axum::response::Response) -> axum::response::Response {
+    record_ui_api_request(node, resp.status());
+    let mut r = with_headers(node, resp);
+    spacestorage_admin_ui::apply_shell_security_headers(&mut r);
+    r
+}
+
 async fn admin_op(
     State(node): State<Arc<Node>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(error) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(error)).into_response();
-    }
+    let admin_tok = admin_token_file_trim(&node);
+    let caller = match auth_mutate(&headers, &node.sessions, &admin_tok).await {
+        Ok(c) => c,
+        Err(error) => return session_auth::csrf_forbidden_response(error),
+    };
     let op: AdminOp = match serde_json::from_slice(&body) {
         Ok(op) => op,
         Err(error) => {
@@ -134,39 +272,390 @@ async fn admin_op(
                 .into_response();
         }
     };
+    if let Err(error) = authorize_admin_op(&caller, &op) {
+        return (StatusCode::FORBIDDEN, Json(error)).into_response();
+    }
     match AdminService::execute(&node, op).await {
         Ok(value) => with_headers(&node, Json(value).into_response()),
         Err(error) => (StatusCode::BAD_REQUEST, Json(error)).into_response(),
     }
 }
 
-async fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
-    let auth = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let token = auth.strip_prefix("Bearer ").unwrap_or("");
-    let cfg = node.config.load();
-    let expected = match cfg.admin_token_file.as_ref() {
-        Some(p) => tokio::fs::read_to_string(p).await.unwrap_or_default(),
-        None => String::new(),
+async fn get_ui_overview(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    if !node.admin_ui.read().unwrap().slice11_enabled {
+        return slice11_required();
+    }
+    if let Err(e) = auth(&headers, &node).await {
+        return with_ui_json(
+            &node,
+            (StatusCode::UNAUTHORIZED, Json(e)).into_response(),
+        );
+    }
+    let Some(principal) = ui_principal(&node, &headers) else {
+        return with_ui_json(
+            &node,
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorBody {
+                    code: "session_invalid".into(),
+                    message: "session expired or unknown".into(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response(),
+        );
     };
-    if check_bearer(token, expected.trim()) {
-        Ok(())
-    } else if node
-        .sessions
-        .read()
-        .ok()
-        .and_then(|s| s.resolve(token))
-        .is_some()
-    {
-        Ok(())
+  let path = "/ui/overview";
+    if let Some(msg) = section_refusal(path, &principal) {
+        return with_ui_json(
+            &node,
+            (
+                StatusCode::FORBIDDEN,
+                Json(ErrorBody {
+                    code: "forbidden".into(),
+                    message: msg.into(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response(),
+        );
+    }
+    let ns_filter = if principal.cluster_admin {
+        None
     } else {
-        Err(ErrorBody {
-            code: "unauthorized".into(),
-            message: "invalid token".into(),
+        Some(principal.namespace_admin.as_slice())
+    };
+    let mut input = build_overview_input(&node, ns_filter).await;
+    if !principal.cluster_admin {
+        spacestorage_admin_ui::filter_overview_for_namespaces(
+            &mut input,
+            &principal.namespace_admin,
+        );
+    }
+    with_ui_json(
+        &node,
+        Json(spacestorage_admin_ui::compose_overview(&input)).into_response(),
+    )
+}
+
+fn ui_limit_bad_request() -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorBody {
+            code: "limit_exceeded".into(),
+            message: "limit must be 1..=100".into(),
             details: serde_json::json!({}),
-        })
+        }),
+    )
+        .into_response()
+}
+
+fn ui_forbidden() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ErrorBody {
+            code: "forbidden".into(),
+            message: "forbidden".into(),
+            details: serde_json::json!({}),
+        }),
+    )
+        .into_response()
+}
+
+async fn require_ui_session(
+    node: &Arc<Node>,
+    headers: &HeaderMap,
+    path: &str,
+) -> Result<spacestorage_admin_ui::UiPrincipal, axum::response::Response> {
+    if !node.admin_ui.read().unwrap().slice11_enabled {
+        return Err(slice11_required());
+    }
+    if let Err(e) = auth(headers, node).await {
+        return Err(with_ui_json(node, (StatusCode::UNAUTHORIZED, Json(e)).into_response()));
+    }
+    let Some(principal) = ui_principal(node, headers) else {
+        return Err(with_ui_json(
+            node,
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorBody {
+                    code: "session_invalid".into(),
+                    message: "session expired or unknown".into(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response(),
+        ));
+    };
+    if let Some(msg) = section_refusal(path, &principal) {
+        return Err(with_ui_json(
+            node,
+            (
+                StatusCode::FORBIDDEN,
+                Json(ErrorBody {
+                    code: "forbidden".into(),
+                    message: msg.into(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response(),
+        ));
+    }
+    Ok(principal)
+}
+
+fn page_params(q: &std::collections::HashMap<String, String>) -> Result<PageParams, LimitError> {
+    let limit = parse_limit(q.get("limit").map(|s| s.as_str()))?;
+    let cursor = q.get("cursor").cloned().filter(|c| !c.is_empty());
+    Ok(PageParams { limit, cursor })
+}
+
+async fn get_ui_namespaces(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let principal = match require_ui_session(&node, &headers, "/ui/namespaces").await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let params = match page_params(&q) {
+        Ok(p) => p,
+        Err(LimitError::Exceeded) => return ui_limit_bad_request(),
+    };
+    let ns_filter = if principal.cluster_admin {
+        None
+    } else {
+        Some(principal.namespace_admin.as_slice())
+    };
+    let filter_q = q.get("q").map(|s| s.as_str());
+    let (rows, _) = build_namespace_list_rows(&node, ns_filter, filter_q).await;
+    with_ui_json(
+        &node,
+        Json(compose_namespace_list(&params, rows)).into_response(),
+    )
+}
+
+async fn get_ui_namespace_detail(
+    State(node): State<Arc<Node>>,
+    Path(name): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let path = format!("/ui/namespaces/{name}");
+    let principal = match require_ui_session(&node, &headers, &path).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    if !principal.cluster_admin && !principal.namespace_admin.iter().any(|n| n == &name) {
+        return with_ui_json(&node, ui_forbidden());
+    }
+    let params = match page_params(&q) {
+        Ok(p) => p,
+        Err(LimitError::Exceeded) => return ui_limit_bad_request(),
+    };
+    let Some((summary, record, containers)) = build_namespace_detail(&node, &name).await else {
+        return with_ui_json(&node, ui_forbidden());
+    };
+    with_ui_json(
+        &node,
+        Json(compose_namespace_detail(&summary, &record, &params, containers)).into_response(),
+    )
+}
+
+async fn get_ui_node_detail(
+    State(node): State<Arc<Node>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let path = format!("/ui/nodes/{id}");
+    let principal = match require_ui_session(&node, &headers, &path).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let ns_filter = if principal.cluster_admin {
+        None
+    } else {
+        Some(principal.namespace_admin.as_slice())
+    };
+    let Some((row, detail)) = build_node_detail(&node, &id).await else {
+        return with_ui_json(&node, ui_forbidden());
+    };
+    if let Some(allowed) = ns_filter {
+        let (rows, _) = build_node_list_rows(&node, Some(allowed)).await;
+        if !rows.iter().any(|r| r.node_id == row.node_id || r.node_name == row.node_name) {
+            return with_ui_json(&node, ui_forbidden());
+        }
+    }
+    with_ui_json(
+        &node,
+        Json(compose_node_detail(&row, &detail)).into_response(),
+    )
+}
+
+async fn get_ui_monitoring(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let principal = match require_ui_session(&node, &headers, "/ui/monitoring").await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    if !principal.cluster_admin {
+        return with_ui_json(&node, ui_forbidden());
+    }
+    let (scope, ns, series, want) = build_monitoring_panel(&node, None);
+    let body = compose_monitoring_panel(scope, ns.as_deref(), &series, &want);
+    with_ui_json(&node, Json(body).into_response())
+}
+
+async fn get_ui_monitoring_ns(
+    State(node): State<Arc<Node>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let path = format!("/ui/monitoring/namespaces/{name}");
+    let principal = match require_ui_session(&node, &headers, &path).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    if !principal.cluster_admin && !principal.namespace_admin.iter().any(|n| n == &name) {
+        return with_ui_json(&node, ui_forbidden());
+    }
+    let (scope, ns, series, want) = build_monitoring_panel(&node, Some(&name));
+    let body = compose_monitoring_panel(scope, ns.as_deref(), &series, &want);
+    with_ui_json(&node, Json(body).into_response())
+}
+
+async fn get_ui_jobs(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let principal = match require_ui_session(&node, &headers, "/ui/jobs").await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let params = match page_params(&q) {
+        Ok(p) => p,
+        Err(LimitError::Exceeded) => return ui_limit_bad_request(),
+    };
+    let ns_filter = if principal.cluster_admin {
+        None
+    } else {
+        Some(principal.namespace_admin.as_slice())
+    };
+    let rows = build_job_rows(&node, ns_filter);
+    with_ui_json(
+        &node,
+        Json(compose_jobs_list(&params, rows)).into_response(),
+    )
+}
+
+async fn get_ui_job_detail(
+    State(node): State<Arc<Node>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let path = format!("/ui/jobs/{id}");
+    let principal = match require_ui_session(&node, &headers, &path).await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let ns_filter = if principal.cluster_admin {
+        None
+    } else {
+        Some(principal.namespace_admin.as_slice())
+    };
+    let Some(row) = find_job_row(&node, &id, ns_filter) else {
+        return with_ui_json(&node, ui_forbidden());
+    };
+    with_ui_json(
+        &node,
+        Json(compose_job_detail(&row)).into_response(),
+    )
+}
+
+async fn get_ui_audit(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let _principal = match require_ui_session(&node, &headers, "/ui/audit").await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let params = match page_params(&q) {
+        Ok(p) => p,
+        Err(LimitError::Exceeded) => return ui_limit_bad_request(),
+    };
+    let list_params = spacestorage_authz::AuditListParams {
+        limit: params.limit as usize,
+        cursor: params.cursor.clone(),
+        namespace: q.get("namespace").cloned(),
+    };
+    let (entries, next_cursor) = node.audit.list(list_params);
+    let body = merge_audit_page(&params, params.limit, next_cursor, entries);
+    with_ui_json(&node, Json(body).into_response())
+}
+
+async fn get_ui_nodes(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let principal = match require_ui_session(&node, &headers, "/ui/nodes").await {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let params = match page_params(&q) {
+        Ok(p) => p,
+        Err(LimitError::Exceeded) => return ui_limit_bad_request(),
+    };
+    let ns_filter = if principal.cluster_admin {
+        None
+    } else {
+        Some(principal.namespace_admin.as_slice())
+    };
+    let (mut rows, source) = build_node_list_rows(&node, ns_filter).await;
+    if let Some(st) = q.get("status").map(|s| s.as_str()).filter(|s| !s.is_empty()) {
+        rows.retain(|r| r.readiness == st);
+    }
+    if let Some(needle) = q.get("q").map(|s| s.as_str()).filter(|s| !s.is_empty()) {
+        rows.retain(|r| r.node_name.contains(needle) || r.node_id.contains(needle));
+    }
+    with_ui_json(
+        &node,
+        Json(compose_nodes_list(&params, source, rows)).into_response(),
+    )
+}
+
+fn admin_token_file_trim(node: &Node) -> String {
+    let cfg = node.config.load();
+    cfg.admin_token_file
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+async fn auth(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
+    let tok = admin_token_file_trim(node);
+    match auth_read(headers, &node.sessions, &tok).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+async fn auth_post(headers: &HeaderMap, node: &Node) -> Result<(), ErrorBody> {
+    let tok = admin_token_file_trim(node);
+    match auth_mutate(headers, &node.sessions, &tok).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -251,8 +740,21 @@ async fn buffers(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::res
 }
 
 async fn reload(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    let tok = admin_token_file_trim(&node);
+    let caller = match auth_mutate(&headers, &node.sessions, &tok).await {
+        Ok(c) => c,
+        Err(e) => return session_auth::csrf_forbidden_response(e),
+    };
+    if !caller_cluster_admin(&caller) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorBody {
+                code: "forbidden".into(),
+                message: "reload requires CLUSTER_ADMIN".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
     }
     match AdminService::execute(&node, AdminOp::Reload).await {
         Ok(v) => with_headers(&node, Json(v).into_response()),
@@ -265,8 +767,21 @@ async fn stop(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    let tok = admin_token_file_trim(&node);
+    let caller = match auth_mutate(&headers, &node.sessions, &tok).await {
+        Ok(c) => c,
+        Err(e) => return session_auth::csrf_forbidden_response(e),
+    };
+    if !caller_cluster_admin(&caller) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorBody {
+                code: "forbidden".into(),
+                message: "stop requires CLUSTER_ADMIN".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
     }
     let wait = serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
@@ -464,8 +979,8 @@ async fn jobs_create(
     headers: HeaderMap,
     body: Bytes,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    if let Err(e) = auth_post(&headers, &node).await {
+        return session_auth::csrf_forbidden_response(e);
     }
     let v: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
@@ -540,8 +1055,21 @@ async fn job_cancel(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    let tok = admin_token_file_trim(&node);
+    let caller = match auth_mutate(&headers, &node.sessions, &tok).await {
+        Ok(c) => c,
+        Err(e) => return session_auth::csrf_forbidden_response(e),
+    };
+    if !caller_cluster_admin(&caller) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorBody {
+                code: "forbidden".into(),
+                message: "job cancel requires CLUSTER_ADMIN".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
     }
     let Ok(jid) = uuid::Uuid::parse_str(&id) else {
         return migrate_err_response(spacestorage_migrate::MigrateError::NotFound);
@@ -560,8 +1088,21 @@ async fn job_resume(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> axum::response::Response {
-    if let Err(e) = auth(&headers, &node).await {
-        return (StatusCode::UNAUTHORIZED, Json(e)).into_response();
+    let tok = admin_token_file_trim(&node);
+    let caller = match auth_mutate(&headers, &node.sessions, &tok).await {
+        Ok(c) => c,
+        Err(e) => return session_auth::csrf_forbidden_response(e),
+    };
+    if !caller_cluster_admin(&caller) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorBody {
+                code: "forbidden".into(),
+                message: "job resume requires CLUSTER_ADMIN".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
     }
     let Ok(jid) = uuid::Uuid::parse_str(&id) else {
         return migrate_err_response(spacestorage_migrate::MigrateError::NotFound);
@@ -712,12 +1253,35 @@ fn slice11_required() -> axum::response::Response {
 }
 
 fn ui_principal(node: &Node, headers: &HeaderMap) -> Option<spacestorage_admin_ui::UiPrincipal> {
+    if let Ok(store) = node.sessions.read() {
+        if let Some(rec) = session_auth::resolve_session(&store, headers) {
+            return Some(if rec.cluster_admin {
+                spacestorage_admin_ui::UiPrincipal::cluster_admin(rec.login)
+            } else if !rec.namespace_scopes.is_empty() {
+                let mut p = spacestorage_admin_ui::UiPrincipal::unprivileged(rec.login);
+                p.namespace_admin = rec.namespace_scopes.clone();
+                p.create_namespaces = rec.namespace_scopes.clone();
+                p
+            } else {
+                spacestorage_admin_ui::UiPrincipal::unprivileged(rec.login)
+            });
+        }
+    }
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .strip_prefix("Bearer ")
         .unwrap_or("");
+    if node
+        .sessions
+        .read()
+        .ok()
+        .and_then(|s| s.resolve(token))
+        .is_some()
+    {
+        return None;
+    }
     let ui = node.admin_ui.read().ok()?;
     (ui.resolve_principal)(token)
 }
@@ -763,7 +1327,7 @@ async fn auth_login(
         )
             .into_response();
     }
-    let (tok, _) = {
+    let (tok, rec) = {
         let mut store = node.sessions.write().unwrap();
         store.issue(
             uuid::Uuid::now_v7(),
@@ -773,17 +1337,64 @@ async fn auth_login(
             std::time::Duration::from_secs(12 * 3600),
         )
     };
-    with_headers(
+    let body = session_view_json(&rec, 12 * 3600);
+    let mut resp = with_ui_json(&node, Json(body).into_response());
+    set_session_cookie(resp.headers_mut(), &tok, 12 * 3600);
+    resp
+}
+
+async fn auth_session(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let store = match node.sessions.read() {
+        Ok(s) => s,
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorBody {
+                    code: "session_invalid".into(),
+                    message: "session expired or unknown".into(),
+                    details: serde_json::json!({}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let Some(rec) = session_auth::resolve_session(&store, &headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                code: "session_invalid".into(),
+                message: "session expired or unknown".into(),
+                details: serde_json::json!({}),
+            }),
+        )
+            .into_response();
+    };
+    with_ui_json(
         &node,
-        Json(serde_json::json!({
-            "token": tok,
-            "token_type": "Bearer",
-            "expires_in": 12 * 3600,
-            "principal": "admin",
-            "cluster_admin": true
-        }))
-        .into_response(),
+        Json(session_view_json(&rec, 12 * 3600)).into_response(),
     )
+}
+
+async fn auth_logout(
+    State(node): State<Arc<Node>>,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    let admin_tok = admin_token_file_trim(&node);
+    let caller = match auth_mutate(&headers, &node.sessions, &admin_tok).await {
+        Ok(c) => c,
+        Err(e) => return session_auth::csrf_forbidden_response(e),
+    };
+    if let AuthCaller::Session(rec) = caller {
+        if let Ok(mut store) = node.sessions.write() {
+            store.revoke_hash(&rec.token_hash);
+        }
+    }
+    let mut resp = with_ui_json(&node, StatusCode::NO_CONTENT.into_response());
+    clear_session_cookie(resp.headers_mut());
+    resp
 }
 
 async fn cluster_map(
@@ -835,6 +1446,9 @@ async fn console_query(
     if !ui.slice11_enabled {
         return slice11_required();
     }
+    if let Err(e) = auth_post(&headers, &node).await {
+        return session_auth::csrf_forbidden_response(e);
+    }
     let Some(principal) = ui_principal(&node, &headers) else {
         return (
             StatusCode::UNAUTHORIZED,
@@ -871,6 +1485,9 @@ async fn console_config(
     let ui = node.admin_ui.read().unwrap().clone();
     if !ui.slice11_enabled {
         return slice11_required();
+    }
+    if let Err(e) = auth_post(&headers, &node).await {
+        return session_auth::csrf_forbidden_response(e);
     }
     let Some(principal) = ui_principal(&node, &headers) else {
         return (
@@ -909,6 +1526,9 @@ async fn console_containers(
     if !ui.slice11_enabled {
         return slice11_required();
     }
+    if let Err(e) = auth_post(&headers, &node).await {
+        return session_auth::csrf_forbidden_response(e);
+    }
     let Some(principal) = ui_principal(&node, &headers) else {
         return (
             StatusCode::UNAUTHORIZED,
@@ -944,84 +1564,105 @@ async fn console_containers(
     }
 }
 
+fn shell_page_response(html: String) -> axum::response::Response {
+    let mut resp = (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response();
+    spacestorage_admin_ui::apply_shell_security_headers(&mut resp);
+    resp
+}
+
 async fn ui_root(State(node): State<Arc<Node>>) -> axum::response::Response {
     if !node.admin_ui.read().unwrap().slice11_enabled {
         return slice11_required();
     }
-    axum::response::Redirect::temporary("/ui/console").into_response()
+    axum::response::Redirect::permanent("/ui/overview").into_response()
 }
 
-async fn ui_cluster(
+async fn ui_overview(State(node): State<Arc<Node>>) -> axum::response::Response {
+    if !node.admin_ui.read().unwrap().slice11_enabled {
+        return slice11_required();
+    }
+    shell_page_response(spacestorage_admin_ui::pages::shell_html(
+        "/ui/overview",
+        spacestorage_admin_ui::shell::ShellSection::Overview,
+    ))
+}
+
+async fn ui_shell_page(
     State(node): State<Arc<Node>>,
-    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> axum::response::Response {
+    if !node.admin_ui.read().unwrap().slice11_enabled {
+        return slice11_required();
+    }
+    let path = uri.path();
+    let section =
+        spacestorage_admin_ui::shell::ShellSection::from_path(path).unwrap_or(
+            spacestorage_admin_ui::shell::ShellSection::Overview,
+        );
+    shell_page_response(spacestorage_admin_ui::pages::shell_html(path, section))
+}
+
+async fn ui_map_page(State(node): State<Arc<Node>>) -> axum::response::Response {
+    if !node.admin_ui.read().unwrap().slice11_enabled {
+        return slice11_required();
+    }
+    shell_page_response(spacestorage_admin_ui::pages::shell_html(
+        "/ui/map",
+        spacestorage_admin_ui::shell::ShellSection::Map,
+    ))
+}
+
+async fn ui_browse_page(State(node): State<Arc<Node>>) -> axum::response::Response {
+    if !node.admin_ui.read().unwrap().slice11_enabled {
+        return slice11_required();
+    }
+    shell_page_response(spacestorage_admin_ui::pages::shell_html(
+        "/ui/browse",
+        spacestorage_admin_ui::shell::ShellSection::Browse,
+    ))
+}
+
+async fn ui_cluster_redirect(
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::response::Response {
-    let ui = node.admin_ui.read().unwrap().clone();
-    if !ui.slice11_enabled {
-        return slice11_required();
-    }
-    let Some(principal) = ui_principal(&node, &headers) else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorBody {
-                code: "unauthorized".into(),
-                message: "invalid token".into(),
-                details: serde_json::json!({}),
-            }),
-        )
-            .into_response();
+    let qs = q
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let loc = if qs.is_empty() {
+        "/ui/map".to_string()
+    } else {
+        format!("/ui/map?{qs}")
     };
-    if matches!(
-        principal.map_authz(),
-        spacestorage_admin_ui::MapAuthz::Forbidden
-    ) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    let interval = q
-        .get("interval")
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(2)
-        .clamp(1, 10);
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        spacestorage_admin_ui::pages::cluster_map_html(interval),
-    )
-        .into_response()
+    axum::response::Redirect::permanent(&loc).into_response()
 }
 
-async fn ui_console(State(node): State<Arc<Node>>, headers: HeaderMap) -> axum::response::Response {
-    let ui = node.admin_ui.read().unwrap().clone();
-    if !ui.slice11_enabled {
-        return slice11_required();
-    }
-    let Some(principal) = ui_principal(&node, &headers) else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorBody {
-                code: "unauthorized".into(),
-                message: "invalid token".into(),
-                details: serde_json::json!({}),
-            }),
-        )
-            .into_response();
+async fn ui_console_redirect(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let qs = q
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let loc = if qs.is_empty() {
+        "/ui/browse".to_string()
+    } else {
+        format!("/ui/browse?{qs}")
     };
-    let az = principal.console_authz();
-    if !az.cluster_admin && az.namespace_admin.is_empty() {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        spacestorage_admin_ui::pages::console_html(),
-    )
-        .into_response()
+    axum::response::Redirect::permanent(&loc).into_response()
 }
 
 async fn ui_asset(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    match name.as_str() {
+    let mut resp = match name.as_str() {
         "cluster-map.js" => (
             [(header::CONTENT_TYPE, "application/javascript")],
             include_str!("../../../admin-ui/src/assets/cluster-map.js"),
@@ -1037,8 +1678,25 @@ async fn ui_asset(
             include_str!("../../../admin-ui/src/assets/console.css"),
         )
             .into_response(),
-        _ => StatusCode::NOT_FOUND.into_response(),
-    }
+        "ui.css" => (
+            [(header::CONTENT_TYPE, "text/css")],
+            include_str!("../../../admin-ui/src/assets/ui.css"),
+        )
+            .into_response(),
+        "shell.js" => (
+            [(header::CONTENT_TYPE, "application/javascript")],
+            spacestorage_admin_ui::pages::SHELL_JS,
+        )
+            .into_response(),
+        "shell.css" => (
+            [(header::CONTENT_TYPE, "text/css")],
+            spacestorage_admin_ui::pages::SHELL_CSS,
+        )
+            .into_response(),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    spacestorage_admin_ui::apply_shell_security_headers(&mut resp);
+    resp
 }
 
 fn ingest_err(e: spacestorage_ingest::IngestError) -> axum::response::Response {

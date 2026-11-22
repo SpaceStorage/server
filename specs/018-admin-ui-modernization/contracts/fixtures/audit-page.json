@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-11-22T18:47:00Z",
+  "limit": 50,
+  "next_cursor": null,
+  "entries": [
+    {
+      "id": "018f2c6e-7b1a-7c3d-8e4f-1a2b3c4d5e6f",
+      "principal": "admin",
+      "action": "namespace.rename",
+      "target": "acme-old → acme",
+      "time": "2026-11-22T18:46:00Z",
+      "namespace": "acme"
+    }
+  ]
+}

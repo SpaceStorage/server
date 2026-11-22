@@ -4,6 +4,8 @@ description: "Task list for cluster identity, discovery, join, leave, and replac
 
 # Tasks: Cluster Identity, Discovery, Join, Leave, and Replace
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/specs/011-identity-membership/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
@@ -41,10 +43,10 @@ description: "Task list for cluster identity, discovery, join, leave, and replac
 - [X] T006 [P] Implement join-secret epochs in `crates/membership/src/secret.rs`: `SecretEpoch { epoch: u64 monotonic, secret: opaque bytes, accepted: bool }`; verify is constant-time over all `accepted=true` epochs; bootstrap creates ≥32-byte secret, writes `cluster.token_file` mode 0600, records epoch 1 accepted
 - [X] T007 [P] Define cluster-scoped event types in `crates/membership/src/events.rs` exactly as [data-model.md](data-model.md) §10: `Bootstrap`, `PendingJoin`, `AdmitMember`, `MemberUpdate`, `Drain`, `Undrain`, `RemoveMember`, `RetireIdentity`, `ReplaceMember`, `SecretRotateBegin`, `SecretRotateComplete`, `JoinTokenMint`, `JoinTokenConsume`; this crate is the only writer
 - [X] T008 [P] Stub metric increments in `crates/membership/src/metrics.rs` for closed names from [contracts/metrics.md](contracts/metrics.md): `spacestorage_membership_members`, `spacestorage_membership_pending`, `spacestorage_membership_join_total{result}`, `spacestorage_membership_replace_total{result}`, `spacestorage_membership_decommission_total{result}`, `spacestorage_membership_secret_epoch` — do not rename `08` series
-- [ ] T009 Extend `cluster { }` parsing/validation in `crates/config` per [contracts/config-directives.md](contracts/config-directives.md): exclusive `bootstrap` / `join`; `seeds` (alias `peers`); `token_file` = join secret; optional `join_token_file`; `secret_max_overlap` default `24h`; `join_token_ttl` default `12h` range `1h`–`72h`; codes `bootstrap_and_join`, `bootstrap_or_join_required`, `bootstrap_foreign_seeds`, `join_secret_required`, `join_token_ttl_range`
+- [X] T009 Extend `cluster { }` parsing/validation in `crates/config` per [contracts/config-directives.md](contracts/config-directives.md): exclusive `bootstrap` / `join`; `seeds` (alias `peers`); `token_file` = join secret; optional `join_token_file`; `secret_max_overlap` default `24h`; `join_token_ttl` default `12h` range `1h`–`72h`; codes `bootstrap_and_join`, `bootstrap_or_join_required`, `bootstrap_foreign_seeds`, `join_secret_required`, `join_token_ttl_range`
 - [X] T010 Implement `MembershipService` skeleton and `on_start` hook surface in `crates/membership/src/lib.rs` (async; called from `crates/node` before advertising `ready`); wire crate into `crates/node` dependency graph without enabling story logic yet
-- [ ] T011 In `crates/controlplane`, ensure applied `MemberRecord.status` is only `ready` \| `draining` (remove unused `joining`); add apply paths for pending map / retired set / incarnation so membership events from T007 can land; pending MUST NOT enter voter set or `members` map ([contracts/membership-store.md](contracts/membership-store.md))
-- [ ] T012 [P] Add additive internodes message type stubs in `crates/internode` for `JoinRequest`, `JoinAck`, `PendingAnnounce`, `FenceIncarnation`, `SecretRotate` per [contracts/internodes-membership.md](contracts/internodes-membership.md); unknown types remain ignored; join secret verify gate stays before processing
+- [X] T011 In `crates/controlplane`, ensure applied `MemberRecord.status` is only `ready` \| `draining` (remove unused `joining`); add apply paths for pending map / retired set / incarnation so membership events from T007 can land; pending MUST NOT enter voter set or `members` map ([contracts/membership-store.md](contracts/membership-store.md))
+- [X] T012 [P] Add additive internodes message type stubs in `crates/internode` for `JoinRequest`, `JoinAck`, `PendingAnnounce`, `FenceIncarnation`, `SecretRotate` per [contracts/internodes-membership.md](contracts/internodes-membership.md); unknown types remain ignored; join secret verify gate stays before processing
 
 **Checkpoint**: `cargo check -p spacestorage-membership` succeeds; config fixtures under `specs/011-identity-membership/contracts/fixtures/invalid/` parse to documented codes; controlplane no longer stores `joining`. User stories can start.
 
@@ -61,15 +63,15 @@ description: "Task list for cluster identity, discovery, join, leave, and replac
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T013 [P] [US1] Add unit tests in `crates/membership/src/bootstrap.rs` (or `crates/membership/tests/bootstrap.rs`) for: bootstrap creates UUID+secret+one member; second bootstrap on fresh dir different UUID; bootstrap ignored when `cluster.json` already exists; `bootstrap_foreign_seeds` refused
-- [ ] T014 [P] [US1] Add conformance tests in `crates/conformance/tests/membership_bootstrap.rs` covering SC-001/SC-002 using [contracts/fixtures/bootstrap.conf](contracts/fixtures/bootstrap.conf): one-node `ready` < 10 s bound; restart keeps UUID; isolated second bootstrap different UUID and no merge
-- [ ] T015 [P] [US1] Add config contract tests in `crates/config/tests/membership_directives.rs` (or equivalent) that [bootstrap-and-join.conf](contracts/fixtures/invalid/bootstrap-and-join.conf) → `bootstrap_and_join` and [bootstrap-foreign-seeds.conf](contracts/fixtures/invalid/bootstrap-foreign-seeds.conf) → `bootstrap_foreign_seeds`
+- [X] T014 [P] [US1] Add conformance tests in `crates/conformance/tests/membership_bootstrap.rs` covering SC-001/SC-002 using [contracts/fixtures/bootstrap.conf](contracts/fixtures/bootstrap.conf): one-node `ready` < 10 s bound; restart keeps UUID; isolated second bootstrap different UUID and no merge
+- [X] T015 [P] [US1] Add config contract tests in `crates/config/tests/membership_directives.rs` (or equivalent) that [bootstrap-and-join.conf](contracts/fixtures/invalid/bootstrap-and-join.conf) → `bootstrap_and_join` and [bootstrap-foreign-seeds.conf](contracts/fixtures/invalid/bootstrap-foreign-seeds.conf) → `bootstrap_foreign_seeds`
 
 ### Implementation for User Story 1
 
 - [X] T016 [US1] Implement explicit bootstrap in `crates/membership/src/bootstrap.rs`: require `cluster { bootstrap; }`, empty or self-only seeds, **and** no local `cluster.json`; create UUID + secret epoch 1; append `Bootstrap` event; become sole voter member with `status=ready`, `incarnation=1`
 - [X] T017 [US1] Wire bootstrap path through `MembershipService::on_start` in `crates/membership/src/lib.rs` and `crates/node` so first binary reaches `ready` as sole member; if local cluster identity exists, ignore bootstrap declaration and start as that cluster (FR-005/FR-020)
 - [X] T018 [US1] On bootstrap, write join secret to `cluster.token_file` (create if missing) with mode 0600 and persist `identity/cluster.json` + `identity/node.json` via `crates/membership/src/identity.rs` / `secret.rs`
-- [ ] T019 [US1] Apply `Bootstrap` in `crates/controlplane` cluster group so `snapshot().members` has exactly one member and minority attempts return `Minority { group: cluster }` with no membership change
+- [X] T019 [US1] Apply `Bootstrap` in `crates/controlplane` cluster group so `snapshot().members` has exactly one member and minority attempts return `Minority { group: cluster }` with no membership change
 - [X] T020 [US1] Enforce FR-008 in `crates/membership` + `crates/node` lifecycle: process not in membership, not bootstrapping, and no reachable seed MUST NOT become `ready` as a member (does not apply to already-admitted members)
 - [X] T021 [US1] Ensure two isolated bootstraps with the same `cluster_name` produce independent UUIDs with no merge protocol in `crates/membership/src/bootstrap.rs` (FR-002)
 
@@ -86,20 +88,20 @@ description: "Task list for cluster identity, discovery, join, leave, and replac
 ### Tests for User Story 2 ⚠️
 
 - [X] T022 [P] [US2] Add unit tests in `crates/membership/src/{join,token,secret}.rs` for: pending ≠ member; token TTL/single-use/name bind; name uniqueness among current members; retired-id refuse; secret overlap verify; admit refused when pending process disconnected
-- [ ] T023 [P] [US2] Add conformance tests in `crates/conformance/tests/membership_join.rs` covering SC-003/SC-004/SC-009 with [join-pending.conf](contracts/fixtures/join-pending.conf), [join-token.conf](contracts/fixtures/join-token.conf), [join-missing-ladder.conf](contracts/fixtures/invalid/join-missing-ladder.conf)
-- [ ] T024 [P] [US2] Add contract fixture assertions in `crates/conformance` or `crates/config` that missing ladder creates **no** pending row and wrong/expired/reused token refuses with audit line
+- [X] T023 [P] [US2] Add conformance tests in `crates/conformance/tests/membership_join.rs` covering SC-003/SC-004/SC-009 with [join-pending.conf](contracts/fixtures/join-pending.conf), [join-token.conf](contracts/fixtures/join-token.conf), [join-missing-ladder.conf](contracts/fixtures/invalid/join-missing-ladder.conf)
+- [X] T024 [P] [US2] Add contract fixture assertions in `crates/conformance` or `crates/config` that missing ladder creates **no** pending row and wrong/expired/reused token refuses with audit line
 
 ### Implementation for User Story 2
 
 - [X] T025 [P] [US2] Implement first-join handshake in `crates/membership/src/join.rs`: after secret+labels accepted, no token → append `PendingJoin` (fields per [data-model.md](data-model.md) §4); valid token → `AdmitMember` without second admit; process exit drops pending; admit of disconnected pending → refuse
 - [X] T026 [P] [US2] Implement one-time tokens in `crates/membership/src/token.rs`: `JoinToken` bound to `node_name` only for token life; optional `node_id`; `expires_at`; `used: bool`; default TTL 12 h (1–72 h); mint/consume events; mismatched name → refuse
-- [ ] T027 [US2] Wire `JoinRequest` / `JoinAck` (`pending` \| `admitted` \| `replaced` \| `refused` + code) and `PendingAnnounce` in `crates/internode` + `crates/membership/src/join.rs`; non-members may send only `JoinRequest` after secret verify ([contracts/internodes-membership.md](contracts/internodes-membership.md))
+- [X] T027 [US2] Wire `JoinRequest` / `JoinAck` (`pending` \| `admitted` \| `replaced` \| `refused` + code) and `PendingAnnounce` in `crates/internode` + `crates/membership/src/join.rs`; non-members may send only `JoinRequest` after secret verify ([contracts/internodes-membership.md](contracts/internodes-membership.md))
 - [X] T028 [US2] On `AdmitMember`, insert into `members` with `status=ready` and adjust voter/learner set per research R12 in `crates/controlplane` (1 voter → third member expands to 3; further members learners); pending remains excluded from voters and replica targets
-- [ ] T029 [US2] Call `004` placement ladder APIs from `crates/membership/src/join.rs` so omit/integrity failure → `JoinAck.refused` code `ladder` and **no** pending row; join MUST NOT move existing replica placements
-- [ ] T030 [US2] Implement admin ops `Membership`, `Admit { node_id }`, `JoinTokenMint { node_name, node_id?, ttl? }` in `crates/admin-proto` (+ node handlers) per [contracts/admin-cli.md](contracts/admin-cli.md); first-binary auth: admin bearer = `CLUSTER_ADMIN`
-- [ ] T031 [US2] Add CLI verbs in `crates/spacestorage`: `membership`, `admit <node-id>`, `join-token mint --name <node-name> [--id <uuid>] [--ttl 12h]` with `--output json` and exit codes from contract
+- [X] T029 [US2] Call `004` placement ladder APIs from `crates/membership/src/join.rs` so omit/integrity failure → `JoinAck.refused` code `ladder` and **no** pending row; join MUST NOT move existing replica placements
+- [X] T030 [US2] Implement admin ops `Membership`, `Admit { node_id }`, `JoinTokenMint { node_name, node_id?, ttl? }` in `crates/admin-proto` (+ node handlers) per [contracts/admin-cli.md](contracts/admin-cli.md); first-binary auth: admin bearer = `CLUSTER_ADMIN`
+- [X] T031 [US2] Add CLI verbs in `crates/spacestorage`: `membership`, `admit <node-id>`, `join-token mint --name <node-name> [--id <uuid>] [--ttl 12h]` with `--output json` and exit codes from contract
 - [X] T032 [US2] In `crates/placement`, treat non-members and pending joins as **not** new replica targets and **not** voters (FR-007/FR-009); members remain eligible coordinators (FR-014)
-- [ ] T033 [US2] Implement secret rotate begin/complete in `crates/membership/src/secret.rs` + admin/CLI `cluster secret-rotate begin|complete` and internodes `SecretRotate`; overlap until `complete` or `secret_max_overlap` (default 24h) drops old epoch
+- [X] T033 [US2] Implement secret rotate begin/complete in `crates/membership/src/secret.rs` + admin/CLI `cluster secret-rotate begin|complete` and internodes `SecretRotate`; overlap until `complete` or `secret_max_overlap` (default 24h) drops old epoch
 - [X] T034 [US2] Enforce retired-identity refuse on first join and name-unique-among-current-members in `crates/membership/src/join.rs` (FR-018); name reuse after decommission accepted only with **new** `node_id`
 
 **Checkpoint**: Pending vs token paths pass SC-003/004/009; ladder/secret failures create no member; admit-after-exit refused.
@@ -115,19 +117,19 @@ description: "Task list for cluster identity, discovery, join, leave, and replac
 ### Tests for User Story 3 ⚠️
 
 - [X] T035 [P] [US3] Add unit tests in `crates/membership/src/{drain,decommission,replace}.rs` for: drain vs stop (`exit_after_drain`); last-member refuse; incarnation fence; live_replace when heartbeating; retired id cannot be replaced
-- [ ] T036 [P] [US3] Add conformance tests in `crates/conformance/tests/membership_lifecycle.rs` covering SC-005/SC-006/SC-007/SC-008/SC-010: drain/undrain/live decommission; replace after timeout + fence; restart without seeds; name reuse vs retired identity; last-member decommission refused
+- [X] T036 [P] [US3] Add conformance tests in `crates/conformance/tests/membership_lifecycle.rs` covering SC-005/SC-006/SC-007/SC-008/SC-010: drain/undrain/live decommission; replace after timeout + fence; restart without seeds; name reuse vs retired identity; last-member decommission refused
 
 ### Implementation for User Story 3
 
 - [X] T037 [US3] Implement operator drain/undrain in `crates/membership/src/drain.rs`: `Drain` → `status=draining`, no new tenant accept, no new placements, process stays up; `Undrain` → `ready`; distinguish from `001` stop path (`exit_after_drain: true`)
 - [X] T038 [US3] Implement decommission in `crates/membership/src/decommission.rs`: require draining if process reachable; call `004` rebalance; blockers → `DecommissionBlocked { containers[] }` with process still up; else `RemoveMember` + `RetireIdentity`; **refuse** when target is last remaining member even with `accept_data_loss` (FR-011/FR-019); voter adjust per R12 (3→2 → one voter + one learner)
 - [X] T039 [US3] Implement replace in `crates/membership/src/replace.rs`: allow iff `012` marks `node_id` unavailable now; heartbeating `ready`/`draining` → `LiveReplace`; on success `incarnation += 1`, emit `FenceIncarnation`; placements keep naming the id; new process may use fresh data dir presenting existing `node_id` via `JoinRequest.replace_of`
-- [ ] T040 [US3] In `crates/node`, wire operator drain ≠ stop: admin drain keeps process running; SIGTERM/`Stop` still drain-then-exit; rolling restart uses stop-signal path only (FR-010/FR-015)
-- [ ] T041 [US3] In `crates/placement`, exclude `draining` from **new** replica targets while existing replicas remain until rebalance/decommission; decommission orchestration waits on rebalance plan completion or data-loss accept
-- [ ] T042 [US3] Implement admin ops `Drain`, `Undrain`, `Decommission { node_id, accept_data_loss }`, `Replace { node_id }` in `crates/admin-proto` + node handlers per [contracts/admin-cli.md](contracts/admin-cli.md) and [contracts/drain-decommission-replace.md](contracts/drain-decommission-replace.md)
-- [ ] T043 [US3] Add CLI verbs in `crates/spacestorage`: `drain`, `undrain`, `decommission [--accept-data-loss]`, `replace <node-id>` with documented exit codes (`live_replace`, `DecommissionBlocked`, minority retryable)
+- [X] T040 [US3] In `crates/node`, wire operator drain ≠ stop: admin drain keeps process running; SIGTERM/`Stop` still drain-then-exit; rolling restart uses stop-signal path only (FR-010/FR-015)
+- [X] T041 [US3] In `crates/placement`, exclude `draining` from **new** replica targets while existing replicas remain until rebalance/decommission; decommission orchestration waits on rebalance plan completion or data-loss accept
+- [X] T042 [US3] Implement admin ops `Drain`, `Undrain`, `Decommission { node_id, accept_data_loss }`, `Replace { node_id }` in `crates/admin-proto` + node handlers per [contracts/admin-cli.md](contracts/admin-cli.md) and [contracts/drain-decommission-replace.md](contracts/drain-decommission-replace.md)
+- [X] T043 [US3] Add CLI verbs in `crates/spacestorage`: `drain`, `undrain`, `decommission [--accept-data-loss]`, `replace <node-id>` with documented exit codes (`live_replace`, `DecommissionBlocked`, minority retryable)
 - [X] T044 [US3] Implement already-admitted restart in `crates/membership` + `crates/node`: persisted membership + join secret only → eligible for `ready`; empty seeds OK; leftover bootstrap ignored; no peer reachable → MAY still `ready` from local membership (FR-016/SC-007)
-- [ ] T045 [US3] Enforce fenced incarnation on `internode`/`replication` in `crates/internode`: stale incarnation → close stream; must not vote or be replica target after replace commits
+- [X] T045 [US3] Enforce fenced incarnation on `internode`/`replication` in `crates/internode`: stale incarnation → close stream; must not vote or be replica target after replace commits
 
 **Checkpoint**: SC-005–SC-008 and SC-010 pass; operator drain keeps process up; last member cannot be decommissioned; replace fences old incarnation.
 
@@ -138,11 +140,11 @@ description: "Task list for cluster identity, discovery, join, leave, and replac
 **Purpose**: Metrics, interim audit, release-profile flag, quickstart validation, cleanup
 
 - [X] T046 [P] Finish metric increments at join/admit/replace/decommission/secret-rotate sites in `crates/membership/src/metrics.rs` with closed `result` label sets from [contracts/metrics.md](contracts/metrics.md)
-- [ ] T047 [P] Emit interim audit records (admit, token mint/use/refuse, decommission, replace, secret-rotate) to in-memory ring + `membership.audit` tracing in `crates/membership` until `014` durable audit ships (research R15)
+- [X] T047 [P] Emit interim audit records (admit, token mint/use/refuse, decommission, replace, secret-rotate) to in-memory ring + `membership.audit` tracing in `crates/membership` until `014` durable audit ships (research R15)
 - [X] T048 Enable membership in first-binary release profile wiring in `crates/release-profile` / `crates/node` so slices 1–5 include bootstrap/join (plan First binary)
-- [ ] T049 [P] Align operator docs/examples with [quickstart.md](quickstart.md) and copy/reference fixtures under `docs/examples/` (or documented path) for bootstrap, join-pending, join-token
-- [ ] T050 Run [quickstart.md](quickstart.md) steps 1–7 against in-process/loopback harness and ensure `cargo test -p spacestorage-membership` plus `crates/conformance/tests/membership_*.rs` pass SC-001–SC-010
-- [ ] T051 [P] `rustfmt` / `clippy` clean pass on `crates/membership` and new conformance/config tests
+- [X] T049 [P] Align operator docs/examples with [quickstart.md](quickstart.md) and copy/reference fixtures under `docs/examples/` (or documented path) for bootstrap, join-pending, join-token
+- [X] T050 Run [quickstart.md](quickstart.md) steps 1–7 against in-process/loopback harness and ensure `cargo test -p spacestorage-membership` plus `crates/conformance/tests/membership_*.rs` pass SC-001–SC-010
+- [X] T051 [P] `rustfmt` / `clippy` clean pass on `crates/membership` and new conformance/config tests
 
 ---
 

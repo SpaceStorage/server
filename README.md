@@ -42,6 +42,16 @@ That build is the server: every handler above, the admin UI, ingest, and the clu
 
 Guide: [what the server is](docs/guide/product.md), [architecture](docs/guide/architecture.md), [start and clients](docs/guide/using.md), [configuration](docs/guide/configuration.md). Example configs are in `docs/examples/`.
 
+## Three-node Docker lab
+
+Builds the binaries when the stack starts, then runs bootstrap + two joiners:
+
+```bash
+docker compose up --build
+```
+
+Details and smoke checks: [`docker/README.md`](docker/README.md).
+
 ## For people changing the server
 
 How the tree is specified and what is still deferred lives in [`AGENTS.md`](AGENTS.md): constitution, `specs/001`–`016`, and the milestone ledger. That is the map for writing the server, not for using it.

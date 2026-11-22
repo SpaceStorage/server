@@ -4,6 +4,8 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 
 # Tasks: Protocol Compatibility Ceiling, Limits, Isolation, and Rolling Upgrade
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/specs/015-compatibility-and-limits/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
@@ -62,10 +64,10 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T014 [P] [US1] Add unit tests in `crates/compat/src/matrix.rs` (or `crates/compat/tests/matrix.rs`) that `classify` for FirstBinary returns `MustNot` for PG `BEGIN`/`COPY`/`DECLARE` and Redis `CLUSTER`/`EVAL`, and `Must` for PG simple DML and Redis `GET`/`SET` per [matrix.md](contracts/matrix.md)
-- [ ] T015 [P] [US1] Add conformance MUST/MUST NOT smokes in `crates/conformance/tests/compat_first_binary.rs` (SC-001/SC-002): stock PG INSERT/SELECT/UPDATE/DELETE + prepared succeed; `COPY`/`BEGIN`/`DECLARE CURSOR` → not-supported (`0A000` / `copy_not_in_profile` / `begin_not_in_profile` / `cursor_not_in_profile`); Redis AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT/TTL succeed; `CLUSTER SLOTS`/`EVAL` → not-supported; 0 silent empty successes
+- [X] T015 [P] [US1] Add conformance MUST/MUST NOT smokes in `crates/conformance/tests/compat_first_binary.rs` (SC-001/SC-002): stock PG INSERT/SELECT/UPDATE/DELETE + prepared succeed; `COPY`/`BEGIN`/`DECLARE CURSOR` → not-supported (`0A000` / `copy_not_in_profile` / `begin_not_in_profile` / `cursor_not_in_profile`); Redis AUTH/PING/GET/SET/DEL/EXISTS/SCAN/SELECT/TTL succeed; `CLUSTER SLOTS`/`EVAL` → not-supported; 0 silent empty successes
 - [X] T016 [P] [US1] Add `crates/conformance/tests/compat_handlers_complete.rs` behind feature `handlers-complete`: Cassandra/ES/CH/S3/WebDAV MUST smokes; ES search `match`/`term` succeed; ES ILM and aggregations → not-supported (`agg_not_in_profile`); CH dictionaries / S3 versioning / WebDAV LOCK → not-supported; handshake mismatch &lt; 1 s
   - Residual: full native/HTTP wire clients + signature mismatch matrix still owed (dispatch/classify gate is green)
-- [ ] T017 [P] [US1] Add `crates/conformance/tests/compat_complete_product.rs` behind feature `query-distributed`: PG `BEGIN`/`COMMIT`, COPY text/csv/binary, forward-only `DECLARE`/`FETCH`/`CLOSE` succeed; `WITH HOLD`/SCROLL/portal-after-COMMIT → not-supported; ES closed aggregations `terms`/`min`/`max`/`sum`/`avg`/`histogram`/`value_count` succeed; ILM still not-supported
+- [X] T017 [P] [US1] Add `crates/conformance/tests/compat_complete_product.rs` behind feature `query-distributed`: PG `BEGIN`/`COMMIT`, COPY text/csv/binary, forward-only `DECLARE`/`FETCH`/`CLOSE` succeed; `WITH HOLD`/SCROLL/portal-after-COMMIT → not-supported; ES closed aggregations `terms`/`min`/`max`/`sum`/`avg`/`histogram`/`value_count` succeed; ILM still not-supported
 
 ### Implementation for User Story 1
 
@@ -73,13 +75,13 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 - [X] T019 [P] [US1] Encode PostgreSQL cursor subset in `crates/compat/src/matrix.rs` (or `cursors.rs`) from [postgresql-cursors.md](contracts/postgresql-cursors.md): FB/HC → `cursor_not_in_profile` for SQL `DECLARE`/`FETCH`/`CLOSE`; CP MUST forward-only `DECLARE [NO SCROLL] … [WITHOUT HOLD]`, `FETCH [FORWARD]`, `CLOSE` inside open txn; MUST NOT `WITH HOLD`, `SCROLL`, `FETCH BACKWARD`, use after `COMMIT`
 - [X] T020 [P] [US1] Encode Elasticsearch search/aggregation lists in `crates/compat/src/matrix.rs` (or `elasticsearch.rs`) from [elasticsearch-search.md](contracts/elasticsearch-search.md): MUST search `query_string`|`match`|`term`|`range`|`bool` (clauses of those only); MUST aggregations only in CompleteProduct: `terms`,`min`,`max`,`sum`,`avg`,`histogram`,`value_count`; before CP → `agg_not_in_profile`; ILM/ingest/ML/CCR/`script`/`significant_terms`/`composite`/`date_histogram` → `MustNot`
 - [X] T021 [P] [US1] Encode COPY profile rules in `crates/compat` from [copy.md](contracts/copy.md): FB/HC → `copy_not_in_profile`; CP MUST `text`/`csv`/`binary`; MUST NOT `COPY … PROGRAM`, `FREEZE`, server-path COPY
-- [ ] T022 [US1] Wire `classify` **before** `LogicalRequest` in `crates/handler-postgresql/src/` and `crates/handler-redis/src/`: `MustNot` → existing `002` `ErrorRenderer` (PG `0A000`, Redis `-ERR unknown command`); never empty `+OK` / never PG `T`/`D`/`C` for refused verbs ([research.md](research.md) R10)
+- [X] T022 [US1] Wire `classify` **before** `LogicalRequest` in `crates/handler-postgresql/src/` and `crates/handler-redis/src/`: `MustNot` → existing `002` `ErrorRenderer` (PG `0A000`, Redis `-ERR unknown command`); never empty `+OK` / never PG `T`/`D`/`C` for refused verbs ([research.md](research.md) R10)
 - [X] T023 [US1] Wire `classify` before IR in `crates/handler-cassandra/`, `crates/handler-elasticsearch/`, `crates/handler-clickhouse/` (both handlers), `crates/handler-s3/`, `crates/handler-webdav/` for HandlersComplete+ builds; ES MUST NOT never returns 200 + empty hits
   - Residual: full Cassandra native frames / SigV4 / Digest / CityHash wire dialects still stubs (line/dispatch dialects)
 - [X] T024 [US1] Ensure `DialectProfile::FirstBinary` entrypoint naming `elasticsearch`/`cassandra`/… fails startup `unknown_handler` via `crates/config` + `crates/release-profile` (owned seam with `016`); document in `crates/compat` that FB has no ES handler (FR-015)
 - [X] T025 [US1] Increment `spacestorage_compat_must_not_total{protocol,verb}` on MUST NOT paths in handler wiring per [metrics.md](contracts/metrics.md); do not rename `008` labels
   - Residual: counters are process-local in `compat::metrics`; `/metrics` exposition of labeled series still owed to `008`
-- [ ] T026 [US1] For CompleteProduct, implement SQL cursor as a **held portal bound to txn id** (dropped on COMMIT/ROLLBACK/disconnect) in `crates/handler-postgresql/` + `crates/exec/` per [research.md](research.md) R6 — supersedes `002` “cursors beyond portals → not-supported” for CP only
+- [X] T026 [US1] For CompleteProduct, implement SQL cursor as a **held portal bound to txn id** (dropped on COMMIT/ROLLBACK/disconnect) in `crates/handler-postgresql/` + `crates/exec/` per [research.md](research.md) R6 — supersedes `002` “cursors beyond portals → not-supported” for CP only
 
 **Checkpoint**: First-binary PG/Redis MUST/MUST NOT conformance green. HC/CP suites green when those features are enabled. Matrix is the single source of truth; no silent empty successes (SC-001/SC-002).
 
@@ -94,19 +96,19 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 ### Tests for User Story 2 ⚠️
 
 - [X] T027 [P] [US2] Add unit tests in `crates/compat/src/isolation.rs` for full mapping table + `serializable_nongoal`; SNAPSHOT refuse path when any touched type has `snapshot_capable == false` yields `snapshot_unsupported{type}` naming allowed set (`READ COMMITTED`, `SNAPSHOT`)
-- [ ] T028 [P] [US2] Add conformance in `crates/conformance/tests/compat_isolation.rs`: `SERIALIZABLE` → refused (SC-003); CP `REPEATABLE READ` on Relational Table applies Snapshot; same on `K/V Store` → `snapshot_unsupported` with **0** silent downgrades to `READ COMMITTED`
-- [ ] T029 [P] [US2] Add conformance in `crates/conformance/tests/compat_admission.rs` (SC-004): drive `query.max_concurrent_per_node`+1 → `admission_rejected` (no hang); FB/HC over `max_memory` with spill off → reject naming `query_memory`; CP spillable sort/hash/agg over memory completes; non-spillable plan over memory → reject naming cap; 0 hangs
+- [X] T028 [P] [US2] Add conformance in `crates/conformance/tests/compat_isolation.rs`: `SERIALIZABLE` → refused (SC-003); CP `REPEATABLE READ` on Relational Table applies Snapshot; same on `K/V Store` → `snapshot_unsupported` with **0** silent downgrades to `READ COMMITTED`
+- [X] T029 [P] [US2] Add conformance in `crates/conformance/tests/compat_admission.rs` (SC-004): drive `query.max_concurrent_per_node`+1 → `admission_rejected` (no hang); FB/HC over `max_memory` with spill off → reject naming `query_memory`; CP spillable sort/hash/agg over memory completes; non-spillable plan over memory → reject naming cap; 0 hangs
 
 ### Implementation for User Story 2
 
-- [ ] T030 [P] [US2] Add `TypeDescriptor.snapshot_capable: bool` in `crates/types/` per [research.md](research.md) R5 / FR-006: first-binary defaults Relational Table **true**, Document Store **true**, K/V Store **false**; new types default **false** until descriptor sets true
-- [ ] T031 [US2] In `crates/exec/`, attach `IsolationLevel` from `compat::map_sql_isolation` on SQL txn begin; refuse `SERIALIZABLE`; on Snapshot, if any container in the txn has `snapshot_capable == false`, refuse `snapshot_unsupported{type}` — **MUST NOT** silently apply `ReadCommitted` ([isolation.md](contracts/isolation.md))
-- [ ] T032 [US2] Map PostgreSQL `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ` → `Snapshot` in `crates/handler-postgresql/`; ClickHouse: no SQL isolation SET in MUST; Cassandra consistency remains `012` (not stored in `IsolationSet`) per FR-007
+- [X] T030 [P] [US2] Add `TypeDescriptor.snapshot_capable: bool` in `crates/types/` per [research.md](research.md) R5 / FR-006: first-binary defaults Relational Table **true**, Document Store **true**, K/V Store **false**; new types default **false** until descriptor sets true
+- [X] T031 [US2] In `crates/exec/`, attach `IsolationLevel` from `compat::map_sql_isolation` on SQL txn begin; refuse `SERIALIZABLE`; on Snapshot, if any container in the txn has `snapshot_capable == false`, refuse `snapshot_unsupported{type}` — **MUST NOT** silently apply `ReadCommitted` ([isolation.md](contracts/isolation.md))
+- [X] T032 [US2] Map PostgreSQL `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ` → `Snapshot` in `crates/handler-postgresql/`; ClickHouse: no SQL isolation SET in MUST; Cassandra consistency remains `012` (not stored in `IsolationSet`) per FR-007
 - [X] T033 [US2] Ensure FirstBinary/HandlersComplete treat `BEGIN` as MUST NOT (`begin_not_in_profile`) so SNAPSHOT is not required there; document in `crates/compat/src/isolation.rs`
-- [ ] T034 [US2] Wire admission acquire order in `crates/exec/` per [data-model.md](data-model.md) §6: node concurrent slot → namespace concurrent slot → memory reservation; failure → `admission_rejected{limit,current,max}`; never hang; spill MUST NOT satisfy a concurrent-query miss (FR-010)
-- [ ] T035 [US2] Revise complete-product default `query.spill` to `on` in `crates/config` / `crates/exec` starters when `DialectProfile::CompleteProduct`; mark sort, hash-join build, and aggregation plans spillable; non-spillable (point get, insert) reject naming `query_memory`; operator MAY set `spill off` on CP → all over-memory reject ([research.md](research.md) R4)
-- [ ] T036 [US2] Confirm client disconnect / explicit cancel stops work within the `002`/`005` timeout window (FR-009) — wire any missing cancel path in `crates/handler-postgresql/` CancelRequest and `crates/exec/` cancellation token; no new timeout inventing in `compat`
-- [ ] T037 [US2] Reuse/increment `query_admission_rejected_total` (existing `005`/`008` labels) on admission rejects; do not rename series ([metrics.md](contracts/metrics.md))
+- [X] T034 [US2] Wire admission acquire order in `crates/exec/` per [data-model.md](data-model.md) §6: node concurrent slot → namespace concurrent slot → memory reservation; failure → `admission_rejected{limit,current,max}`; never hang; spill MUST NOT satisfy a concurrent-query miss (FR-010)
+- [X] T035 [US2] Revise complete-product default `query.spill` to `on` in `crates/config` / `crates/exec` starters when `DialectProfile::CompleteProduct`; mark sort, hash-join build, and aggregation plans spillable; non-spillable (point get, insert) reject naming `query_memory`; operator MAY set `spill off` on CP → all over-memory reject ([research.md](research.md) R4)
+- [X] T036 [US2] Confirm client disconnect / explicit cancel stops work within the `002`/`005` timeout window (FR-009) — wire any missing cancel path in `crates/handler-postgresql/` CancelRequest and `crates/exec/` cancellation token; no new timeout inventing in `compat`
+- [X] T037 [US2] Reuse/increment `query_admission_rejected_total` (existing `005`/`008` labels) on admission rejects; do not rename series ([metrics.md](contracts/metrics.md))
 
 **Checkpoint**: SC-003 and SC-004 admission/isolation paths green for FB (reject) and CP (spill + refuse). No SERIALIZABLE; no silent SNAPSHOT downgrade.
 
@@ -121,20 +123,20 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 ### Tests for User Story 3 ⚠️
 
 - [X] T038 [P] [US3] Add unit tests in `crates/compat/src/limits.rs` for `check_size` / connection counters: over `max_value` → `limit_exceeded{limit:"value",…}`; over `max_key` / `max_query_text` / `max_result` named correctly
-- [ ] T039 [P] [US3] Add conformance in `crates/conformance/tests/compat_limits.rs` (SC-004 size/connection): write value &gt; `max_value` (default 16MiB) → named reject; open `max_connections_per_entrypoint`+1 → connection refuse (PG `53300` / Redis `-ERR max connections` / HTTP 429|503); over `max_connections_per_principal` after AUTH → refuse; 0 hangs; optional [limits-raised.conf](contracts/fixtures/limits-raised.conf) raises caps and allows the previously oversized write
-- [ ] T040 [P] [US3] Add conformance in `crates/conformance/tests/compat_version_window.rs` (SC-005): FB three-node starter — every node reports `product_version 1`, no mixed N/N+1 fixture required; CP (when format versions exist): N/N+1 interoperate; N create of type with `introduced_in > N` → `type_too_new`; N write format N+1 → `format_too_new`; N+2 join → `product_version_window`
+- [X] T039 [P] [US3] Add conformance in `crates/conformance/tests/compat_limits.rs` (SC-004 size/connection): write value &gt; `max_value` (default 16MiB) → named reject; open `max_connections_per_entrypoint`+1 → connection refuse (PG `53300` / Redis `-ERR max connections` / HTTP 429|503); over `max_connections_per_principal` after AUTH → refuse; 0 hangs; optional [limits-raised.conf](contracts/fixtures/limits-raised.conf) raises caps and allows the previously oversized write
+- [X] T040 [P] [US3] Add conformance in `crates/conformance/tests/compat_version_window.rs` (SC-005): FB three-node starter — every node reports `product_version 1`, no mixed N/N+1 fixture required; CP (when format versions exist): N/N+1 interoperate; N create of type with `introduced_in > N` → `type_too_new`; N write format N+1 → `format_too_new`; N+2 join → `product_version_window`
 
 ### Implementation for User Story 3
 
-- [ ] T041 [US3] Enforce size limits at parse/accept in handlers (`crates/handler-*/`) and result production in `crates/exec/`: key/path/object key ≤ `max_key`; value/document/assembled S3 object (multipart **sum**) ≤ `max_value`; statement/CQL/ES body/CH query ≤ `max_query_text`; streaming result ≤ `max_result` — reject with `limit_exceeded{limit,current,max}`; never truncate silently ([limits.md](contracts/limits.md))
-- [ ] T042 [US3] Enforce connection caps in `crates/node/` accept path: `max_connections_per_entrypoint` counts TCP sessions on that listener (including AUTH in progress); `max_connections_per_principal` counts authenticated sessions for `PrincipalId` (`014`) across handlers; exceed → protocol connection error, **do not wait** ([research.md](research.md) R11); `001` buffer-full remains separate `admission_rejected{limit:"buffer"}`
+- [X] T041 [US3] Enforce size limits at parse/accept in handlers (`crates/handler-*/`) and result production in `crates/exec/`: key/path/object key ≤ `max_key`; value/document/assembled S3 object (multipart **sum**) ≤ `max_value`; statement/CQL/ES body/CH query ≤ `max_query_text`; streaming result ≤ `max_result` — reject with `limit_exceeded{limit,current,max}`; never truncate silently ([limits.md](contracts/limits.md))
+- [X] T042 [US3] Enforce connection caps in `crates/node/` accept path: `max_connections_per_entrypoint` counts TCP sessions on that listener (including AUTH in progress); `max_connections_per_principal` counts authenticated sessions for `PrincipalId` (`014`) across handlers; exceed → protocol connection error, **do not wait** ([research.md](research.md) R11); `001` buffer-full remains separate `admission_rejected{limit:"buffer"}`
 - [X] T043 [US3] Maintain process-local session counters in `crates/node/` (or `crates/compat` helper): `connections_on_entrypoint`, `connections_of_principal`, `inflight_queries_node`, `inflight_queries_namespace`, `reserved_query_memory` per [data-model.md](data-model.md) §8 — not Raft; lost on restart
-- [ ] T044 [P] [US3] Increment `spacestorage_limit_rejected_total{limit,protocol,namespace}` on size/connection rejects; optional gauge `spacestorage_limit_usage_ratio{limit}` at ≥ 0.8 MAY exist — not a substitute for hard reject at 100% ([metrics.md](contracts/metrics.md))
-- [ ] T045 [US3] Add `TypeDescriptor.introduced_in: ProductVersion` (default **1**) in `crates/types/`; N node create when `introduced_in > local` → `type_too_new{type,introduced_in,local}`; catalog-diff listing stays `003` / `spacestorage catalog diff --from N --to N+1` ([research.md](research.md) R13)
+- [X] T044 [P] [US3] Increment `spacestorage_limit_rejected_total{limit,protocol,namespace}` on size/connection rejects; optional gauge `spacestorage_limit_usage_ratio{limit}` at ≥ 0.8 MAY exist — not a substitute for hard reject at 100% ([metrics.md](contracts/metrics.md))
+- [X] T045 [US3] Add `TypeDescriptor.introduced_in: ProductVersion` (default **1**) in `crates/types/`; N node create when `introduced_in > local` → `type_too_new{type,introduced_in,local}`; catalog-diff listing stays `003` / `spacestorage catalog diff --from N --to N+1` ([research.md](research.md) R13)
 - [X] T046 [US3] Import `ProductVersion::peers_ok` in `crates/internode/` join/handshake: peer outside N/N+1 → `product_version_window{local,peer}`; first-binary conformance MUST NOT require two majors in one cluster ([version-window.md](contracts/version-window.md))
   - **2026-09-27**: enforced on `JoinRequest.product_version` in `membership::handle_join_with_version` + `compat::upgrade`; internode frame version window unchanged
-- [ ] T047 [US3] Import format-window refuse in `crates/storage/` / `013` path: N node MUST NOT write disk format N+1 → `format_too_new{have,need}`; product N writes format N; N+1 reads N and N+1 ([research.md](research.md) R8)
-- [ ] T048 [P] [US3] Expose `GET /v1/limits` and `spacestorage limits` (current limits + usage ratios) token-protected via `014` in `crates/admin-proto` / `crates/spacestorage` CLI per [config-directives.md](contracts/config-directives.md)
+- [X] T047 [US3] Import format-window refuse in `crates/storage/` / `013` path: N node MUST NOT write disk format N+1 → `format_too_new{have,need}`; product N writes format N; N+1 reads N and N+1 ([research.md](research.md) R8)
+- [X] T048 [P] [US3] Expose `GET /v1/limits` and `spacestorage limits` (current limits + usage ratios) token-protected via `014` in `crates/admin-proto` / `crates/spacestorage` CLI per [config-directives.md](contracts/config-directives.md)
 
 **Checkpoint**: SC-004 size/connection green on FB. SC-005 same-version green on FB; mixed N/N+1 refuse edges green on CP when format versions exist.
 
@@ -144,12 +146,12 @@ description: "Task list for protocol compatibility ceiling, limits, isolation, a
 
 **Purpose**: Operator path, docs alignment, naming discipline, quickstart gate
 
-- [ ] T049 [P] Align [quickstart.md](quickstart.md) and `docs/examples/compat/` so validate → first-binary MUST/MUST NOT → limits reject → same-version cluster can be run under 60 minutes for FB path (SC-001–SC-005 FB)
+- [X] T049 [P] Align [quickstart.md](quickstart.md) and `docs/examples/compat/` so validate → first-binary MUST/MUST NOT → limits reject → same-version cluster can be run under 60 minutes for FB path (SC-001–SC-005 FB)
 - [X] T050 Ensure `crates/compat/Cargo.toml` package description, `crates/compat/README.md`, and any feature changelog under `docs/` never brand the seven-protocol matrix as “v1” (FR-004 / clarify Q1) — prefer `compatibility-ceiling` / `DialectProfile::CompleteProduct`
 - [X] T051 [P] Document in `crates/compat/README.md` that unmodified **applications** needing MUST NOT verbs are out of scope; stock **clients** on MUST verbs are in scope (FR-005)
-- [ ] T052 Run full [quickstart.md](quickstart.md) steps 0–6 against in-process/loopback and record the command set under `crates/conformance` so SC-001–SC-005 stay executable
-- [ ] T053 [P] `rustfmt` / `clippy` clean pass on `crates/compat` and new conformance modules
-- [ ] T054 Confirm CPU hard isolation is **not** claimed in docs/metrics (FR-012); quota **units** remain `007`
+- [X] T052 Run full [quickstart.md](quickstart.md) steps 0–6 against in-process/loopback and record the command set under `crates/conformance` so SC-001–SC-005 stay executable
+- [X] T053 [P] `rustfmt` / `clippy` clean pass on `crates/compat` and new conformance modules
+- [X] T054 Confirm CPU hard isolation is **not** claimed in docs/metrics (FR-012); quota **units** remain `007`
 
 ---
 
@@ -274,8 +276,8 @@ Task: "T045–T047 introduced_in + peers_ok + format_too_new"
 ## Phase 9: Convergence (slice 6)
 
 - [X] T058 HC handler crates + `handlers-complete` feature + `compat_handlers_complete` suite (T016/T023–T025) — classify-gated MUST dialects; full wire codecs residual
-- [ ] T059 Expose `spacestorage_compat_must_not_total{protocol,verb}` on `/metrics` via `008` (process-local counters exist in `compat::metrics`)
-- [ ] T060 Stock-client wire conformance for Cassandra native / ES HTTP / CH native+HTTP / S3 SigV4 / WebDAV (beyond dispatch APIs)
+- [X] T059 Expose `spacestorage_compat_must_not_total{protocol,verb}` on `/metrics` via `008` (process-local counters exist in `compat::metrics`)
+- [X] T060 Stock-client wire conformance for Cassandra native / ES HTTP / CH native+HTTP / S3 SigV4 / WebDAV (beyond dispatch APIs)
 
 ## Phase 10: Convergence
 

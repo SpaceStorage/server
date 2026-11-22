@@ -4,6 +4,8 @@ description: "Task list for data migration, transforms, and backup/restore jobs"
 
 # Tasks: Data Migration and Type/Model Transforms
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/specs/010-migration-transforms/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
@@ -64,9 +66,9 @@ description: "Task list for data migration, transforms, and backup/restore jobs"
 
 - [X] T015 [P] [US1] Add contract/fixture tests in `crates/migrate/tests/fixtures_evacuate.rs` loading [contracts/fixtures/evacuate-live.json](contracts/fixtures/evacuate-live.json) and asserting job shape + refuse paths under `contracts/fixtures/invalid/`
 - [X] T016 [P] [US1] Add unit tests in `crates/migrate/tests/dual_write_sequence.rs` for dual-write ack only after target apply, pause without client ack on target failure, and cutover gate on `last_applied_source_seq`
-- [ ] T017 [P] [US1] Add conformance tests behind feature `migrate` in `crates/conformance/tests/migrate_live.rs`: two-node then three-node live KV evacuate; identical logical data; residual replicas match dest policy (SC-001)
+- [X] T017 [P] [US1] Add conformance tests behind feature `migrate` in `crates/conformance/tests/migrate_live.rs`: two-node then three-node live KV evacuate; identical logical data; residual replicas match dest policy (SC-001)
 - [X] T018 [P] [US1] Add conformance test in `crates/conformance/tests/migrate_live.rs` that unsatisfiable anti-affinity returns `ConstraintUnsatisfiable` with no copy started
-- [ ] T019 [P] [US1] Add conformance test in `crates/conformance/tests/migrate_resume.rs` that killing a node mid-migration resumes at `last_applied_source_seq` without duplicating committed keys or fails `StateUnreadable` (FR-008 / SC-004)
+- [X] T019 [P] [US1] Add conformance test in `crates/conformance/tests/migrate_resume.rs` that killing a node mid-migration resumes at `last_applied_source_seq` without duplicating committed keys or fails `StateUnreadable` (FR-008 / SC-004)
 
 ### Implementation for User Story 1
 
@@ -117,8 +119,8 @@ description: "Task list for data migration, transforms, and backup/restore jobs"
 - [X] T035 [P] [US3] Add fixture tests in `crates/migrate/tests/fixtures_transform.rs` for [contracts/fixtures/transform-catalog.json](contracts/fixtures/transform-catalog.json) and [contracts/fixtures/transform-mapping-query.json](contracts/fixtures/transform-mapping-query.json)
 - [X] T036 [P] [US3] Add unit tests in `crates/migrate/tests/mapping_refuse.rs`: understandable pair without query uses catalog; complex without query → `MappingQueryRequired`; missing source column/container → `MappingSourceMissing`; join/agg → `NotSupported`
 - [X] T037 [P] [US3] Add conformance tests in `crates/conformance/tests/transform_kinds.rs` covering all five rewrite kinds (type/model, incompatible schema, re-encode/recompress, re-encrypt, sharding-key) with at least one fixture each (SC-003)
-- [ ] T038 [P] [US3] Add conformance tests in `crates/conformance/tests/transform_live_swap.rs`: live writes during transform appear on target at swap; swap refused until last applied source seq present
-- [ ] T039 [P] [US3] Add conformance tests in `crates/conformance/tests/transform_mapping.rs`: catalog path without query; mapping-query path; missing mapping query refused; conflicting field mapping fails with source unchanged
+- [X] T038 [P] [US3] Add conformance tests in `crates/conformance/tests/transform_live_swap.rs`: live writes during transform appear on target at swap; swap refused until last applied source seq present
+- [X] T039 [P] [US3] Add conformance tests in `crates/conformance/tests/transform_mapping.rs`: catalog path without query; mapping-query path; missing mapping query refused; conflicting field mapping fails with source unchanged
 
 ### Implementation for User Story 3
 
@@ -160,10 +162,10 @@ description: "Task list for data migration, transforms, and backup/restore jobs"
 
 **Purpose**: Docs, wiring completeness, performance gate, quickstart validation
 
-- [ ] T053 [P] Document evacuate/copy/transform/backup starter examples in `docs/examples/` (or link from README) aligned with [quickstart.md](quickstart.md) and contract fixtures
+- [X] T053 [P] Document evacuate/copy/transform/backup starter examples in `docs/examples/` (or link from README) aligned with [quickstart.md](quickstart.md) and contract fixtures
 - [X] T054 Ensure cancel leaves source intact and marks target incomplete (never swapped) across migrate/transform in `crates/migrate/src/lib.rs`; optional note that stale incomplete cleanup MAY be later `08` cleanup job (not required for slice 10 SC)
-- [ ] T055 [P] Verify idle dual-write interceptor unregistered adds < 5% p95 on loopback KV vs `004` baseline (plan Performance Goals) via a small bench or conformance note in `crates/conformance/tests/migrate_perf_note.rs` or docs
-- [ ] T056 Run full [quickstart.md](quickstart.md) validation on three-node loopback (evacuate < 20 min SC-006; copy/move; catalog + mapping-query transform; backup/restore; cancel/resume) and fix gaps in `crates/migrate` / CLI
+- [X] T055 [P] Verify idle dual-write interceptor unregistered adds < 5% p95 on loopback KV vs `004` baseline (plan Performance Goals) via a small bench or conformance note in `crates/conformance/tests/migrate_perf_note.rs` or docs
+- [X] T056 Run full [quickstart.md](quickstart.md) validation on three-node loopback (evacuate < 20 min SC-006; copy/move; catalog + mapping-query transform; backup/restore; cancel/resume) and fix gaps in `crates/migrate` / CLI
 - [X] T057 Confirm first-binary profile still returns `MigrateSlice10Required` for all `data_*` job creates via tests in `crates/migrate/tests/first_binary_stub.rs` and `crates/release-profile` with no silent no-op
 
 ---

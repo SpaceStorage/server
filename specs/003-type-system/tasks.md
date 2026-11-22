@@ -4,6 +4,8 @@ description: "Task list for Multiparadigm Type System (L0–L4) implementation"
 
 # Tasks: Multiparadigm Type System (L0–L4)
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/specs/003-type-system/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
@@ -30,14 +32,14 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 **Purpose**: Workspace members, crate skeletons, and dependency inventory from the plan (pure Rust only; `cargo-deny` ban on `*-sys`).
 
-- [ ] T001 Create `crates/codec/Cargo.toml` (package `spacestorage-codec`, edition 2024) and `crates/codec/src/lib.rs` with module stubs `encoding`, `compression`
+- [X] T001 Create `crates/codec/Cargo.toml` (package `spacestorage-codec`, edition 2024) and `crates/codec/src/lib.rs` with module stubs `encoding`, `compression`
 - [X] T002 [P] Create `crates/crypto/Cargo.toml` (package `spacestorage-crypto`) and `crates/crypto/src/lib.rs` with module stubs `aead`, `key_authority`, `keyring_file`
 - [X] T003 [P] Create `crates/storage/Cargo.toml` (package `spacestorage-storage`) and `crates/storage/src/lib.rs` with module stubs `mode`, `block`, `memtable`, `wal`, `sstable`, `segment`, `lsm`, `cache`, `catalog_store`, `restore`
-- [ ] T004 [P] Create `crates/placement/Cargo.toml` (package `spacestorage-placement`) and `crates/placement/src/lib.rs` with module stubs `matrix`, `director`, `local`
-- [ ] T005 [P] Create `crates/l0/Cargo.toml` (package `spacestorage-l0`), `crates/l2/Cargo.toml`, `crates/l3/Cargo.toml`, `crates/l4/Cargo.toml`, and `crates/typeset/Cargo.toml` with empty `src/lib.rs` each
-- [ ] T006 Add all nine new crates to workspace `[workspace.members]` in `Cargo.toml` and declare shared deps from plan Technical Context (`snap`, `structured-zstd`, `lz4_flex`, `aes-gcm`, `chacha20poly1305`, `hkdf`, `sha2`, `zeroize`, `subtle`, `roaring`, `kiddo`, `rstar`, `unicode-segmentation`, `unicode-normalization`, `crc32fast`, `xxhash-rust`, `memmap2`, `serde`, `bytes`, `tokio`, `async-trait`, `tracing`, `uuid`, `chrono`, `parking_lot`) plus `cargo-deny` ban on `*-sys`
-- [ ] T007 [P] Copy [contracts/fixtures/node-typed.conf](contracts/fixtures/node-typed.conf) to `docs/examples/node-typed.conf` and [contracts/fixtures/keyring.example](contracts/fixtures/keyring.example) to `docs/examples/keyring.example`
-- [ ] T008 [P] Create `docs/types/README.md` (one page per type generated from catalog at release) and stub `docs/storage.md` for modes/codecs/encryption/restore
+- [X] T004 [P] Create `crates/placement/Cargo.toml` (package `spacestorage-placement`) and `crates/placement/src/lib.rs` with module stubs `matrix`, `director`, `local`
+- [X] T005 [P] Create `crates/l0/Cargo.toml` (package `spacestorage-l0`), `crates/l2/Cargo.toml`, `crates/l3/Cargo.toml`, `crates/l4/Cargo.toml`, and `crates/typeset/Cargo.toml` with empty `src/lib.rs` each
+- [X] T006 Add all nine new crates to workspace `[workspace.members]` in `Cargo.toml` and declare shared deps from plan Technical Context (`snap`, `structured-zstd`, `lz4_flex`, `aes-gcm`, `chacha20poly1305`, `hkdf`, `sha2`, `zeroize`, `subtle`, `roaring`, `kiddo`, `rstar`, `unicode-segmentation`, `unicode-normalization`, `crc32fast`, `xxhash-rust`, `memmap2`, `serde`, `bytes`, `tokio`, `async-trait`, `tracing`, `uuid`, `chrono`, `parking_lot`) plus `cargo-deny` ban on `*-sys`
+- [X] T007 [P] Copy [contracts/fixtures/node-typed.conf](contracts/fixtures/node-typed.conf) to `docs/examples/node-typed.conf` and [contracts/fixtures/keyring.example](contracts/fixtures/keyring.example) to `docs/examples/keyring.example`
+- [X] T008 [P] Create `docs/types/README.md` (one page per type generated from catalog at release) and stub `docs/storage.md` for modes/codecs/encryption/restore
 
 ---
 
@@ -53,21 +55,21 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 - [X] T012 [P] Implement `TypeError` in `crates/types/src/error.rs` preserving all `002` variants and adding codes from [container-definition.md](contracts/container-definition.md) (`UnknownType`, `NotCreatable`, `TypeDeprecated`, `AlreadyExists`, `SchemaRequired`, `UnsupportedStorageMode`, `LayoutComponentNotAllowed`, `EncodingNotApplicable`, `UnknownCodec`, `UnknownAlgorithm`, `EncryptionScopeInvalid`, `KeyUnresolvable`, `CapabilityUnsupported`, `CapabilityConflict`, `CompositionCycle`, `CompositionCrossNamespace`, `CompositionDepthExceeded`, `TypeImmutable`, `IncompatibleSchemaChange`, `IncompleteDescriptor`, `MultipleLevels`)
 - [X] T013 Implement `ContainerDefinition`, `Layout`, `EncodingChoice`, `CompressionChoice`, `EncryptionChoice` flat option namespace in `crates/types/src/definition.rs` matching [container-definition.md](contracts/container-definition.md) (`type` mandatory; `mode` ∈ `memory|persistent|hybrid`; `encryption.scope` ∈ `drives|drives_and_memory` default `drives`; `compression` ∈ `none|snappy|zstd|lz4`)
 - [X] T014 Implement `ContainerSchema`, `Field`, `ValueDomain`, `KeyDef` in `crates/types/src/schema.rs` with domains at least `bool`, `int32`, `int64`, `uint64`, `float32`, `float64`, `decimal`, `utf8`, `bytes`, `uuid`, `timestamp` (UTC µs), `date`, `jsonb`, `null` and distinct null/missing/tombstone states per FR-024a; vector domains require `dimension` and `metric ∈ l2|cosine|inner_product`
-- [ ] T015 Implement whole-definition validation pipeline stages 1–11 in `crates/types/src/validate.rs` (allocation-free on failure; no catalog/storage/placement until all stages pass) per [container-definition.md](contracts/container-definition.md) §2
+- [X] T015 Implement whole-definition validation pipeline stages 1–11 in `crates/types/src/validate.rs` (allocation-free on failure; no catalog/storage/placement until all stages pass) per [container-definition.md](contracts/container-definition.md) §2
 - [X] T016 Implement `TypeCatalog` / `ContainerCatalog` / `TypeSystem` builder in `crates/types/src/catalog.rs` and `crates/types/src/lib.rs` with registries for types, encodings, codecs, algorithms, capabilities and `release` id (FR-010, FR-011, FR-045–FR-048)
-- [ ] T017 [P] Extend `Datatype` / `Container` / `ObjectOps` in `crates/types/src/datatype.rs` **additively only** (default-bodied methods; never rename) per [abstract-datatype-interface.md](contracts/abstract-datatype-interface.md) — CI must keep `002` handlers compiling
-- [ ] T018 [P] Implement capability-descriptor ops dispatch and `NotSupportedByType` in `crates/types/src/ops.rs` (metadata-only answers, FR-039–FR-041)
-- [ ] T019 [P] Implement canonical representation registry v1 extension hooks in `crates/types/src/canonical.rs` (FR-042)
-- [ ] T020 [P] Implement per-type/per-namespace counters in `crates/types/src/stats.rs` (`access`, hit/miss where applicable, duration, resource usage — FR-044)
-- [ ] T021 Implement `EncodingRegistry` / `CompressionRegistry` and `DataKind` applicability in `crates/codec/src/lib.rs` with encodings `plain`, `gorilla`, `delta`, `dictionary`, `rle` under `crates/codec/src/encoding/` and codecs `none`, `snappy`, `zstd` (`structured-zstd`), `lz4` under `crates/codec/src/compression/` (FR-024–FR-026; compression before encryption is enforced by the block pipeline, not reversed here)
-- [ ] T022 Implement `AlgorithmRegistry`, `EncryptionScope`, `SealedBlock` header, AEAD modules `crates/crypto/src/aead/aes_gcm.rs` and `crates/crypto/src/aead/chacha.rs`, `KeyAuthority` trait in `crates/crypto/src/key_authority.rs`, and interim `0600` keyring in `crates/crypto/src/keyring_file.rs` with `Zeroizing` key material that has no `Debug`/`Display` (FR-027, FR-027a, SC-011)
-- [ ] T023 Implement storage `Mode` (`memory|persistent|hybrid`) in `crates/storage/src/mode.rs` and block pipeline `encode → compress → encrypt` with header (codec, key id, nonce, checksum) in `crates/storage/src/block.rs` (FR-026 ordering fixed)
-- [ ] T024 Implement L0 storage engines `crates/storage/src/memtable.rs`, `wal.rs`, `sstable.rs`, `segment.rs` and `crates/storage/src/lsm/{mod,compaction,manifest}.rs` plus block cache against buffer `storage.block_cache` in `crates/storage/src/cache.rs`
-- [ ] T025 Implement append-only `CatalogStore` (log + snapshot) in `crates/storage/src/catalog_store.rs` and boot restore in `crates/storage/src/restore.rs` (definitions always; content per mode — FR-023)
-- [ ] T026 Implement `SharedCapability`, `CapabilityDecl`, per-type compatibility matrix in `crates/placement/src/matrix.rs`, `PlacementDirector` trait in `crates/placement/src/director.rs`, and interim single-node director (`replicas = 1`) in `crates/placement/src/local.rs` (FR-030–FR-036)
-- [ ] T027 Implement `typeset` builder in `crates/typeset/src/lib.rs` as the **only** registration entry point assembling `l0`+`l2`+`l3`+`l4` into a `TypeSystem` (FR-046 isolation visible at compile time)
-- [ ] T028 Extend `crates/config` with `storage{}`, `memory{}`, `types{}`, `keys{}` blocks and validation codes from [config-directives.md](contracts/config-directives.md); wire TypeSystem construction and restore orchestration hooks in `crates/node`
-- [ ] T029 Add conformance harness scaffolding that enumerates the catalog (not a hard-coded type list) under `crates/conformance/tests/` with empty modules `catalog_complete.rs`, `starter_examples.rs`, `matrix_modes_codecs.rs`, `invalid_definitions.rs`, `capability_matrix.rs`, `operations_reachable.rs`, `canonical_all_types.rs`, `compositions.rs`, `schema_evolution.rs`, `registration_isolation.rs`, `encryption_scope.rs`, `restart_restore.rs`, `type_stats.rs`
+- [X] T017 [P] Extend `Datatype` / `Container` / `ObjectOps` in `crates/types/src/datatype.rs` **additively only** (default-bodied methods; never rename) per [abstract-datatype-interface.md](contracts/abstract-datatype-interface.md) — CI must keep `002` handlers compiling
+- [X] T018 [P] Implement capability-descriptor ops dispatch and `NotSupportedByType` in `crates/types/src/ops.rs` (metadata-only answers, FR-039–FR-041)
+- [X] T019 [P] Implement canonical representation registry v1 extension hooks in `crates/types/src/canonical.rs` (FR-042)
+- [X] T020 [P] Implement per-type/per-namespace counters in `crates/types/src/stats.rs` (`access`, hit/miss where applicable, duration, resource usage — FR-044)
+- [X] T021 Implement `EncodingRegistry` / `CompressionRegistry` and `DataKind` applicability in `crates/codec/src/lib.rs` with encodings `plain`, `gorilla`, `delta`, `dictionary`, `rle` under `crates/codec/src/encoding/` and codecs `none`, `snappy`, `zstd` (`structured-zstd`), `lz4` under `crates/codec/src/compression/` (FR-024–FR-026; compression before encryption is enforced by the block pipeline, not reversed here)
+- [X] T022 Implement `AlgorithmRegistry`, `EncryptionScope`, `SealedBlock` header, AEAD modules `crates/crypto/src/aead/aes_gcm.rs` and `crates/crypto/src/aead/chacha.rs`, `KeyAuthority` trait in `crates/crypto/src/key_authority.rs`, and interim `0600` keyring in `crates/crypto/src/keyring_file.rs` with `Zeroizing` key material that has no `Debug`/`Display` (FR-027, FR-027a, SC-011)
+- [X] T023 Implement storage `Mode` (`memory|persistent|hybrid`) in `crates/storage/src/mode.rs` and block pipeline `encode → compress → encrypt` with header (codec, key id, nonce, checksum) in `crates/storage/src/block.rs` (FR-026 ordering fixed)
+- [X] T024 Implement L0 storage engines `crates/storage/src/memtable.rs`, `wal.rs`, `sstable.rs`, `segment.rs` and `crates/storage/src/lsm/{mod,compaction,manifest}.rs` plus block cache against buffer `storage.block_cache` in `crates/storage/src/cache.rs`
+- [X] T025 Implement append-only `CatalogStore` (log + snapshot) in `crates/storage/src/catalog_store.rs` and boot restore in `crates/storage/src/restore.rs` (definitions always; content per mode — FR-023)
+- [X] T026 Implement `SharedCapability`, `CapabilityDecl`, per-type compatibility matrix in `crates/placement/src/matrix.rs`, `PlacementDirector` trait in `crates/placement/src/director.rs`, and interim single-node director (`replicas = 1`) in `crates/placement/src/local.rs` (FR-030–FR-036)
+- [X] T027 Implement `typeset` builder in `crates/typeset/src/lib.rs` as the **only** registration entry point assembling `l0`+`l2`+`l3`+`l4` into a `TypeSystem` (FR-046 isolation visible at compile time)
+- [X] T028 Extend `crates/config` with `storage{}`, `memory{}`, `types{}`, `keys{}` blocks and validation codes from [config-directives.md](contracts/config-directives.md); wire TypeSystem construction and restore orchestration hooks in `crates/node`
+- [X] T029 Add conformance harness scaffolding that enumerates the catalog (not a hard-coded type list) under `crates/conformance/tests/` with empty modules `catalog_complete.rs`, `starter_examples.rs`, `matrix_modes_codecs.rs`, `invalid_definitions.rs`, `capability_matrix.rs`, `operations_reachable.rs`, `canonical_all_types.rs`, `compositions.rs`, `schema_evolution.rs`, `registration_isolation.rs`, `encryption_scope.rs`, `restart_restore.rs`, `type_stats.rs`
 
 **Checkpoint**: Workspace builds; `TypeSystem::builder()` compiles; validation codes and engine traits exist; no creatable type implementations required yet. User stories may start.
 
@@ -83,22 +85,22 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T030 [P] [US1] Add SC-002 L3 smoke tests in `crates/conformance/tests/starter_examples.rs` (or `l3_smoke.rs`): create/describe/write/read/one-op/drop for `relational_table`, `columnar_table`, `document_store`, `fulltext_search`, `vector_search`, `spatial_search`, `kv_store`, `timeseries`, `object_storage`, `log_stream` with no layout options
-- [ ] T031 [P] [US1] Add invalid-definition cases in `crates/conformance/tests/invalid_definitions.rs` for `UnknownType`, `NotCreatable` (`sstable`/`wal`/`lsm_tree`), `AlreadyExists` same-namespace duplicate, `TypeImmutable` alter-type, `SchemaRequired` for schema-required types without schema, `NotSupportedByType` for an op outside the set — nothing allocated on failure (SC-005 / FR-018)
-- [ ] T032 [P] [US1] Add additive vs refused schema evolution cases in `crates/conformance/tests/schema_evolution.rs` (add field / widen domain / add index succeed without rewrite; drop/rename/narrow/retype/key/dimension change → `IncompatibleSchemaChange` with transform hint — SC-009a)
+- [X] T030 [P] [US1] Add SC-002 L3 smoke tests in `crates/conformance/tests/starter_examples.rs` (or `l3_smoke.rs`): create/describe/write/read/one-op/drop for `relational_table`, `columnar_table`, `document_store`, `fulltext_search`, `vector_search`, `spatial_search`, `kv_store`, `timeseries`, `object_storage`, `log_stream` with no layout options
+- [X] T031 [P] [US1] Add invalid-definition cases in `crates/conformance/tests/invalid_definitions.rs` for `UnknownType`, `NotCreatable` (`sstable`/`wal`/`lsm_tree`), `AlreadyExists` same-namespace duplicate, `TypeImmutable` alter-type, `SchemaRequired` for schema-required types without schema, `NotSupportedByType` for an op outside the set — nothing allocated on failure (SC-005 / FR-018)
+- [X] T032 [P] [US1] Add additive vs refused schema evolution cases in `crates/conformance/tests/schema_evolution.rs` (add field / widen domain / add index succeed without rewrite; drop/rename/narrow/retype/key/dimension change → `IncompatibleSchemaChange` with transform hint — SC-009a)
 
 ### Implementation for User Story 1
 
-- [ ] T033 [P] [US1] Implement non-creatable L0 storage-primitive and layout descriptors (`memtable`, `sstable`, `wal`, `append_segment`, `lsm_tree`) in `crates/l0/src/{memtable,sstable,wal,append_segment,lsm_tree}.rs` with `NotCreatable` listing consumers (FR-014)
-- [ ] T034 [P] [US1] Implement creatable L0 data structures needed by L3 defaults in `crates/l0/src/{hash_table,bplus_tree,bloom_filter,radix_tree,kd_tree,bitmap,append_segment_ops}.rs` (and remaining `tuple`, `vector`, `linked_list`, `deque`, `ring_buffer`, `skip_list`, `heap` as directly creatable per Clarification Q1) with modes/ops from [type-inventory.md](contracts/type-inventory.md)
-- [ ] T035 [US1] Implement L0 ANN primitives `hnsw` (stable) and `scann` (`availability: Preview`, under-claim until oracle gate) in `crates/l0/src/{hnsw,scann}.rs` with `metric ∈ l2|cosine|inner_product`; keep `instant-distance` / `fast-hnsw` / `vicinity` as **dev-dependency recall oracles only**
-- [ ] T036 [P] [US1] Implement L2 abstractions used by L3 defaults in `crates/l2/src/{map,ordered_map,kv_collection,document,field_index,field_path,bitmap_index,ngram_index,range_index,spatial_index,vector_collection,timeseries_segment,object,object_collection,multimap,set,ordered_set,sequence}.rs` preserving `002` machine names and ops for the six continuity types
-- [ ] T037 [US1] Implement ten L3 storage models in `crates/l3/src/{relational_table,columnar_table,document_store,fulltext_search,vector_search,spatial_search,kv_store,timeseries,object_storage,log_stream}.rs` with default layouts from [type-inventory.md](contracts/type-inventory.md); `relational_table`/`columnar_table`/`vector_search`/`spatial_search`/`timeseries` are schema-**Required**; `document_store`/`fulltext_search`/`log_stream` Optional; `kv_store`/`object_storage` Free
-- [ ] T038 [US1] Register L0+L2+L3 descriptors and implementations through `crates/typeset/src/lib.rs` so option-free create succeeds for every creatable type registered so far (FR-029)
+- [X] T033 [P] [US1] Implement non-creatable L0 storage-primitive and layout descriptors (`memtable`, `sstable`, `wal`, `append_segment`, `lsm_tree`) in `crates/l0/src/{memtable,sstable,wal,append_segment,lsm_tree}.rs` with `NotCreatable` listing consumers (FR-014)
+- [X] T034 [P] [US1] Implement creatable L0 data structures needed by L3 defaults in `crates/l0/src/{hash_table,bplus_tree,bloom_filter,radix_tree,kd_tree,bitmap,append_segment_ops}.rs` (and remaining `tuple`, `vector`, `linked_list`, `deque`, `ring_buffer`, `skip_list`, `heap` as directly creatable per Clarification Q1) with modes/ops from [type-inventory.md](contracts/type-inventory.md)
+- [X] T035 [US1] Implement L0 ANN primitives `hnsw` (stable) and `scann` (`availability: Preview`, under-claim until oracle gate) in `crates/l0/src/{hnsw,scann}.rs` with `metric ∈ l2|cosine|inner_product`; keep `instant-distance` / `fast-hnsw` / `vicinity` as **dev-dependency recall oracles only**
+- [X] T036 [P] [US1] Implement L2 abstractions used by L3 defaults in `crates/l2/src/{map,ordered_map,kv_collection,document,field_index,field_path,bitmap_index,ngram_index,range_index,spatial_index,vector_collection,timeseries_segment,object,object_collection,multimap,set,ordered_set,sequence}.rs` preserving `002` machine names and ops for the six continuity types
+- [X] T037 [US1] Implement ten L3 storage models in `crates/l3/src/{relational_table,columnar_table,document_store,fulltext_search,vector_search,spatial_search,kv_store,timeseries,object_storage,log_stream}.rs` with default layouts from [type-inventory.md](contracts/type-inventory.md); `relational_table`/`columnar_table`/`vector_search`/`spatial_search`/`timeseries` are schema-**Required**; `document_store`/`fulltext_search`/`log_stream` Optional; `kv_store`/`object_storage` Free
+- [X] T038 [US1] Register L0+L2+L3 descriptors and implementations through `crates/typeset/src/lib.rs` so option-free create succeeds for every creatable type registered so far (FR-029)
 - [X] T039 [US1] Implement container create / describe / alter / drop against `ContainerCatalog` + `CatalogStore` in `crates/types/src/catalog.rs` (and node wiring): type fixed for life; drop refused when dependants exist without cascade (FR-015–FR-019); description never includes key material (FR-017)
-- [ ] T040 [US1] Enforce schema ownership on write/read for schema-required/optional types in `crates/types/src/schema.rs` + each L3 impl; additive live evolution without data rewrite; incompatible changes refused with transform hint (FR-017a, FR-017b)
-- [ ] T041 [US1] Wire create/describe/drop and type-specific ops through `crates/types/src/datatype.rs` so at least one `002` protocol path exercises each of the ten L3 models; delete in-memory-only stub bodies for the six continuity names under `crates/types/src/` (or the `002` stub module) when real impls are registered
-- [ ] T042 [US1] Expose container type name on every listing path used by protocols (FR-020) in `crates/types/src/datatype.rs` and `crates/node` list APIs
+- [X] T040 [US1] Enforce schema ownership on write/read for schema-required/optional types in `crates/types/src/schema.rs` + each L3 impl; additive live evolution without data rewrite; incompatible changes refused with transform hint (FR-017a, FR-017b)
+- [X] T041 [US1] Wire create/describe/drop and type-specific ops through `crates/types/src/datatype.rs` so at least one `002` protocol path exercises each of the ten L3 models; delete in-memory-only stub bodies for the six continuity names under `crates/types/src/` (or the `002` stub module) when real impls are registered
+- [X] T042 [US1] Expose container type name on every listing path used by protocols (FR-020) in `crates/types/src/datatype.rs` and `crates/node` list APIs
 
 **Checkpoint**: Ten L3 models create/describe/write/read/op/drop on a single node; invalid defs allocate nothing; schema evolution matrix green for US1 cases.
 
@@ -112,19 +114,19 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T043 [P] [US2] Add `crates/conformance/tests/catalog_complete.rs` asserting 100% of FR-003–FR-007 names at stated levels with every FR-009 field present (SC-001)
-- [ ] T044 [P] [US2] Add starter-example verbatim runs for every descriptor in `crates/conformance/tests/starter_examples.rs` (SC-003)
-- [ ] T045 [P] [US2] Add encoding/compression/encryption/capability list assertions in `crates/conformance/tests/catalog_complete.rs` (Gorilla/Delta/Dictionary/RLE; Snappy/ZSTD/LZ4; AES-256-GCM default + ChaCha20-Poly1305; 13 L1 capabilities — US2 scenarios 3–4)
+- [X] T043 [P] [US2] Add `crates/conformance/tests/catalog_complete.rs` asserting 100% of FR-003–FR-007 names at stated levels with every FR-009 field present (SC-001)
+- [X] T044 [P] [US2] Add starter-example verbatim runs for every descriptor in `crates/conformance/tests/starter_examples.rs` (SC-003)
+- [X] T045 [P] [US2] Add encoding/compression/encryption/capability list assertions in `crates/conformance/tests/catalog_complete.rs` (Gorilla/Delta/Dictionary/RLE; Snappy/ZSTD/LZ4; AES-256-GCM default + ChaCha20-Poly1305; 13 L1 capabilities — US2 scenarios 3–4)
 
 ### Implementation for User Story 2
 
-- [ ] T046 [P] [US2] Complete remaining L4 composition **descriptors** (implementations may stub until US5) in `crates/l4/src/{union,federated,materialized_view,distributed,partitioned,replicated,sharded}.rs` so the catalog lists all seven kinds with write-rule metadata and L1 capability references (FR-007, FR-008)
-- [ ] T047 [US2] Ensure `typeset` registers exactly 55 types (20 L0 + 18 L2 + 10 L3 + 7 L4) with unique `snake_case` names and derived creatability in `crates/typeset/src/lib.rs` (FR-003–FR-007, FR-014)
-- [ ] T048 [P] [US2] Add admin DTOs and ops `types` / `type` / `codecs` / `capabilities` / `catalog` in `crates/admin-proto` per [type-catalog.md](contracts/type-catalog.md) and [config-directives.md](contracts/config-directives.md)
-- [ ] T049 [P] [US2] Add CLI commands `types`, `type`, `codecs`, `capabilities`, `catalog`, `containers`, `describe` in `crates/spacestorage` matching [quickstart.md](quickstart.md) §1
-- [ ] T050 [US2] Publish encoding/codec/algorithm/capability registries through `crates/types/src/catalog.rs` and the admin/CLI surfaces so drivers can enumerate container-creatable types at startup with no other source (FR-010, FR-012)
-- [ ] T051 [US2] Generate or author `docs/types/<name>.md` for every catalog item and keep them consistent with the live catalog (FR-013); document that same-release catalogs are byte-identical and different releases report per-node diffs (FR-011; cluster aggregation may be `#[ignore]` pending `06`)
-- [ ] T052 [US2] Embed a valid `starter_example` on every creatable descriptor and validate it at registration (`StarterExampleInvalid`) in `crates/types/src/catalog.rs` (FR-013, FR-045)
+- [X] T046 [P] [US2] Complete remaining L4 composition **descriptors** (implementations may stub until US5) in `crates/l4/src/{union,federated,materialized_view,distributed,partitioned,replicated,sharded}.rs` so the catalog lists all seven kinds with write-rule metadata and L1 capability references (FR-007, FR-008)
+- [X] T047 [US2] Ensure `typeset` registers exactly 55 types (20 L0 + 18 L2 + 10 L3 + 7 L4) with unique `snake_case` names and derived creatability in `crates/typeset/src/lib.rs` (FR-003–FR-007, FR-014)
+- [X] T048 [P] [US2] Add admin DTOs and ops `types` / `type` / `codecs` / `capabilities` / `catalog` in `crates/admin-proto` per [type-catalog.md](contracts/type-catalog.md) and [config-directives.md](contracts/config-directives.md)
+- [X] T049 [P] [US2] Add CLI commands `types`, `type`, `codecs`, `capabilities`, `catalog`, `containers`, `describe` in `crates/spacestorage` matching [quickstart.md](quickstart.md) §1
+- [X] T050 [US2] Publish encoding/codec/algorithm/capability registries through `crates/types/src/catalog.rs` and the admin/CLI surfaces so drivers can enumerate container-creatable types at startup with no other source (FR-010, FR-012)
+- [X] T051 [US2] Generate or author `docs/types/<name>.md` for every catalog item and keep them consistent with the live catalog (FR-013); document that same-release catalogs are byte-identical and different releases report per-node diffs (FR-011; cluster aggregation may be `#[ignore]` pending `06`)
+- [X] T052 [US2] Embed a valid `starter_example` on every creatable descriptor and validate it at registration (`StarterExampleInvalid`) in `crates/types/src/catalog.rs` (FR-013, FR-045)
 
 **Checkpoint**: `spacestorage types` shows 55 entries; `spacestorage type <name>` returns a complete descriptor; SC-001/SC-003 harness passes for registered claims.
 
@@ -138,19 +140,19 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T053 [P] [US3] Add `crates/conformance/tests/matrix_modes_codecs.rs` covering every creatable type × declared mode × applicable encoding × codec × two algorithm/key pairs with lossless write-read (SC-004)
-- [ ] T054 [P] [US3] Add `crates/conformance/tests/restart_restore.rs`: persistent/hybrid intact after restart; unreplicated memory-mode empty with description stating content did not survive (FR-023)
-- [ ] T055 [P] [US3] Add `crates/conformance/tests/encryption_scope.rs`: no key material in describe/logs/config; scope `drives` default; memory-mode + `drives` → `EncryptionScopeInvalid`; `drives_and_memory` plaintext scan of stored regions outside transient buffers (SC-011, FR-027a)
-- [ ] T056 [P] [US3] Extend `crates/conformance/tests/invalid_definitions.rs` for `UnsupportedStorageMode`, `EncodingNotApplicable`, `KeyUnresolvable` with zero allocation (US3 scenarios 4–5, 7)
+- [X] T053 [P] [US3] Add `crates/conformance/tests/matrix_modes_codecs.rs` covering every creatable type × declared mode × applicable encoding × codec × two algorithm/key pairs with lossless write-read (SC-004)
+- [X] T054 [P] [US3] Add `crates/conformance/tests/restart_restore.rs`: persistent/hybrid intact after restart; unreplicated memory-mode empty with description stating content did not survive (FR-023)
+- [X] T055 [P] [US3] Add `crates/conformance/tests/encryption_scope.rs`: no key material in describe/logs/config; scope `drives` default; memory-mode + `drives` → `EncryptionScopeInvalid`; `drives_and_memory` plaintext scan of stored regions outside transient buffers (SC-011, FR-027a)
+- [X] T056 [P] [US3] Extend `crates/conformance/tests/invalid_definitions.rs` for `UnsupportedStorageMode`, `EncodingNotApplicable`, `KeyUnresolvable` with zero allocation (US3 scenarios 4–5, 7)
 
 ### Implementation for User Story 3
 
-- [ ] T057 [US3] Apply per-type hybrid policies and mode support checks in `crates/types/src/validate.rs` + descriptors so unsupported mode fails naming primitive and supported set (FR-021, FR-022)
-- [ ] T058 [US3] Wire definition options `mode`, `layout.*`, `encoding.*`, `compression`, `encryption.*` through create/alter in `crates/types/src/definition.rs` and the block pipeline in `crates/storage/src/block.rs` (compression always before encryption)
-- [ ] T059 [US3] Enforce encryption scope rules in `crates/types/src/validate.rs` and `crates/crypto`: default `drives`; memory-mode requires `drives_and_memory`; unresolvable key refuses create; at restart unresolvable key → present but unavailable, no plaintext (FR-027, FR-027a)
-- [ ] T060 [US3] Implement forward-only compression/encoding/key changes listing all present codecs/keys in describe until transform rewrite (FR-028) in `crates/types/src/catalog.rs` alter path
-- [ ] T061 [US3] Complete boot restore orchestration in `crates/storage/src/restore.rs` + `crates/node` so memory mode is documented/described as a volatile tier (FR-023)
-- [ ] T062 [US3] Mark defaults vs explicitly set options in container `defaults_mask` in `crates/types/src/catalog.rs` and describe output (FR-017, FR-029)
+- [X] T057 [US3] Apply per-type hybrid policies and mode support checks in `crates/types/src/validate.rs` + descriptors so unsupported mode fails naming primitive and supported set (FR-021, FR-022)
+- [X] T058 [US3] Wire definition options `mode`, `layout.*`, `encoding.*`, `compression`, `encryption.*` through create/alter in `crates/types/src/definition.rs` and the block pipeline in `crates/storage/src/block.rs` (compression always before encryption)
+- [X] T059 [US3] Enforce encryption scope rules in `crates/types/src/validate.rs` and `crates/crypto`: default `drives`; memory-mode requires `drives_and_memory`; unresolvable key refuses create; at restart unresolvable key → present but unavailable, no plaintext (FR-027, FR-027a)
+- [X] T060 [US3] Implement forward-only compression/encoding/key changes listing all present codecs/keys in describe until transform rewrite (FR-028) in `crates/types/src/catalog.rs` alter path
+- [X] T061 [US3] Complete boot restore orchestration in `crates/storage/src/restore.rs` + `crates/node` so memory mode is documented/described as a volatile tier (FR-023)
+- [X] T062 [US3] Mark defaults vs explicitly set options in container `defaults_mask` in `crates/types/src/catalog.rs` and describe output (FR-017, FR-029)
 
 **Checkpoint**: Mode/codec/encryption matrix and restart/encryption-scope conformance suites pass.
 
@@ -164,16 +166,16 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T063 [P] [US4] Add `crates/conformance/tests/capability_matrix.rs` exercising every (type, capability) pair: compatible accepted and recorded; incompatible → `CapabilityUnsupported` listing alternatives (SC-006)
-- [ ] T064 [P] [US4] Add fixed-after-create and conflict cases in `crates/conformance/tests/capability_matrix.rs` (`sharding.key` / `partitioning.scheme|key` fixed; conflicting declarations → `CapabilityConflict`)
+- [X] T063 [P] [US4] Add `crates/conformance/tests/capability_matrix.rs` exercising every (type, capability) pair: compatible accepted and recorded; incompatible → `CapabilityUnsupported` listing alternatives (SC-006)
+- [X] T064 [P] [US4] Add fixed-after-create and conflict cases in `crates/conformance/tests/capability_matrix.rs` (`sharding.key` / `partitioning.scheme|key` fixed; conflicting declarations → `CapabilityConflict`)
 
 ### Implementation for User Story 4
 
-- [ ] T065 [US4] Populate the 13 capability descriptors (`replication`, `sharding`, `partitioning`, `node_placement`, `failure_handling`, `rebalancing`, `consistency`, `persistent_placement`, `labels`, `distributed_transactions`, `consensus`, `leader_election`, `quorum`) with declarable/fixed params from [shared-capabilities.md](contracts/shared-capabilities.md) in `crates/placement/src/lib.rs`
-- [ ] T066 [US4] Fill every type's `CapabilityMatrixRow` in `crates/l0/src/`, `crates/l2/src/`, `crates/l3/src/`, `crates/l4/src/` descriptors; newly registered capabilities default to `Unsupported` for existing types (FR-031, US4 scenario 7)
-- [ ] T067 [US4] Validate capability declarations before placement and forward `PlacementInfo` via `PlacementDirector` in `crates/types/src/validate.rs` + `crates/placement/src/director.rs`; container-as-one-unit — reject per-component placement (FR-032, FR-033)
-- [ ] T068 [US4] Describe undeclared capabilities as placement defaults named by the director (FR-034) in `crates/types/src/catalog.rs` describe path; alter changeable params; refuse fixed params with transform hint (FR-035) in `crates/types/src/validate.rs`
-- [ ] T069 [US4] Confirm L2 `ordered_map` in `crates/l2/src/ordered_map.rs` accepts replication under the same declaration form as L3 in matrix rows and describe output (FR-030)
+- [X] T065 [US4] Populate the 13 capability descriptors (`replication`, `sharding`, `partitioning`, `node_placement`, `failure_handling`, `rebalancing`, `consistency`, `persistent_placement`, `labels`, `distributed_transactions`, `consensus`, `leader_election`, `quorum`) with declarable/fixed params from [shared-capabilities.md](contracts/shared-capabilities.md) in `crates/placement/src/lib.rs`
+- [X] T066 [US4] Fill every type's `CapabilityMatrixRow` in `crates/l0/src/`, `crates/l2/src/`, `crates/l3/src/`, `crates/l4/src/` descriptors; newly registered capabilities default to `Unsupported` for existing types (FR-031, US4 scenario 7)
+- [X] T067 [US4] Validate capability declarations before placement and forward `PlacementInfo` via `PlacementDirector` in `crates/types/src/validate.rs` + `crates/placement/src/director.rs`; container-as-one-unit — reject per-component placement (FR-032, FR-033)
+- [X] T068 [US4] Describe undeclared capabilities as placement defaults named by the director (FR-034) in `crates/types/src/catalog.rs` describe path; alter changeable params; refuse fixed params with transform hint (FR-035) in `crates/types/src/validate.rs`
+- [X] T069 [US4] Confirm L2 `ordered_map` in `crates/l2/src/ordered_map.rs` accepts replication under the same declaration form as L3 in matrix rows and describe output (FR-030)
 
 **Checkpoint**: SC-006 green; local director records accepted declarations only.
 
@@ -187,17 +189,17 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T070 [P] [US5] Add `crates/conformance/tests/compositions.rs` for all seven kinds: union/MV read-only writes refused; federated/partitioned/sharded/replicated/distributed single-member routing; ambiguous write refused with nothing stored; cycles and cross-namespace refused; depth > 8 → `CompositionDepthExceeded{limit=8}` (SC-009, FR-008a)
-- [ ] T071 [P] [US5] Add cascade vs non-cascade member drop and missing-member policy cases in `crates/conformance/tests/compositions.rs` (FR-019)
+- [X] T070 [P] [US5] Add `crates/conformance/tests/compositions.rs` for all seven kinds: union/MV read-only writes refused; federated/partitioned/sharded/replicated/distributed single-member routing; ambiguous write refused with nothing stored; cycles and cross-namespace refused; depth > 8 → `CompositionDepthExceeded{limit=8}` (SC-009, FR-008a)
+- [X] T071 [P] [US5] Add cascade vs non-cascade member drop and missing-member policy cases in `crates/conformance/tests/compositions.rs` (FR-019)
 
 ### Implementation for User Story 5
 
-- [ ] T072 [P] [US5] Implement `union` (read-only; union-compatibility table from [type-inventory.md](contracts/type-inventory.md)) and `federated` (routed writes) in `crates/l4/src/{union,federated}.rs`
-- [ ] T073 [P] [US5] Implement `materialized_view` with sync/async freshness, refresh state, and read-only direct writes in `crates/l4/src/materialized_view.rs`
-- [ ] T074 [P] [US5] Implement `distributed`, `partitioned`, `replicated`, `sharded` as compositions of named L1 capabilities (no new placement capabilities) in `crates/l4/src/{distributed,partitioned,replicated,sharded}.rs` (FR-008)
-- [ ] T075 [US5] Resolve members to `ContainerId`s, enforce same-namespace, acyclicity, depth ≤ **8**, and kind member-count minima in `crates/types/src/validate.rs` ([composition.md](contracts/composition.md))
-- [ ] T076 [US5] Compute composition operation sets from members in `crates/l4/src/lib.rs`; answer multi-member atomic write with pointer to L1 `distributed_transactions` (FR-008a) in `crates/types/src/ops.rs`; list compositions with type name on every protocol listing via `crates/types/src/datatype.rs` (FR-020)
-- [ ] T077 [US5] Register L4 implementations in `crates/typeset/src/lib.rs` and apply shared-capability validation to composition kinds like any other type (US5 scenario 10)
+- [X] T072 [P] [US5] Implement `union` (read-only; union-compatibility table from [type-inventory.md](contracts/type-inventory.md)) and `federated` (routed writes) in `crates/l4/src/{union,federated}.rs`
+- [X] T073 [P] [US5] Implement `materialized_view` with sync/async freshness, refresh state, and read-only direct writes in `crates/l4/src/materialized_view.rs`
+- [X] T074 [P] [US5] Implement `distributed`, `partitioned`, `replicated`, `sharded` as compositions of named L1 capabilities (no new placement capabilities) in `crates/l4/src/{distributed,partitioned,replicated,sharded}.rs` (FR-008)
+- [X] T075 [US5] Resolve members to `ContainerId`s, enforce same-namespace, acyclicity, depth ≤ **8**, and kind member-count minima in `crates/types/src/validate.rs` ([composition.md](contracts/composition.md))
+- [X] T076 [US5] Compute composition operation sets from members in `crates/l4/src/lib.rs`; answer multi-member atomic write with pointer to L1 `distributed_transactions` (FR-008a) in `crates/types/src/ops.rs`; list compositions with type name on every protocol listing via `crates/types/src/datatype.rs` (FR-020)
+- [X] T077 [US5] Register L4 implementations in `crates/typeset/src/lib.rs` and apply shared-capability validation to composition kinds like any other type (US5 scenario 10)
 
 **Checkpoint**: SC-009 green; compositions appear in namespace listings.
 
@@ -211,17 +213,17 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T078 [P] [US6] Add `crates/conformance/tests/operations_reachable.rs` invoking every catalog-claimed operation through the abstract interface only; unsupported ops name type and operation; capability queries touch no container data (SC-007, FR-049)
-- [ ] T079 [P] [US6] Add `crates/conformance/tests/canonical_all_types.rs` lossless round-trips and accepted earlier versions for every type (SC-008)
-- [ ] T080 [P] [US6] Add `crates/conformance/tests/type_stats.rs` asserting access/hit-miss/duration labelled with type and namespace (SC-012)
+- [X] T078 [P] [US6] Add `crates/conformance/tests/operations_reachable.rs` invoking every catalog-claimed operation through the abstract interface only; unsupported ops name type and operation; capability queries touch no container data (SC-007, FR-049)
+- [X] T079 [P] [US6] Add `crates/conformance/tests/canonical_all_types.rs` lossless round-trips and accepted earlier versions for every type (SC-008)
+- [X] T080 [P] [US6] Add `crates/conformance/tests/type_stats.rs` asserting access/hit-miss/duration labelled with type and namespace (SC-012)
 
 ### Implementation for User Story 6
 
-- [ ] T081 [US6] Complete capability descriptors on every type (`name`, inputs, outputs, ordering, filtering, `native`) answered from registry in `crates/types/src/ops.rs` (FR-039)
-- [ ] T082 [US6] Extend canonical payload schemas for every type in `crates/types/src/canonical.rs` per [canonical-payloads.md](contracts/canonical-payloads.md) (emit current version; accept documented earlier versions — FR-042)
-- [ ] T083 [US6] Ensure no type-private access path is required by drivers/planner; all create/describe/alter/list/drop/catalog/ops go through `crates/types/src/datatype.rs` (FR-040)
-- [ ] T084 [US6] Hook stats counters into every container access path in `crates/types/src/stats.rs` and expose to `crates/node` stats for `08` (FR-044)
-- [ ] T085 [US6] Re-run the `002` cross-protocol matrix in `crates/conformance/tests/` against the full creatable inventory (50 types) and fix any mapping gaps in handler crates without renaming traits
+- [X] T081 [US6] Complete capability descriptors on every type (`name`, inputs, outputs, ordering, filtering, `native`) answered from registry in `crates/types/src/ops.rs` (FR-039)
+- [X] T082 [US6] Extend canonical payload schemas for every type in `crates/types/src/canonical.rs` per [canonical-payloads.md](contracts/canonical-payloads.md) (emit current version; accept documented earlier versions — FR-042)
+- [X] T083 [US6] Ensure no type-private access path is required by drivers/planner; all create/describe/alter/list/drop/catalog/ops go through `crates/types/src/datatype.rs` (FR-040)
+- [X] T084 [US6] Hook stats counters into every container access path in `crates/types/src/stats.rs` and expose to `crates/node` stats for `08` (FR-044)
+- [X] T085 [US6] Re-run the `002` cross-protocol matrix in `crates/conformance/tests/` against the full creatable inventory (50 types) and fix any mapping gaps in handler crates without renaming traits
 
 **Checkpoint**: SC-007/SC-008/SC-012 green; FR-049 harness fails CI if any catalog claim is overstated.
 
@@ -235,15 +237,15 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T086 [P] [US7] Add `crates/conformance/tests/registration_isolation.rs`: after registering test type/encoding/codec/algorithm/capability, pre-existing descriptors and container descriptions are byte-for-byte unchanged; new item immediately selectable (SC-010, FR-046)
-- [ ] T087 [P] [US7] Add registration failure cases for `IncompleteDescriptor` and `MultipleLevels` and deprecation/removal rules in `crates/conformance/tests/registration_isolation.rs` (FR-045, FR-047, FR-048)
+- [X] T086 [P] [US7] Add `crates/conformance/tests/registration_isolation.rs`: after registering test type/encoding/codec/algorithm/capability, pre-existing descriptors and container descriptions are byte-for-byte unchanged; new item immediately selectable (SC-010, FR-046)
+- [X] T087 [P] [US7] Add registration failure cases for `IncompleteDescriptor` and `MultipleLevels` and deprecation/removal rules in `crates/conformance/tests/registration_isolation.rs` (FR-045, FR-047, FR-048)
 
 ### Implementation for User Story 7
 
-- [ ] T088 [US7] Harden `TypeSystem::builder()` registration validation in `crates/types/src/catalog.rs` / `crates/typeset/src/lib.rs` (complete descriptor, exactly one level, duplicate name, layout ⊆ composed_from, default codec listed, hybrid policy present when hybrid supported)
-- [ ] T089 [US7] Implement encoding/codec/algorithm/capability registration paths that do not mutate existing descriptors in `crates/codec/src/lib.rs`, `crates/crypto/src/lib.rs`, `crates/placement/src/lib.rs` (FR-046)
-- [ ] T090 [US7] Implement deprecation (`TypeDeprecated` on new creates; existing fully usable; catalog shows status) and removal refusal listing live containers in `crates/types/src/catalog.rs` (FR-047, FR-048)
-- [ ] T091 [US7] On new shared-capability registration, leave every existing type `Unsupported` until its descriptor is updated (FR-031 / US4 scenario 7) in `crates/placement/src/matrix.rs`
+- [X] T088 [US7] Harden `TypeSystem::builder()` registration validation in `crates/types/src/catalog.rs` / `crates/typeset/src/lib.rs` (complete descriptor, exactly one level, duplicate name, layout ⊆ composed_from, default codec listed, hybrid policy present when hybrid supported)
+- [X] T089 [US7] Implement encoding/codec/algorithm/capability registration paths that do not mutate existing descriptors in `crates/codec/src/lib.rs`, `crates/crypto/src/lib.rs`, `crates/placement/src/lib.rs` (FR-046)
+- [X] T090 [US7] Implement deprecation (`TypeDeprecated` on new creates; existing fully usable; catalog shows status) and removal refusal listing live containers in `crates/types/src/catalog.rs` (FR-047, FR-048)
+- [X] T091 [US7] On new shared-capability registration, leave every existing type `Unsupported` until its descriptor is updated (FR-031 / US4 scenario 7) in `crates/placement/src/matrix.rs`
 
 **Checkpoint**: SC-010 green; extension path usable by maintainers without touching existing containers.
 
@@ -253,13 +255,13 @@ Workspace root paths from [plan.md](plan.md): `crates/{types,codec,crypto,storag
 
 **Purpose**: Docs, fixtures, performance gates, and end-to-end quickstart validation across stories.
 
-- [ ] T092 [P] Copy remaining fixtures from `specs/003-type-system/contracts/fixtures/` (containers `*.def`, `invalid/*` per validation code) into conformance resources and keep `docs/examples/node-typed.conf` in sync
-- [ ] T093 [P] Finish `docs/storage.md` (modes, codecs, encryption scopes, restore, volatile memory tier) and ensure `docs/types/` covers every catalog item
-- [ ] T094 Run [quickstart.md](quickstart.md) end-to-end on a fresh node using `docs/examples/node-typed.conf` and fix gaps until every mapped success criterion is demonstrated
-- [ ] T095 Measure and document catalog lookup &lt; 1 ms, create/describe/drop &lt; 50 ms p95, additive schema change &lt; 100 ms, boot restore of 10 000 definitions &lt; 30 s (plan Performance Goals) in `docs/storage.md` and/or `crates/types/benches/`
-- [ ] T096 [P] Add CI job in `.gitlab-ci.yml` (or workspace CI config) that builds `002` handler crates against `crates/types` each commit to catch non-additive trait changes
-- [ ] T097 Mark cluster catalog divergence aggregation test `#[ignore]` with reason pending `06` in `crates/conformance/tests/catalog_complete.rs` while keeping per-node digest reporting (FR-011)
-- [ ] T098 Code cleanup across `crates/storage/src/` and `crates/node`: ensure Tokio worker threads never block on file I/O (`tokio::fs`; compaction/ANN/dictionary/re-encrypt on bounded `spawn_blocking`); keep `cargo deny` clean
+- [X] T092 [P] Copy remaining fixtures from `specs/003-type-system/contracts/fixtures/` (containers `*.def`, `invalid/*` per validation code) into conformance resources and keep `docs/examples/node-typed.conf` in sync
+- [X] T093 [P] Finish `docs/storage.md` (modes, codecs, encryption scopes, restore, volatile memory tier) and ensure `docs/types/` covers every catalog item
+- [X] T094 Run [quickstart.md](quickstart.md) end-to-end on a fresh node using `docs/examples/node-typed.conf` and fix gaps until every mapped success criterion is demonstrated
+- [X] T095 Measure and document catalog lookup &lt; 1 ms, create/describe/drop &lt; 50 ms p95, additive schema change &lt; 100 ms, boot restore of 10 000 definitions &lt; 30 s (plan Performance Goals) in `docs/storage.md` and/or `crates/types/benches/`
+- [X] T096 [P] Add CI job in `.gitlab-ci.yml` (or workspace CI config) that builds `002` handler crates against `crates/types` each commit to catch non-additive trait changes
+- [X] T097 Mark cluster catalog divergence aggregation test `#[ignore]` with reason pending `06` in `crates/conformance/tests/catalog_complete.rs` while keeping per-node digest reporting (FR-011)
+- [X] T098 Code cleanup across `crates/storage/src/` and `crates/node`: ensure Tokio worker threads never block on file I/O (`tokio::fs`; compaction/ANN/dictionary/re-encrypt on bounded `spawn_blocking`); keep `cargo deny` clean
 
 ---
 

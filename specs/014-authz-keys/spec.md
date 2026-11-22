@@ -189,7 +189,7 @@ The **first binary** MUST append join, key bind/rotate, failed authentication, l
 - Namespace and quota **units** (`07`).
 - Type inventory and encryption scope (`03`).
 - Internode protocol framing (`12`).
-- Cerebro/Kibana chrome (`09`) except same authz.
+- Cerebro/Kibana chrome (`09`) except same authz. Browser admin shell (`018`) adds cookie transport and `GET /v1/ui/audit` pagination over the same `AuditLog` and `SessionTokenStore` — see `specs/018-admin-ui-modernization/contracts/session-cookie.md` and `audit-list.md`.
 - LDAP/SSO (future).
 - Custom roles, tenant `AUDIT_READ`, and remaining permission grants as **first-binary** requirements (they remain complete-product / slice 7).
 - Data-key rewrite via transform as a **first-binary** requirement (`10`).

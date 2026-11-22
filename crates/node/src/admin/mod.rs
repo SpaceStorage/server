@@ -11,6 +11,7 @@ use spacestorage_config::model::Transport;
 use spacestorage_release_profile::ReleaseProfile;
 use std::collections::HashSet;
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub struct AdminService;
 
@@ -116,8 +117,92 @@ impl AdminService {
                 )
                 .await
             }
+            AdminOp::JoinTokenMint {
+                node_name,
+                node_id,
+                ttl_secs,
+            } => membership_join_token_mint(node, node_name, node_id, ttl_secs).await,
+            AdminOp::Membership => membership_roster(node).await,
+            AdminOp::AuditList {
+                cursor,
+                limit,
+                namespace,
+            } => audit_list(node, cursor, limit, namespace).await,
+            AdminOp::Drain { node_id } => membership_drain(node, node_id).await,
+            AdminOp::Undrain { node_id } => membership_undrain(node, node_id).await,
         }
     }
+}
+
+async fn audit_list(
+    node: &Node,
+    cursor: Option<String>,
+    limit: Option<u32>,
+    namespace: Option<String>,
+) -> Result<serde_json::Value, ErrorBody> {
+    let limit = limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(ErrorBody {
+            code: "limit_exceeded".into(),
+            message: "limit must be 1..=100".into(),
+            details: serde_json::json!({}),
+        });
+    }
+    if let Some(ref c) = cursor {
+        if uuid::Uuid::parse_str(c).is_err() {
+            return Err(ErrorBody {
+                code: "invalid_cursor".into(),
+                message: "unrecognized cursor".into(),
+                details: serde_json::json!({}),
+            });
+        }
+    }
+    let params = spacestorage_authz::AuditListParams {
+        limit: limit as usize,
+        cursor,
+        namespace,
+    };
+    let (entries, next_cursor) = node.audit.list(params);
+    Ok(serde_json::json!({
+        "generated_at": "1970-01-01T00:00:00Z",
+        "limit": limit,
+        "next_cursor": next_cursor,
+        "entries": entries,
+    }))
+}
+
+async fn membership_drain(node: &Node, node_id: Uuid) -> Result<serde_json::Value, ErrorBody> {
+    let m = node.membership.read().await;
+    let Some(m) = m.as_ref() else {
+        return Err(ErrorBody {
+            code: "unavailable".into(),
+            message: "membership not configured".into(),
+            details: serde_json::json!({}),
+        });
+    };
+    m.operator_drain(node_id).map_err(|e| ErrorBody {
+        code: "membership".into(),
+        message: e.to_string(),
+        details: serde_json::json!({}),
+    })?;
+    Ok(serde_json::json!({ "node_id": node_id, "status": "draining" }))
+}
+
+async fn membership_undrain(node: &Node, node_id: Uuid) -> Result<serde_json::Value, ErrorBody> {
+    let m = node.membership.read().await;
+    let Some(m) = m.as_ref() else {
+        return Err(ErrorBody {
+            code: "unavailable".into(),
+            message: "membership not configured".into(),
+            details: serde_json::json!({}),
+        });
+    };
+    m.operator_undrain(node_id).map_err(|e| ErrorBody {
+        code: "membership".into(),
+        message: e.to_string(),
+        details: serde_json::json!({}),
+    })?;
+    Ok(serde_json::json!({ "node_id": node_id, "status": "ready" }))
 }
 
 async fn tenancy_namespace_list(node: &Node) -> Result<serde_json::Value, ErrorBody> {
@@ -417,6 +502,79 @@ async fn controlplane_voter_op(
     let cp = require_cp(node).await?;
     cp.voter_op(op).await.map_err(cp_err)?;
     Ok(serde_json::json!({"ok": true}))
+}
+
+async fn require_membership(
+    node: &Node,
+) -> Result<std::sync::Arc<spacestorage_membership::MembershipService>, ErrorBody> {
+    node.membership
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| ErrorBody {
+            code: "membership_unavailable".into(),
+            message: "membership not started".into(),
+            details: serde_json::json!({}),
+        })
+}
+
+async fn membership_join_token_mint(
+    node: &Node,
+    node_name: String,
+    node_id: Option<uuid::Uuid>,
+    ttl_secs: Option<u64>,
+) -> Result<serde_json::Value, ErrorBody> {
+    let svc = require_membership(node).await?;
+    let ttl = std::time::Duration::from_secs(ttl_secs.unwrap_or(12 * 3600));
+    let token = svc.mint_join_token(&node_name, node_id, ttl).map_err(|e| ErrorBody {
+        code: "join_token_mint_failed".into(),
+        message: e.to_string(),
+        details: serde_json::json!({}),
+    })?;
+    Ok(serde_json::json!({
+        "token": token.token_id,
+        "node_name": token.node_name,
+        "expires_at_unix_ms": token.expires_at_unix_ms,
+    }))
+}
+
+async fn membership_roster(node: &Node) -> Result<serde_json::Value, ErrorBody> {
+    let svc = require_membership(node).await?;
+    let Some(view) = svc.view_snapshot() else {
+        return Err(ErrorBody {
+            code: "no_view".into(),
+            message: "membership has no view yet".into(),
+            details: serde_json::json!({}),
+        });
+    };
+    let members: Vec<serde_json::Value> = view
+        .members
+        .values()
+        .map(|m| {
+            serde_json::json!({
+                "node_id": m.node_id,
+                "node_name": m.node_name,
+                "status": m.status,
+            })
+        })
+        .collect();
+    let pending: Vec<serde_json::Value> = view
+        .pending
+        .values()
+        .map(|p| {
+            serde_json::json!({
+                "node_id": p.node_id,
+                "node_name": p.node_name,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "cluster_uuid": view.cluster_uuid,
+        "cluster_name": view.cluster_name,
+        "members": members,
+        "pending": pending,
+        "retired_count": view.retired.len(),
+    }))
 }
 
 fn entrypoint_statuses(node: &Node) -> Vec<EntrypointStatus> {

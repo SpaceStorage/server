@@ -514,6 +514,28 @@ impl MembershipService {
     pub fn is_join_mode(&self) -> bool {
         self.join_declared
     }
+
+    /// Operator drain — delegates to `drain.rs`, records event locally (018).
+    pub fn operator_drain(&self, node_id: Uuid) -> Result<MembershipEvent> {
+        let mut g = self.inner.write();
+        let Some(view) = g.view.as_mut() else {
+            return Err(MembershipError::InvalidState("no_view".into()));
+        };
+        let ev = crate::drain::drain(view, node_id)?;
+        g.events.push(ev.clone());
+        Ok(ev)
+    }
+
+    /// Operator undrain (018).
+    pub fn operator_undrain(&self, node_id: Uuid) -> Result<MembershipEvent> {
+        let mut g = self.inner.write();
+        let Some(view) = g.view.as_mut() else {
+            return Err(MembershipError::InvalidState("no_view".into()));
+        };
+        let ev = crate::drain::undrain(view, node_id)?;
+        g.events.push(ev.clone());
+        Ok(ev)
+    }
 }
 
 #[cfg(test)]

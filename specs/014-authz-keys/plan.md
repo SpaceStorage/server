@@ -132,3 +132,7 @@ crates/
 ## Constitution Check (post-design)
 
 Re-evaluated after Phase 1: principals/KEKs/audit on the cluster log; SCRAM/Redis AUTH map to one store; unbound admin refused on credential-bound protocols; bound tenants get an implicit data-plane grant until slice 7; `CLUSTER_ADMIN` implies all verbs; built-ins immutable; envelope replaces keyring; later requests re-check generation; `08` does not own audit content; handlers stay native-auth adapters. **Gate result: PASS.**
+
+## Cross-feature note (018 admin UI, 2026-11)
+
+`specs/018-admin-ui-modernization` adds a browser **HttpOnly** session cookie (`ss_session`) and per-session **CSRF** token on `014` `SessionTokenStore` — it does not replace SCRAM, verb bitmasks, or audit append semantics. Admin HTTP `POST /v1/auth/login` still authenticates via the static `admin.token` (bootstrap path) and issues the same session record shape handlers already resolve. **`AdminOp::AuditList`** and `GET /v1/ui/audit` read the existing `AuditLog` (`AUDIT_READ` / `CLUSTER_ADMIN`); the UI adds pagination and shell rendering only, not export/retention controls. Bearer session hex remains **401** on mutating routes; admin-token bearer without CSRF is unchanged for automation.

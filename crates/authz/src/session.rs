@@ -40,6 +40,10 @@ pub struct SessionToken {
     pub generation: u64,
     pub login: String,
     pub cluster_admin: bool,
+    /// 32 random bytes, hex-encoded; not the session secret (018 session-cookie).
+    pub csrf_token: String,
+    /// Namespace names this session may administer when not `cluster_admin`.
+    pub namespace_scopes: Vec<String>,
     pub expires_at: Instant,
 }
 
@@ -73,12 +77,17 @@ impl SessionTokenStore {
         getrandom_fill(&mut raw);
         let hex = hex_encode(&raw);
         let token_hash = Self::hash_token(&raw);
+        let mut csrf_raw = [0u8; 32];
+        getrandom_fill(&mut csrf_raw);
+        let csrf_token = hex_encode(&csrf_raw);
         let rec = SessionToken {
             token_hash,
             principal_id,
             generation,
             login: login.into(),
             cluster_admin,
+            csrf_token,
+            namespace_scopes: Vec::new(),
             expires_at: Instant::now() + ttl,
         };
         self.by_hash.insert(token_hash, rec.clone());
@@ -110,6 +119,28 @@ impl SessionTokenStore {
     pub fn revoke_hash(&mut self, hash: &[u8; 32]) {
         self.by_hash.remove(hash);
     }
+
+    pub fn set_namespace_scopes(&mut self, hash: &[u8; 32], scopes: Vec<String>) {
+        if let Some(rec) = self.by_hash.get_mut(hash) {
+            rec.namespace_scopes = scopes;
+        }
+    }
+
+    /// Resolve from `ss_session` cookie hex (same as bearer hex rules).
+    pub fn resolve_cookie(&self, cookie_hex: &str) -> Option<SessionToken> {
+        self.resolve(cookie_hex)
+    }
+}
+
+/// Constant-time compare for CSRF proofs.
+pub fn csrf_tokens_equal(expected: &str, presented: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    let a = expected.as_bytes();
+    let b = presented.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    a.ct_eq(b).into()
 }
 
 fn getrandom_fill(buf: &mut [u8]) {

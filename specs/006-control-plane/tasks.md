@@ -4,6 +4,8 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 
 # Tasks: Control-Plane Hierarchy, Raft Elections, and Node Restore
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/specs/006-control-plane/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
@@ -72,9 +74,9 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T014 [P] [US1] Add unit tests in `crates/controlplane/src/membership.rs` for first-binary voter table: 1 member → `{A}`; 2 → `{A}` + B learner; 3 → one config change `{A,B,C}`; 4+ stay `{A,B,C}`; even proposals → `VoterSetOdd`
-- [ ] T015 [P] [US1] Add conformance election tests in `crates/conformance` (e.g. `tests/controlplane_election.rs`) for SC-001/SC-002: 3 in-process voters, exactly one primary + ≥1 secondary, kill primary → new primary, membership unchanged; scrape `spacestorage_leader_elections_total` / duration histogram (SC-008)
-- [ ] T016 [P] [US1] Add conformance minority tests in `crates/conformance` for SC-003: partitioned minority of cluster voters refuses join / create-namespace with `Minority { group: cluster }` even if non-voters are reachable on the minority side
-- [ ] T017 [P] [US1] Add config validation tests in `crates/config` that [raft-heartbeat-zero.conf](contracts/fixtures/invalid/raft-heartbeat-zero.conf), [raft-election-timeout-le-heartbeat.conf](contracts/fixtures/invalid/raft-election-timeout-le-heartbeat.conf), and [exclusive-data-on-first-binary.conf](contracts/fixtures/invalid/exclusive-data-on-first-binary.conf) exit validate with code 2
+- [X] T015 [P] [US1] Add conformance election tests in `crates/conformance` (e.g. `tests/controlplane_election.rs`) for SC-001/SC-002: 3 in-process voters, exactly one primary + ≥1 secondary, kill primary → new primary, membership unchanged; scrape `spacestorage_leader_elections_total` / duration histogram (SC-008)
+- [X] T016 [P] [US1] Add conformance minority tests in `crates/conformance` for SC-003: partitioned minority of cluster voters refuses join / create-namespace with `Minority { group: cluster }` even if non-voters are reachable on the minority side
+- [X] T017 [P] [US1] Add config validation tests in `crates/config` that [raft-heartbeat-zero.conf](contracts/fixtures/invalid/raft-heartbeat-zero.conf), [raft-election-timeout-le-heartbeat.conf](contracts/fixtures/invalid/raft-election-timeout-le-heartbeat.conf), and [exclusive-data-on-first-binary.conf](contracts/fixtures/invalid/exclusive-data-on-first-binary.conf) exit validate with code 2
 
 ### Implementation for User Story 1
 
@@ -83,8 +85,8 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 - [X] T020 [US1] Implement first-binary static voter expansion in `crates/controlplane/src/membership.rs` / apply path: on third member admit, single `ExpandToThree { b, c }` membership op; further joins are learners only; `Replace`/`Grow`/`Shrink` return `Slice7Required`
 - [X] T021 [US1] Route cluster-scoped `ClusterStore::append` commits through cluster Raft majority in `crates/controlplane/src/apply.rs` / `lib.rs`; minority → `Minority { group: cluster }`; do not count non-voters toward majority ([contracts/cluster-store.md](contracts/cluster-store.md))
 - [X] T022 [US1] Enforce `FR-010` in `crates/controlplane`: process not in membership → `NotMember`, must not vote and must not be a new replica target; membership necessary but not sufficient to vote
-- [ ] T023 [US1] Select `RaftClusterStore` in `crates/node` when internodes enabled and remove interim LWW `CatalogDelta` shipper wiring from `004` once Raft path is live
-- [ ] T024 [US1] Implement admin `Controllers` / `RaftStatus { group }` and CLI `spacestorage controllers` / `spacestorage raft-status` in `crates/node`, `crates/admin-proto`, `crates/spacestorage` showing cluster primary, secondaries, commit/term
+- [X] T023 [US1] Select `RaftClusterStore` in `crates/node` when internodes enabled and remove interim LWW `CatalogDelta` shipper wiring from `004` once Raft path is live
+- [X] T024 [US1] Implement admin `Controllers` / `RaftStatus { group }` and CLI `spacestorage controllers` / `spacestorage raft-status` in `crates/node`, `crates/admin-proto`, `crates/spacestorage` showing cluster primary, secondaries, commit/term
 - [X] T025 [US1] Confirm data-path coordination remains on any member (voter or not) in `crates/node` / handler path — no redirect of tenant queries to cluster primary (`FR-008`); document in code comment at coordinator entry if needed
 
 **Checkpoint**: Three-node election, failover, and minority refuse pass; `spacestorage controllers` reports one cluster primary. MVP gate for electable cluster metadata.
@@ -99,19 +101,19 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T026 [P] [US2] Add conformance test in `crates/conformance` that creating namespace `acme` starts `GroupId::Namespace` with primary+secondary and applied schemas/definitions; leaderless KV/SQL insert succeeds with no lease row (SC-005)
+- [X] T026 [P] [US2] Add conformance test in `crates/conformance` that creating namespace `acme` starts `GroupId::Namespace` with primary+secondary and applied schemas/definitions; leaderless KV/SQL insert succeeds with no lease row (SC-005)
 - [X] T027 [P] [US2] Add unit tests in `crates/controlplane/src/lease.rs` for grant/steal epoch++ , `LeaseForbidden` on leaderless types, `StaleEpoch` refuse, and `LeaseNotGranted` when ordered write lacks a lease
-- [ ] T028 [P] [US2] Add conformance test behind feature `controlplane-leases` (or ordered-type present) in `crates/conformance` for SC-006: re-grant lease → old holder stale-epoch appends refused and absent from ordered history
+- [X] T028 [P] [US2] Add conformance test behind feature `controlplane-leases` (or ordered-type present) in `crates/conformance` for SC-006: re-grant lease → old holder stale-epoch appends refused and absent from ordered history
 
 ### Implementation for User Story 2
 
 - [X] T029 [P] [US2] Implement `NamespaceState` apply machine in `crates/controlplane/src/namespace.rs`: `schemas`, `containers` (definitions/options/shared-datatype metadata), `leases`, namespace `voter_set`, last applied `hlc` — MUST NOT hold cluster membership
-- [ ] T030 [US2] On cluster commit of `create_namespace`, start namespace Raft group in `crates/controlplane` with initial voter set = current **cluster** voter set and all other members as learners; isolate majorities so loss of one namespace majority does not block another ([contracts/namespace-store.md](contracts/namespace-store.md))
-- [ ] T031 [US2] Route schema/definition/shared-meta `ClusterStore::append` events to the owning namespace group in `crates/controlplane/src/apply.rs`; namespace minority → `Minority { group: ns/<id> }`
+- [X] T030 [US2] On cluster commit of `create_namespace`, start namespace Raft group in `crates/controlplane` with initial voter set = current **cluster** voter set and all other members as learners; isolate majorities so loss of one namespace majority does not block another ([contracts/namespace-store.md](contracts/namespace-store.md))
+- [X] T031 [US2] Route schema/definition/shared-meta `ClusterStore::append` events to the owning namespace group in `crates/controlplane/src/apply.rs`; namespace minority → `Minority { group: ns/<id> }`
 - [X] T032 [US2] Implement `LeadershipLease { container_id, holder, epoch, granted_index }` grant/steal in `crates/controlplane/src/lease.rs` as namespace-log commits; leaderless types → `LeaseForbidden`; wall-clock alone MUST NOT fence ([contracts/leadership-lease.md](contracts/leadership-lease.md))
-- [ ] T033 [US2] Enforce epoch on ordered append / `004` FR-078 path in `crates/controlplane` + consumer seam: require presented `epoch == current` else `StaleEpoch { have, need }` and MUST NOT enter ordered history; first-binary types MUST NOT take a lease (`FR-020`)
-- [ ] T034 [US2] Stamp applied cluster/namespace records with HLC from `012` in `crates/controlplane/src/apply.rs` (`FR-015`) while Raft `(term, index)` remains commit order
-- [ ] T035 [US2] Extend `spacestorage controllers` / admin `Controllers` in `crates/spacestorage` and `crates/admin-proto` to list each namespace group primary/secondaries; add `Leases { namespace }` (empty in first binary unless ordered type exists)
+- [X] T033 [US2] Enforce epoch on ordered append / `004` FR-078 path in `crates/controlplane` + consumer seam: require presented `epoch == current` else `StaleEpoch { have, need }` and MUST NOT enter ordered history; first-binary types MUST NOT take a lease (`FR-020`)
+- [X] T034 [US2] Stamp applied cluster/namespace records with HLC from `012` in `crates/controlplane/src/apply.rs` (`FR-015`) while Raft `(term, index)` remains commit order
+- [X] T035 [US2] Extend `spacestorage controllers` / admin `Controllers` in `crates/spacestorage` and `crates/admin-proto` to list each namespace group primary/secondaries; add `Leases { namespace }` (empty in first binary unless ordered type exists)
 
 **Checkpoint**: Namespace Raft live for every existing namespace; leaderless writes unbound by leases; lease API ready for ordered types.
 
@@ -125,15 +127,15 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T036 [P] [US3] Add conformance restore suite in `crates/conformance` for SC-004: after restart, persistent/hybrid keep definition+content; unreplicated memory-mode keeps definition, empty content, volatility notice; replicated memory-mode may re-populate via `004` only
-- [ ] T037 [P] [US3] Add unit/integration test in `crates/controlplane/src/restore.rs` (or conformance) that a process absent from membership starts without voting and refuses new replica placements (`NotMember` / `FR-010`)
+- [X] T036 [P] [US3] Add conformance restore suite in `crates/conformance` for SC-004: after restart, persistent/hybrid keep definition+content; unreplicated memory-mode keeps definition, empty content, volatility notice; replicated memory-mode may re-populate via `004` only
+- [X] T037 [P] [US3] Add unit/integration test in `crates/controlplane/src/restore.rs` (or conformance) that a process absent from membership starts without voting and refuses new replica placements (`NotMember` / `FR-010`)
 
 ### Implementation for User Story 3
 
 - [X] T038 [US3] Implement boot orchestrator `RestorePlan` in `crates/controlplane/src/restore.rs` ordered: open local Raft dirs → apply snapshots/logs to catalog → invoke `013` content restore for persistent/hybrid → memory content empty → internodes up → learner catch-up → optional `004` memory re-populate ([contracts/restore.md](contracts/restore.md))
-- [ ] T039 [US3] Invoke `013` restore entrypoint from `crates/durability` inside `crates/controlplane/src/restore.rs` without reimplementing WAL; surface volatility notice from type/storage mode on unreplicated memory-mode
+- [X] T039 [US3] Invoke `013` restore entrypoint from `crates/durability` inside `crates/controlplane/src/restore.rs` without reimplementing WAL; surface volatility notice from type/storage mode on unreplicated memory-mode
 - [X] T040 [US3] Handle corrupt/unknown Raft format in `crates/controlplane/src/raft_store.rs` / `restore.rs`: isolate group dir, attempt peer snapshot, else degrade; `UnknownRaftFormat` refuses start (`015`)
-- [ ] T041 [US3] Hook restore before `ready` in `crates/node` so definitions are applied within the `001` ready bound once `013` replay finishes; ensure non-member join path (`011`) does not start as voter
+- [X] T041 [US3] Hook restore before `ready` in `crates/node` so definitions are applied within the `001` ready bound once `013` replay finishes; ensure non-member join path (`011`) does not start as voter
 
 **Checkpoint**: Restart preserves durable content and definitions; memory-mode volatility honored; non-members cannot vote.
 
@@ -148,14 +150,14 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 ### Tests for User Story 4 ⚠️
 
 - [X] T042 [P] [US4] Add unit tests in `crates/controlplane/src/ops.rs` / `membership.rs` behind `controlplane-ops`: replace keeps odd size; grow/shrink by 2; step that loses majority or goes even → `VoterSetMajorityLost` / `VoterSetOdd` and previous set remains
-- [ ] T043 [P] [US4] Add conformance tests behind feature `controlplane-ops` in `crates/conformance` for SC-009 voter replace and SC-010 exclusive-data placement exclusion / no in-place drop
+- [X] T043 [P] [US4] Add conformance tests behind feature `controlplane-ops` in `crates/conformance` for SC-009 voter replace and SC-010 exclusive-data placement exclusion / no in-place drop
 
 ### Implementation for User Story 4
 
 - [X] T044 [US4] Implement slice-7 membership ops in `crates/controlplane/src/ops.rs`: `Replace { from, to }`, `Grow { add: [NodeId; 2] }`, `Shrink { remove: [NodeId; 2] }` keeping odd size and majority at every accepted joint step (`FR-018`)
 - [X] T045 [US4] Implement live `controller_exclusive_data` flag in `crates/controlplane` / `crates/config`: default off; when on, if tenant replicas remain on voters → `ExclusiveDataBlocked` until `04`/`11` drain — never drop (`FR-019`)
 - [X] T046 [US4] Publish `tenant_replica_excluded(node) -> bool` from `crates/controlplane` and consume in `crates/placement` as `NodeFlags::no_tenant_data` / selector miss (`excluded: controller_exclusive_data`)
-- [ ] T047 [US4] Add admin/CLI `VoterReplace` / `VoterGrow` / `VoterShrink` and `spacestorage controllers voters replace|grow|shrink` in `crates/admin-proto`, `crates/node`, `crates/spacestorage`; without `controlplane-ops` return `Slice7Required`
+- [X] T047 [US4] Add admin/CLI `VoterReplace` / `VoterGrow` / `VoterShrink` and `spacestorage controllers voters replace|grow|shrink` in `crates/admin-proto`, `crates/node`, `crates/spacestorage`; without `controlplane-ops` return `Slice7Required`
 - [X] T048 [US4] Gate `controlplane-ops` in `crates/release-profile` so first binary compiles cluster+namespace Raft with static voters and exclusive-data off; slice 7 enables ops feature
 
 **Checkpoint**: Voter migration and exclusive-data work under `controlplane-ops`; first binary remains static/odd/off.
@@ -170,15 +172,15 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T049 [P] [US5] Add conformance metadata-read tests in `crates/conformance` for SC-007: secondary list namespaces matches primary after read-index; write to secondary is forwarded or `NotLeader`, never applied only on secondary
-- [ ] T050 [P] [US5] Add conformance aggregator tests in `crates/conformance` for SC-011: merged shared-datatype series on namespace primary `/metrics`; not on cluster primary (if different) as aggregator of record; local series always present
+- [X] T049 [P] [US5] Add conformance metadata-read tests in `crates/conformance` for SC-007: secondary list namespaces matches primary after read-index; write to secondary is forwarded or `NotLeader`, never applied only on secondary
+- [X] T050 [P] [US5] Add conformance aggregator tests in `crates/conformance` for SC-011: merged shared-datatype series on namespace primary `/metrics`; not on cluster primary (if different) as aggregator of record; local series always present
 
 ### Implementation for User Story 5
 
 - [X] T051 [US5] Implement follower metadata reads with read-index (or wait applied ≥ leader commit) in `crates/controlplane/src/read.rs`; learners with apply lag MUST wait or redirect rather than return stale-as-complete ([contracts/metadata-reads.md](contracts/metadata-reads.md))
-- [ ] T052 [US5] Implement metadata write path on non-leader: `RaftForward` to leader if known else `NotLeader { leader }` in `crates/controlplane` / `crates/internode`; never apply write only on secondary
-- [ ] T053 [US5] Implement in-memory `SharedMetricAggregate` merge on namespace primary in `crates/controlplane/src/metrics_agg.rs` via `MetricsPush` each `cluster.raft.heartbeat`; `stale=true` if replica silent for `2 * heartbeat`; cluster primary and lease holder MUST NOT aggregate (`FR-013`)
-- [ ] T054 [US5] Expose merged series only on namespace-primary node exposition seam consumed by `08` in `crates/controlplane` / node metrics path; keep required `08` names unchanged; election series already labeled `raft_group`
+- [X] T052 [US5] Implement metadata write path on non-leader: `RaftForward` to leader if known else `NotLeader { leader }` in `crates/controlplane` / `crates/internode`; never apply write only on secondary
+- [X] T053 [US5] Implement in-memory `SharedMetricAggregate` merge on namespace primary in `crates/controlplane/src/metrics_agg.rs` via `MetricsPush` each `cluster.raft.heartbeat`; `stale=true` if replica silent for `2 * heartbeat`; cluster primary and lease holder MUST NOT aggregate (`FR-013`)
+- [X] T054 [US5] Expose merged series only on namespace-primary node exposition seam consumed by `08` in `crates/controlplane` / node metrics path; keep required `08` names unchanged; election series already labeled `raft_group`
 
 **Checkpoint**: Secondary metadata reads match primary; namespace-primary aggregates shared-datatype metrics; failover still elects.
 
@@ -189,10 +191,10 @@ description: "Task list for control-plane hierarchy, Raft elections, and node re
 **Purpose**: Docs, profile alignment, quickstart proof, cleanup across stories
 
 - [X] T055 [P] Document `cluster.raft` and `controller_exclusive_data` starters in `docs/` (or extend `001`/`016` config docs) matching [contracts/config-directives.md](contracts/config-directives.md) production defaults and loopback fixtures
-- [ ] T056 [P] Record `016` sequencing amendment note (Raft in first binary for cluster + existing namespaces; slice 7 keeps migrate/exclusive-data) in `specs/016-mvp-and-nongoals/` only if that feature’s contracts are opened for edit — otherwise leave a pointer comment in `crates/release-profile` feature docs
-- [ ] T057 Run [quickstart.md](quickstart.md) validation end-to-end: config validate invalid fixtures; one-node controllers; three-node election/failover; minority refuse; restore split; secondary metadata read; aggregator identity
+- [X] T056 [P] Record `016` sequencing amendment note (Raft in first binary for cluster + existing namespaces; slice 7 keeps migrate/exclusive-data) in `specs/016-mvp-and-nongoals/` only if that feature’s contracts are opened for edit — otherwise leave a pointer comment in `crates/release-profile` feature docs
+- [X] T057 Run [quickstart.md](quickstart.md) validation end-to-end: config validate invalid fixtures; one-node controllers; three-node election/failover; minority refuse; restore split; secondary metadata read; aggregator identity
 - [X] T058 Code cleanup in `crates/controlplane`: ensure no fsync on Tokio workers, no etcd/gRPC, no per-container Raft, and leaderless write path has zero extra RPC to a datatype primary
-- [ ] T059 [P] Confirm double-bootstrap same cluster name is detected/not merged via `011` seam (store refuses second UUID) in `crates/controlplane/src/cluster.rs` / membership integration
+- [X] T059 [P] Confirm double-bootstrap same cluster name is detected/not merged via `011` seam (store refuses second UUID) in `crates/controlplane/src/cluster.rs` / membership integration
 
 ---
 

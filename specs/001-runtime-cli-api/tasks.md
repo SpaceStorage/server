@@ -4,6 +4,8 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 # Tasks: SpaceStorage Runtime, CLI, and Node Interfaces
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/Users/g.kashintsev/devel/myrepo/spacestorage/server/specs/001-runtime-cli-api/`
 
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
@@ -140,19 +142,19 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 ### Tests for User Story 3
 
-- [ ] T048 [P] [US3] Write CLI process tests (`validate` multi-error exit 2; valid prints effective threads; status/stop/reload exit codes 0/3/5; JSON field stability) in `crates/spacestorage/tests/cli.rs` using `assert_cmd`
+- [X] T048 [P] [US3] Write CLI process tests (`validate` multi-error exit 2; valid prints effective threads; status/stop/reload exit codes 0/3/5; JSON field stability) in `crates/spacestorage/tests/cli.rs` using `assert_cmd`
 
 ### Implementation for User Story 3
 
-- [ ] T049 [US3] Implement clap derive command tree and global flags (`--endpoint`, `--via`, `--token-file`, `--tls`, `--ca`, `--timeout` default 5 s, `--output human|json`) in `crates/spacestorage/src/args.rs` per `contracts/cli.md` (no `--insecure`)
-- [ ] T050 [P] [US3] Implement exit code mapping (0/1/2/3/4/5) in `crates/spacestorage/src/exit.rs`
-- [ ] T051 [P] [US3] Implement human table + JSON output helpers in `crates/spacestorage/src/output.rs`
-- [ ] T052 [US3] Implement `AdminClient` trait plus TCP framed client in `crates/spacestorage/src/client/{mod,tcp}.rs`
-- [ ] T053 [US3] Implement HTTP client for admin-http routes in `crates/spacestorage/src/client/http.rs`
-- [ ] T054 [US3] Implement CLI rustls client with `webpki-roots` + optional `--ca`; verification failures fatal naming endpoint/handler in `crates/spacestorage/src/client/` (FR-030)
-- [ ] T055 [US3] Implement `validate <config> [--set …]` using `crates/config` only (no socket); list all problems; print effective config including derived thread count in `crates/spacestorage/src/main.rs`
-- [ ] T056 [US3] Implement remote commands `status`, `config`, `threads`, `buffers`, `handlers`, `reload`, `stop [--wait]` with connection-timeout errors naming address and handler in `crates/spacestorage/src/main.rs`
-- [ ] T057 [US3] Ensure `reload` CLI prints changed / applied live / pending restart and exits 5 when `pending_restart` non-empty, 2 on `config_invalid` in `crates/spacestorage/src/main.rs`
+- [X] T049 [US3] Implement clap derive command tree and global flags (`--endpoint`, `--via`, `--token-file`, `--tls`, `--ca`, `--timeout` default 5 s, `--output human|json`) in `crates/spacestorage/src/args.rs` per `contracts/cli.md` (no `--insecure`)
+- [X] T050 [P] [US3] Implement exit code mapping (0/1/2/3/4/5) in `crates/spacestorage/src/exit.rs`
+- [X] T051 [P] [US3] Implement human table + JSON output helpers in `crates/spacestorage/src/output.rs`
+- [X] T052 [US3] Implement `AdminClient` trait plus TCP framed client in `crates/spacestorage/src/client/{mod,tcp}.rs`
+- [X] T053 [US3] Implement HTTP client for admin-http routes in `crates/spacestorage/src/client/http.rs`
+- [X] T054 [US3] Implement CLI rustls client with `webpki-roots` + optional `--ca`; verification failures fatal naming endpoint/handler in `crates/spacestorage/src/client/` (FR-030)
+- [X] T055 [US3] Implement `validate <config> [--set …]` using `crates/config` only (no socket); list all problems; print effective config including derived thread count in `crates/spacestorage/src/main.rs`
+- [X] T056 [US3] Implement remote commands `status`, `config`, `threads`, `buffers`, `handlers`, `reload`, `stop [--wait]` with connection-timeout errors naming address and handler in `crates/spacestorage/src/main.rs`
+- [X] T057 [US3] Ensure `reload` CLI prints changed / applied live / pending restart and exits 5 when `pending_restart` non-empty, 2 on `config_invalid` in `crates/spacestorage/src/main.rs`
 
 **Checkpoint**: Operator can validate → start → inspect → reload → stop using only the bundled CLI (quickstart.md)
 
@@ -166,17 +168,17 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 
 ### Tests for User Story 4
 
-- [ ] T058 [P] [US4] Write buffer integration tests (defaults, unknown/out-of-range reject, limit-hit + overflow policy, raise/lower capacity including usage &gt; 100%, concurrent reload serialization, reload reject while draining) in `crates/node/tests/buffers.rs`
-- [ ] T059 [P] [US4] Extend reload integration coverage for live buffer+drain changes with zero dropped connections in `crates/node/tests/reload.rs` (SC-009)
+- [X] T058 [P] [US4] Write buffer integration tests (defaults, unknown/out-of-range reject, limit-hit + overflow policy, raise/lower capacity including usage &gt; 100%, concurrent reload serialization, reload reject while draining) in `crates/node/tests/buffers.rs`
+- [X] T059 [P] [US4] Extend reload integration coverage for live buffer+drain changes with zero dropped connections in `crates/node/tests/reload.rs` (SC-009)
 
 ### Implementation for User Story 4
 
-- [ ] T060 [US4] Apply configured buffer capacities at startup from `NodeConfig.buffers` onto `BufferRegistry` in `crates/node/src/lib.rs` / startup path; unknown name / out-of-range fail before bind
-- [ ] T061 [US4] Wire `net.recv` / `net.send` / `request.queue` reservations into admin TCP framing and accept/request paths in `crates/node/src/handler/admin_tcp.rs` and `crates/node/src/entrypoint/listener.rs` so limit-hits increment under load
-- [ ] T062 [US4] Expose buffer reports (capacity, used, ratio, limit_hits, policy, range, default, owner) identically via AdminService `buffers`/`status` and ensure CLI tables consume them in `crates/node/src/admin/mod.rs`
-- [ ] T063 [US4] On reload lowering capacity below `used`: accept, stop admitting until `used + n <= capacity`, do not discard held data; raising capacity is immediate in `crates/node/src/buffer/mod.rs` + `crates/node/src/reload.rs` (FR-040)
-- [ ] T064 [US4] Emit `buffers_exceed_memory` warning at startup and reload (sum capacities vs available memory via `spawn_blocking` /proc or sysctl) without failing in `crates/node/src/reload.rs` and startup path (FR-044)
-- [ ] T065 [US4] Reject entire reload atomically on unknown buffer or out-of-range capacity (no partial apply) in `crates/node/src/reload.rs`
+- [X] T060 [US4] Apply configured buffer capacities at startup from `NodeConfig.buffers` onto `BufferRegistry` in `crates/node/src/lib.rs` / startup path; unknown name / out-of-range fail before bind
+- [X] T061 [US4] Wire `net.recv` / `net.send` / `request.queue` reservations into admin TCP framing and accept/request paths in `crates/node/src/handler/admin_tcp.rs` and `crates/node/src/entrypoint/listener.rs` so limit-hits increment under load
+- [X] T062 [US4] Expose buffer reports (capacity, used, ratio, limit_hits, policy, range, default, owner) identically via AdminService `buffers`/`status` and ensure CLI tables consume them in `crates/node/src/admin/mod.rs`
+- [X] T063 [US4] On reload lowering capacity below `used`: accept, stop admitting until `used + n <= capacity`, do not discard held data; raising capacity is immediate in `crates/node/src/buffer/mod.rs` + `crates/node/src/reload.rs` (FR-040)
+- [X] T064 [US4] Emit `buffers_exceed_memory` warning at startup and reload (sum capacities vs available memory via `spawn_blocking` /proc or sysctl) without failing in `crates/node/src/reload.rs` and startup path (FR-044)
+- [X] T065 [US4] Reject entire reload atomically on unknown buffer or out-of-range capacity (no partial apply) in `crates/node/src/reload.rs`
 
 **Checkpoint**: Per-node bounded buffers are tunable and observable through all admin surfaces
 
@@ -187,10 +189,10 @@ description: "Task list for SpaceStorage Runtime, CLI, and Node Interfaces"
 **Purpose**: Documentation, packaging sanity, quickstart proof, leftover edge cases
 
 - [X] T066 [P] Copy starter example to `docs/examples/node.conf` from `specs/001-runtime-cli-api/contracts/fixtures/node.conf` and draft `docs/configuration.md` from `contracts/config-grammar.md`
-- [ ] T067 [P] Add unit tests for lexer/parser/resolve edge cases (SIZE/DURATION literals, wrong arity, bad literal) in `crates/config/src/` modules
-- [ ] T068 Harden edge cases: oversubscription threads accepted; address not owned by host → bind error; cert expiry while running logs + flags entrypoint; concurrent reloads ordered; reload while draining → `invalid_state` in `crates/node/src/`
-- [ ] T069 Ensure both binaries build from one workspace (`cargo build --release` produces `target/release/spacestoraged` and `target/release/spacestorage`) documenting FR-031 in `README.md` or `docs/`
-- [ ] T070 Run end-to-end validation of `specs/001-runtime-cli-api/quickstart.md` (validate → start → inspect → reload → stop) and fix gaps discovered
+- [X] T067 [P] Add unit tests for lexer/parser/resolve edge cases (SIZE/DURATION literals, wrong arity, bad literal) in `crates/config/src/` modules
+- [X] T068 Harden edge cases: oversubscription threads accepted; address not owned by host → bind error; cert expiry while running logs + flags entrypoint; concurrent reloads ordered; reload while draining → `invalid_state` in `crates/node/src/`
+- [X] T069 Ensure both binaries build from one workspace (`cargo build --release` produces `target/release/spacestoraged` and `target/release/spacestorage`) documenting FR-031 in `README.md` or `docs/`
+- [X] T070 Run end-to-end validation of `specs/001-runtime-cli-api/quickstart.md` (validate → start → inspect → reload → stop) and fix gaps discovered
 - [X] T071 [P] Reserve `/metrics` 404 and confirm stats names remain stable for feature `08` without exposition in this feature (`crates/node/src/handler/admin_http.rs`, `crates/node/src/stats.rs`)
 
 ---

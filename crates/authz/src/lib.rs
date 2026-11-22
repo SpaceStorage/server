@@ -1,6 +1,7 @@
 //! AuthZ — principals, SCRAM, permissions, sessions, bootstrap, audit (014).
 //! Master-key / envelope live in `spacestorage-crypto`, not here.
 
+pub mod affordances;
 pub mod audit;
 pub mod bootstrap;
 pub mod error;
@@ -12,7 +13,9 @@ pub mod session;
 pub use error::AuthzError;
 pub use permission::{role_put_custom, Authorizer, CustomRole, Resource, Verb};
 pub use principal::{LoginName, PrincipalId, PrincipalRecord};
-pub use session::{Session, SessionToken, SessionTokenStore};
+pub use affordances::{affordances_for_session, Affordances};
+pub use audit::{AuditEntry, AuditListParams, AuditLog, SharedAuditLog};
+pub use session::{csrf_tokens_equal, Session, SessionToken, SessionTokenStore};
 
 pub const SCRAM_ITERATIONS_DEFAULT: u32 = 16384;
 

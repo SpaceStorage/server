@@ -87,6 +87,8 @@ impl Default for HandlerRegistry {
 }
 
 pub mod admin_http;
+pub mod session_auth;
+pub mod ui_reads;
 pub mod admin_tcp;
 pub mod console_backend;
 pub mod controlplane_namespaces;

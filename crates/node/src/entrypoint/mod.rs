@@ -34,9 +34,9 @@ pub async fn bind_all(node: Arc<Node>) -> Result<Vec<tokio::task::JoinHandle<()>
         if ep.handler == "admin-http" && cfg.disable_admin_http {
             continue;
         }
-        let addr: SocketAddr = format!("{}:{}", ep.address, ep.port)
-            .parse()
-            .map_err(|e| format!("bad address for {}: {e}", ep.name))?;
+        // Accept IP literals and hostnames (Compose service DNS). Advertise
+        // strings stay as configured; only the bind socket is resolved.
+        let addr = resolve_bind_addr(&ep.address, ep.port, &ep.name).await?;
 
         let tls_acceptor = if ep.transport == Transport::Tls {
             let tls = ep.tls.as_ref().ok_or_else(|| {
@@ -95,6 +95,26 @@ pub async fn bind_all(node: Arc<Node>) -> Result<Vec<tokio::task::JoinHandle<()>
         listeners.push(h);
     }
     Ok(listeners)
+}
+
+async fn resolve_bind_addr(address: &str, port: u16, ep_name: &str) -> Result<SocketAddr, String> {
+    let host_port = format!("{address}:{port}");
+    match host_port.parse::<SocketAddr>() {
+        Ok(addr) => Ok(addr),
+        Err(_) => {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&host_port)
+                .await
+                .map_err(|e| format!("bad address for {ep_name}: resolve {host_port}: {e}"))?
+                .collect();
+            // Prefer IPv4 in Compose labs; fall back to any resolved address.
+            addrs
+                .iter()
+                .copied()
+                .find(|a| a.is_ipv4())
+                .or_else(|| addrs.first().copied())
+                .ok_or_else(|| format!("bad address for {ep_name}: no addresses for {host_port}"))
+        }
+    }
 }
 
 async fn accept_loop(

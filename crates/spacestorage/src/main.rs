@@ -337,6 +337,27 @@ fn main() -> ExitCode {
         args::Command::Roles { endpoint } => {
             admin_client::run_admin_op(&endpoint, spacestorage_admin_proto::AdminOp::RoleList, None)
         }
+        args::Command::JoinToken { action } => match action {
+            args::JoinTokenAction::Mint {
+                name,
+                ttl_secs,
+                endpoint,
+                output,
+            } => admin_client::run_admin_op(
+                &endpoint,
+                spacestorage_admin_proto::AdminOp::JoinTokenMint {
+                    node_name: name,
+                    node_id: None,
+                    ttl_secs,
+                },
+                Some(&output),
+            ),
+        },
+        args::Command::Membership { endpoint, output } => admin_client::run_admin_op(
+            &endpoint,
+            spacestorage_admin_proto::AdminOp::Membership,
+            Some(&output),
+        ),
     }
 }
 

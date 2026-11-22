@@ -1,11 +1,20 @@
 //! Cerebro-like cluster map and Kibana-like console (009).
 
+pub mod audit;
 pub mod console;
+pub mod ui_time;
+pub mod jobs_view;
 pub mod map;
+pub mod monitoring;
+pub mod namespaces;
+pub mod nodes;
+pub mod overview;
 pub mod pages;
+pub mod shell;
 
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
+use shell::ShellSection;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
@@ -14,6 +23,17 @@ pub use console::{
     ConsoleAuthz, ConsoleBackend, ConsoleCreateContainer, ConsoleConfigRequest, ConsoleError,
     ConsoleQueryRequest, ConsoleService, MAX_PAGE_BYTES, MAX_PAGE_ROWS,
 };
+pub use namespaces::{
+    compose_namespace_detail, compose_namespace_list, DescriptorScanBudget, NamespaceContainerRow,
+    NamespaceListRow,
+};
+pub use nodes::{compose_node_detail, compose_nodes_list, NodeDetailView, NodeListRow};
+pub use overview::{
+    compose_overview, filter_overview_for_namespaces, LagLine, MemberLine, OverviewComposeInput,
+};
+pub use audit::merge_audit_page;
+pub use jobs_view::{compose_job_detail, compose_jobs_list, JobRow};
+pub use monitoring::compose_monitoring_panel;
 pub use map::{
     ClusterMapView, ContainerMapEntry, MapAuthz, MapComposer, MapScope, MigrationProgress,
     NodeMapEntry, ReplicaMapEntry, ShardMapEntry, TopologySnapshot,
@@ -257,17 +277,11 @@ fn console_err(e: console::ConsoleError) -> Response {
 
 async fn ui_cluster(
     axum::extract::State(state): axum::extract::State<AdminUiState>,
-    headers: axum::http::HeaderMap,
     axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response {
+    // HTML shell is public; JSON under `/v1/*` still requires SessionToken.
     if !state.slice11_enabled {
         return slice11_required();
-    }
-    let Some(principal) = (state.resolve_principal)(bearer(&headers)) else {
-        return unauthorized();
-    };
-    if matches!(principal.map_authz(), MapAuthz::Forbidden) {
-        return forbidden();
     }
     let interval = q
         .get("interval")
@@ -277,32 +291,116 @@ async fn ui_cluster(
     Html(pages::cluster_map_html(interval)).into_response()
 }
 
-async fn ui_console(
-    axum::extract::State(state): axum::extract::State<AdminUiState>,
-    headers: axum::http::HeaderMap,
-) -> Response {
+async fn ui_console(axum::extract::State(state): axum::extract::State<AdminUiState>) -> Response {
+    // HTML shell is public; JSON under `/v1/console/*` still requires SessionToken.
     if !state.slice11_enabled {
         return slice11_required();
     }
-    let Some(principal) = (state.resolve_principal)(bearer(&headers)) else {
-        return unauthorized();
-    };
-    let az = principal.console_authz();
-    if !az.cluster_admin && az.namespace_admin.is_empty() {
-        return forbidden();
-    }
     Html(pages::console_html()).into_response()
+}
+
+pub fn apply_shell_security_headers(resp: &mut Response) {
+    let h = resp.headers_mut();
+    let _ = h.insert(
+        header::CONTENT_SECURITY_POLICY,
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            .parse()
+            .unwrap(),
+    );
+    let _ = h.insert(header::HeaderName::from_static("x-content-type-options"), "nosniff".parse().unwrap());
+    let _ = h.insert(header::HeaderName::from_static("referrer-policy"), "same-origin".parse().unwrap());
+}
+
+fn shell_html_resp(path: &str, section: ShellSection) -> Response {
+    let mut resp = Html(pages::shell_html(path, section)).into_response();
+    apply_shell_security_headers(&mut resp);
+    resp
 }
 
 async fn ui_root(axum::extract::State(state): axum::extract::State<AdminUiState>) -> Response {
     if !state.slice11_enabled {
         return slice11_required();
     }
-    Redirect::temporary("/ui/console").into_response()
+    Redirect::permanent("/ui/overview").into_response()
+}
+
+async fn ui_overview(axum::extract::State(state): axum::extract::State<AdminUiState>) -> Response {
+    if !state.slice11_enabled {
+        return slice11_required();
+    }
+    shell_html_resp("/ui/overview", ShellSection::Overview)
+}
+
+async fn ui_section(
+    axum::extract::State(state): axum::extract::State<AdminUiState>,
+    uri: axum::http::Uri,
+) -> Response {
+    if !state.slice11_enabled {
+        return slice11_required();
+    }
+    let path = uri.path();
+    let section = ShellSection::from_path(path).unwrap_or(ShellSection::Overview);
+    shell_html_resp(path, section)
+}
+
+async fn ui_map_shell(axum::extract::State(state): axum::extract::State<AdminUiState>) -> Response {
+    if !state.slice11_enabled {
+        return slice11_required();
+    }
+    shell_html_resp("/ui/map", ShellSection::Map)
+}
+
+async fn ui_browse_shell(axum::extract::State(state): axum::extract::State<AdminUiState>) -> Response {
+    if !state.slice11_enabled {
+        return slice11_required();
+    }
+    shell_html_resp("/ui/browse", ShellSection::Browse)
+}
+
+async fn ui_cluster_redirect(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+  let qs = q
+      .iter()
+      .map(|(k, v)| format!("{k}={v}"))
+      .collect::<Vec<_>>()
+      .join("&");
+  let loc = if qs.is_empty() {
+    "/ui/map".into()
+  } else {
+    format!("/ui/map?{qs}")
+  };
+  Redirect::permanent(&loc).into_response()
+}
+
+async fn ui_console_redirect(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+  let qs = q
+      .iter()
+      .map(|(k, v)| format!("{k}={v}"))
+      .collect::<Vec<_>>()
+      .join("&");
+  let loc = if qs.is_empty() {
+    "/ui/browse".into()
+  } else {
+    format!("/ui/browse?{qs}")
+  };
+  Redirect::permanent(&loc).into_response()
 }
 
 async fn ui_asset(axum::extract::Path(name): axum::extract::Path<String>) -> Response {
-    match name.as_str() {
+    let mut resp = match name.as_str() {
+        "shell.js" => (
+            [(header::CONTENT_TYPE, "application/javascript")],
+            pages::SHELL_JS,
+        )
+            .into_response(),
+        "shell.css" => (
+            [(header::CONTENT_TYPE, "text/css")],
+            pages::SHELL_CSS,
+        )
+            .into_response(),
         "cluster-map.js" => (
             [(header::CONTENT_TYPE, "application/javascript")],
             include_str!("assets/cluster-map.js"),
@@ -318,22 +416,49 @@ async fn ui_asset(axum::extract::Path(name): axum::extract::Path<String>) -> Res
             include_str!("assets/console.css"),
         )
             .into_response(),
-        _ => StatusCode::NOT_FOUND.into_response(),
-    }
+        "ui.css" => (
+            [(header::CONTENT_TYPE, "text/css")],
+            include_str!("assets/ui.css"),
+        )
+            .into_response(),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    apply_shell_security_headers(&mut resp);
+    resp
+}
+
+/// Shell HTML routes and assets (`018` contracts/shell-http.md).
+pub fn ui_shell_router(state: AdminUiState) -> Router {
+    Router::new()
+        .route("/ui", get(ui_root))
+        .route("/ui/overview", get(ui_overview))
+        .route("/ui/namespaces", get(ui_section))
+        .route("/ui/namespaces/{*tail}", get(ui_section))
+        .route("/ui/nodes", get(ui_section))
+        .route("/ui/nodes/{*tail}", get(ui_section))
+        .route("/ui/monitoring", get(ui_section))
+        .route("/ui/monitoring/namespaces/{*tail}", get(ui_section))
+        .route("/ui/jobs", get(ui_section))
+        .route("/ui/jobs/{*tail}", get(ui_section))
+        .route("/ui/audit", get(ui_section))
+        .route("/ui/map", get(ui_map_shell))
+        .route("/ui/browse", get(ui_browse_shell))
+        .route("/ui/cluster", get(ui_cluster_redirect))
+        .route("/ui/console", get(ui_console_redirect))
+        .route("/ui/assets/{*name}", get(ui_asset))
+        .with_state(state)
 }
 
 /// Nested router for merge into node admin-http (same paths, own state).
 pub fn ui_router(state: AdminUiState) -> Router {
-    Router::new()
-        .route("/ui", get(ui_root))
-        .route("/ui/cluster", get(ui_cluster))
-        .route("/ui/console", get(ui_console))
-        .route("/ui/assets/{*name}", get(ui_asset))
-        .route("/v1/cluster/map", get(get_cluster_map))
-        .route("/v1/console/query", post(post_console_query))
-        .route("/v1/console/config", post(post_console_config))
-        .route("/v1/console/containers", post(post_console_containers))
-        .with_state(state)
+    ui_shell_router(state.clone()).merge(
+        Router::new()
+            .route("/v1/cluster/map", get(get_cluster_map))
+            .route("/v1/console/query", post(post_console_query))
+            .route("/v1/console/config", post(post_console_config))
+            .route("/v1/console/containers", post(post_console_containers))
+            .with_state(state),
+    )
 }
 
 /// CLI hint text for `spacestorage ui`.

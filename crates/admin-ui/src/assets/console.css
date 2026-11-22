@@ -1,4 +1,12 @@
-body { font-family: system-ui, sans-serif; margin: 1.5rem; }
-section { margin-bottom: 1.5rem; }
-label { display: block; margin: 0.25rem 0; }
-pre#out { background: #f4f4f4; padding: 0.75rem; min-height: 4rem; }
+/* Console reuses shared ui.css; keep file for route compatibility. */
+@import url("/ui/assets/ui.css");
+
+pre#out,
+pre#cfg-out {
+  background: #f0eee8;
+  padding: 0.75rem;
+  min-height: 4rem;
+  overflow: auto;
+  font-size: 0.85rem;
+  border-radius: 4px;
+}

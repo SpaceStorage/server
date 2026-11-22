@@ -4,6 +4,8 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 # Tasks: Durability, WAL, Restore, Deletes, TTL, Compaction, and Backup
 
+> **Historical task hygiene (2026-11-22):** open checkboxes in phases before the tip close were unmarked history, not a live remainder (see `AGENTS.md`, milestone `docs/milestones/009-full-product`). They are checked `[X]` here so they no longer appear as unpaid work. This is bookkeeping against the closed tip — not a claim that each row was re-executed in this pass. Live debt, if any, lives only in a new Convergence phase or an open feature (`017`+).
+
 **Input**: Design documents from `/specs/013-durability-and-recovery/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/](contracts/), [quickstart.md](quickstart.md)
@@ -61,9 +63,9 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T013 [P] [US1] Add unit tests for group-commit coalesce (`max_wait` 2 ms / `max_bytes` 1 MiB) and `spawn_blocking` fsync fence in `crates/storage/src/wal/group_commit.rs` (or `crates/storage/tests/group_commit.rs`)
-- [ ] T014 [P] [US1] Add unit tests that `sync none` yields `sync_none_not_durable` outside `SPACESTORAGE_TEST=1` and even under test never produces a counted durable ack for persistent/hybrid in `crates/storage/tests/sync_none.rs`
-- [ ] T015 [P] [US1] Add conformance SC-001 crash+restart of acknowledging replicas for persistent `TWO` in `crates/conformance/tests/durability_ack.rs` using [contracts/fixtures/single-drive.conf](contracts/fixtures/single-drive.conf) / three-node `012` harness (`SPACESTORAGE_TEST=1`)
-- [ ] T016 [P] [US1] Add conformance that memory-mode counted acks are `kind=memory` and execution records distinguish durable vs memory in mixed sets in `crates/conformance/tests/durability_ack.rs` per [contracts/ack.md](contracts/ack.md)
+- [X] T014 [P] [US1] Add unit tests that `sync none` yields `sync_none_not_durable` outside `SPACESTORAGE_TEST=1` and even under test never produces a counted durable ack for persistent/hybrid in `crates/storage/tests/sync_none.rs`
+- [X] T015 [P] [US1] Add conformance SC-001 crash+restart of acknowledging replicas for persistent `TWO` in `crates/conformance/tests/durability_ack.rs` using [contracts/fixtures/single-drive.conf](contracts/fixtures/single-drive.conf) / three-node `012` harness (`SPACESTORAGE_TEST=1`)
+- [X] T016 [P] [US1] Add conformance that memory-mode counted acks are `kind=memory` and execution records distinguish durable vs memory in mixed sets in `crates/conformance/tests/durability_ack.rs` per [contracts/ack.md](contracts/ack.md)
 
 ### Implementation for User Story 1
 
@@ -71,8 +73,8 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 - [X] T018 [US1] Implement group commit in `crates/storage/src/wal/group_commit.rs`: coalesce until `max_wait` or `max_bytes`; durability syscall (`fdatasync` default; `fsync` allowed; macOS `F_FULLFSYNC` in durability tests) exclusively via `001` `spawn_blocking` pool; advance `durable_lsn` monotonically; state machine `buffered → fsyncing → durable | failed`
 - [X] T019 [US1] Encrypt WAL payloads for encrypted containers with container data key (`014`/`003` crypto) and AAD `drive_id ‖ lsn ‖ container_id` in `crates/storage/src/wal/record.rs`; leave header/`container_id` plaintext; unencrypted containers yield plaintext payload
 - [X] T020 [US1] Wire counted persistent/hybrid ack to wait `durable_lsn ≥ record.lsn` on the replica’s pinned drive in `crates/storage` + replication/placement ack path (`crates/placement` / `crates/types`); memory-mode acks stay memory-only and MUST NOT be labelled crash-durable
-- [ ] T021 [US1] Ensure hybrid counted ack covers the write (including memory portion that `WriteBuffer`/`HotSet` would lose) in `crates/storage` / `crates/types` per research R16; do not treat hybrid like memory-mode
-- [ ] T022 [US1] Implement admin/CLI `spacestorage storage` and `spacestorage wal [DRIVE]` showing per-drive `durable_lsn`, lag, and disk state in `crates/admin-proto` + `crates/spacestorage` per [contracts/admin-cli.md](contracts/admin-cli.md) (slice 2)
+- [X] T021 [US1] Ensure hybrid counted ack covers the write (including memory portion that `WriteBuffer`/`HotSet` would lose) in `crates/storage` / `crates/types` per research R16; do not treat hybrid like memory-mode
+- [X] T022 [US1] Implement admin/CLI `spacestorage storage` and `spacestorage wal [DRIVE]` showing per-drive `durable_lsn`, lag, and disk state in `crates/admin-proto` + `crates/spacestorage` per [contracts/admin-cli.md](contracts/admin-cli.md) (slice 2)
 - [X] T023 [US1] Increment `db_wal_bytes_total`, `db_wal_fsync_total`, `db_wal_fsync_duration_seconds` on group commit in `crates/storage/src/wal/group_commit.rs` per [contracts/metrics.md](contracts/metrics.md)
 
 **Checkpoint**: Persistent `TWO` write survives kill-9+restart of acknowledging replicas. Memory-mode is not claimed crash-durable. Fsync never runs on a Tokio worker. Drive-1 ack independent of drive-2 WAL.
@@ -88,17 +90,17 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 ### Tests for User Story 2 ⚠️
 
 - [X] T024 [P] [US2] Add unit tests for torn-tail skip (short/CRC-invalid last record), `db_wal_torn_total` increment, and mid-log CRC → quarantine in `crates/storage/src/wal/replay.rs` / `crates/storage/tests/replay.rs`
-- [ ] T025 [P] [US2] Add conformance SC-002 unreplicated memory-mode empty after restart with volatility notice in `crates/conformance/tests/recovery_boot.rs`
-- [ ] T026 [P] [US2] Add conformance SC-003 disk-full on drive 1 refuses durable writes for containers on that drive while drive 2 still accepts, `node_state=degraded`, prior acks readable in `crates/conformance/tests/disk_full.rs` using [contracts/fixtures/two-drive.conf](contracts/fixtures/two-drive.conf)
-- [ ] T027 [P] [US2] Add conformance SC-004 unknown major refuses start and N nodes refuse writing N+1 format in `crates/conformance/tests/format_version.rs`
+- [X] T025 [P] [US2] Add conformance SC-002 unreplicated memory-mode empty after restart with volatility notice in `crates/conformance/tests/recovery_boot.rs`
+- [X] T026 [P] [US2] Add conformance SC-003 disk-full on drive 1 refuses durable writes for containers on that drive while drive 2 still accepts, `node_state=degraded`, prior acks readable in `crates/conformance/tests/disk_full.rs` using [contracts/fixtures/two-drive.conf](contracts/fixtures/two-drive.conf)
+- [X] T027 [P] [US2] Add conformance SC-004 unknown major refuses start and N nodes refuse writing N+1 format in `crates/conformance/tests/format_version.rs`
 
 ### Implementation for User Story 2
 
 - [X] T028 [US2] Implement boot content restore sequence in `crates/storage/src/restore.rs` and wire before `ready` in `crates/node/src/lifecycle.rs`: (1) catalog restore `003`/`006`, (2) open each drive WAL, skip torn tail, replay `lsn > checkpoint` for persistent/hybrid in LSN order, (3) memory-mode empty unless `004` re-populates, (4) hybrid memory portion rebuilt per `003` HybridPolicy; parallelize per drive on blocking pool
 - [X] T029 [P] [US2] Implement torn-tail and mid-log corruption handling in `crates/storage/src/wal/replay.rs` and quarantine rename `{path}.corrupt.{unix_ts}` in `crates/storage/src/quarantine.rs` per [contracts/recovery.md](contracts/recovery.md); no crash-loop; container `degraded` or rebuild from replica
-- [ ] T030 [US2] Implement ENOSPC / write-error → `DriveDiskState::full`, refuse new durable writes for containers on that drive, continue other drives and servable reads, set `node_state=degraded`, fail unfsynced group-commit waiters without counted ack in `crates/storage/src/disk.rs`; increment `db_wal_disk_full_total`
+- [X] T030 [US2] Implement ENOSPC / write-error → `DriveDiskState::full`, refuse new durable writes for containers on that drive, continue other drives and servable reads, set `node_state=degraded`, fail unfsynced group-commit waiters without counted ack in `crates/storage/src/disk.rs`; increment `db_wal_disk_full_total`
 - [X] T031 [P] [US2] Enforce `format_major` on open: unknown major → refuse node start naming the path (`format_unsupported`); refuse writing a major belonging to product N+1 on node N in `crates/storage/src/wal/mod.rs` per [contracts/format.md](contracts/format.md) / `015`
-- [ ] T032 [US2] Implement checkpoint persist of `covered_lsn` and conditional WAL prefix truncate in `crates/storage/src/checkpoint.rs` only when R5 retain rules pass (`gc_grace`, replica/follower lag, snapshot pins)
+- [X] T032 [US2] Implement checkpoint persist of `covered_lsn` and conditional WAL prefix truncate in `crates/storage/src/checkpoint.rs` only when R5 retain rules pass (`gc_grace`, replica/follower lag, snapshot pins)
 - [X] T033 [US2] Increment `db_wal_replay_duration_seconds`, `db_wal_recovery_duration_seconds`, `db_recovery_total`, `db_recovery_duration_seconds`, `db_recovery_records_total` during boot in `crates/storage/src/restore.rs` / `crates/node`
 
 **Checkpoint**: Restart restores durable content; memory-mode empty; torn tail skipped; one full drive degrades without killing the node or other drives; unknown major refuses start.
@@ -113,17 +115,17 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T034 [P] [US3] Add unit tests that premature compaction retains tombstones still required by source-domain replicas or uncaught-up followers in `crates/storage/tests/gc_grace.rs`
-- [ ] T035 [P] [US3] Add conformance SC-005 premature compaction retain + post-grace drop (test override e.g. `gc_grace` 1s) in `crates/conformance/tests/tombstones.rs`
-- [ ] T036 [P] [US3] Add unit/conformance that TTL expiry enqueues a delete/tombstone via job `TTL expiration` (never silent omit) and uses event-time if present else ingest/HLC in source domain in `crates/storage/tests/ttl.rs`
+- [X] T034 [P] [US3] Add unit tests that premature compaction retains tombstones still required by source-domain replicas or uncaught-up followers in `crates/storage/tests/gc_grace.rs`
+- [X] T035 [P] [US3] Add conformance SC-005 premature compaction retain + post-grace drop (test override e.g. `gc_grace` 1s) in `crates/conformance/tests/tombstones.rs`
+- [X] T036 [P] [US3] Add unit/conformance that TTL expiry enqueues a delete/tombstone via job `TTL expiration` (never silent omit) and uses event-time if present else ingest/HLC in source domain in `crates/storage/tests/ttl.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T037 [P] [US3] Implement `Tombstone` with `gc_grace_until = created + container/namespace/storage.gc_grace` (default **24h**) in `crates/storage/src/tombstone.rs` per [data-model.md](data-model.md) and [contracts/tombstones.md](contracts/tombstones.md)
-- [ ] T038 [US3] Gate tombstone drop in `crates/storage/src/compaction.rs`: MAY drop only if (1) every source `quorum_domain` replica has seen it or was rebuilt from a newer snapshot, (2) `now ≥ gc_grace_until`, (3) async followers caught up on source log or rebuilt-from-snapshot; consult `crates/placement` / `crates/replication` lag
-- [ ] T039 [US3] Implement `TTL expiration` job in `crates/storage/src/ttl.rs` emitting tombstones; clock = type event-time if present else ingest/HLC in source domain; MUST NOT use TTL event-time as PITR clock
-- [ ] T040 [P] [US3] Wire background jobs `flush`, `checkpoint`, `compaction`, `vacuum`, `GC`, `TTL expiration` on the blocking pool in `crates/storage` with `spacestorage_job_*` labels per [contracts/jobs.md](contracts/jobs.md) and [contracts/compaction.md](contracts/compaction.md); strategy defaults remain type catalog `003`
-- [ ] T041 [US3] Preserve null / missing field / tombstone as three distinct `003` value states through compaction paths in `crates/storage/src/compaction.rs` / `crates/types` (FR-012)
+- [X] T037 [P] [US3] Implement `Tombstone` with `gc_grace_until = created + container/namespace/storage.gc_grace` (default **24h**) in `crates/storage/src/tombstone.rs` per [data-model.md](data-model.md) and [contracts/tombstones.md](contracts/tombstones.md)
+- [X] T038 [US3] Gate tombstone drop in `crates/storage/src/compaction.rs`: MAY drop only if (1) every source `quorum_domain` replica has seen it or was rebuilt from a newer snapshot, (2) `now ≥ gc_grace_until`, (3) async followers caught up on source log or rebuilt-from-snapshot; consult `crates/placement` / `crates/replication` lag
+- [X] T039 [US3] Implement `TTL expiration` job in `crates/storage/src/ttl.rs` emitting tombstones; clock = type event-time if present else ingest/HLC in source domain; MUST NOT use TTL event-time as PITR clock
+- [X] T040 [P] [US3] Wire background jobs `flush`, `checkpoint`, `compaction`, `vacuum`, `GC`, `TTL expiration` on the blocking pool in `crates/storage` with `spacestorage_job_*` labels per [contracts/jobs.md](contracts/jobs.md) and [contracts/compaction.md](contracts/compaction.md); strategy defaults remain type catalog `003`
+- [X] T041 [US3] Preserve null / missing field / tombstone as three distinct `003` value states through compaction paths in `crates/storage/src/compaction.rs` / `crates/types` (FR-012)
 
 **Checkpoint**: Early compaction retains required tombstones; after grace + visibility, drop allowed; TTL creates tombstones via the named job.
 
@@ -139,7 +141,7 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 - [X] T042 [P] [US4] Add unit tests for HLC→LSN map (`lsn* = max { lsn | stamp ≤ T }`), refuse `pitr_unmappable` naming drive, and never past last durable ack in `crates/backup/src/pitr.rs` / `crates/backup/tests/pitr.rs`
 - [X] T043 [P] [US4] Add unit tests for `confirm_drop=false` → `RestoreDestinationHasContent` (dest intact) and confirm-drop/empty → fill in `crates/backup/tests/restore.rs`
-- [ ] T044 [P] [US4] Add conformance SC-006 multi-drive independent positions (no cluster freeze), PITR HLC map, and unmappable-drive refuse in `crates/conformance/tests/snapshot_pitr.rs`
+- [X] T044 [P] [US4] Add conformance SC-006 multi-drive independent positions (no cluster freeze), PITR HLC map, and unmappable-drive refuse in `crates/conformance/tests/snapshot_pitr.rs`
 - [X] T045 [P] [US4] Add conformance SC-007 missing key fails naming the reference, SC-008 overwrite refuse, SC-009 memory-mode content omitted from snapshot/restore empty in `crates/conformance/tests/snapshot_pitr.rs`
 
 ### Implementation for User Story 4
@@ -150,7 +152,7 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 - [X] T049 [US4] Implement `RestoreService` in `crates/backup/src/restore.rs`: same-cluster and new-cluster fill; refuse while dest has content unless `confirm_drop=true`; after drop/empty fill names; accept specified key ref; missing key fails naming reference; cross-namespace requires admin (`014`)
 - [X] T050 [US4] Encrypt snapshot files with same key references as source containers (`014`) in `crates/backup/src/snapshot.rs`; document unrestorable encrypted data when keys lost
 - [X] T051 [US4] Expose library APIs for `010` to store the **position map** (not a single LSN) from `crates/backup/src/lib.rs`; in first-binary profile, admin `snapshot`/`restore`/`snapshots` return `BackupSlice10Required` in `crates/admin-proto` / `crates/spacestorage` per [contracts/admin-cli.md](contracts/admin-cli.md); slice-10 wiring calls these APIs from `crates/migrate` without a second snapshot format
-- [ ] T052 [P] [US4] Add HTTP `/v1/storage`, `/v1/wal` (slice 2) and stub `/v1/snapshots` (slice 10) in `crates/admin-proto` / `crates/node` matching CLI verbs
+- [X] T052 [P] [US4] Add HTTP `/v1/storage`, `/v1/wal` (slice 2) and stub `/v1/snapshots` (slice 10) in `crates/admin-proto` / `crates/node` matching CLI verbs
 
 **Checkpoint**: Snapshot manifests carry independent per-drive positions; memory content absent; PITR HLC map fail-closed; restore overwrite refused without confirm-drop; missing key named. Operator backup jobs may wait for slice 10.
 
@@ -160,11 +162,11 @@ description: "Task list for durability, WAL, restore, deletes, TTL, compaction, 
 
 **Purpose**: Docs, profile flags, quickstart validation, release-profile slice markers
 
-- [ ] T053 [P] Document durability/restore operator procedures and quickstart walkthrough in `docs/` linking [quickstart.md](quickstart.md) (SC-001–SC-009 commands)
+- [X] T053 [P] Document durability/restore operator procedures and quickstart walkthrough in `docs/` linking [quickstart.md](quickstart.md) (SC-001–SC-009 commands)
 - [X] T054 Mark slice 2 (WAL+restore) required and slice 10 (operator snapshot jobs) deferred in `crates/release-profile` per research R14 / `016`
-- [ ] T055 [P] Ensure `storage.sync none` is rejected at startup for persistent/hybrid outside tests across `crates/config` + `crates/node` using [contracts/fixtures/invalid/sync-none.conf](contracts/fixtures/invalid/)
-- [ ] T056 Run [quickstart.md](quickstart.md) validation end-to-end via `crates/conformance/tests/{durability_ack,recovery_boot,disk_full,format_version,tombstones,snapshot_pitr}.rs` (`cargo test -p spacestorage-conformance`) and fix gaps
-- [ ] T057 [P] Confirm no `08` series renamed and job labels match [contracts/jobs.md](contracts/jobs.md) / [contracts/metrics.md](contracts/metrics.md) in metrics registration code
+- [X] T055 [P] Ensure `storage.sync none` is rejected at startup for persistent/hybrid outside tests across `crates/config` + `crates/node` using [contracts/fixtures/invalid/sync-none.conf](contracts/fixtures/invalid/)
+- [X] T056 Run [quickstart.md](quickstart.md) validation end-to-end via `crates/conformance/tests/{durability_ack,recovery_boot,disk_full,format_version,tombstones,snapshot_pitr}.rs` (`cargo test -p spacestorage-conformance`) and fix gaps
+- [X] T057 [P] Confirm no `08` series renamed and job labels match [contracts/jobs.md](contracts/jobs.md) / [contracts/metrics.md](contracts/metrics.md) in metrics registration code
 
 ---
 

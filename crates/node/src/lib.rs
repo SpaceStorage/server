@@ -69,6 +69,8 @@ pub struct Node {
     pub admin_ui: Arc<std::sync::RwLock<spacestorage_admin_ui::AdminUiState>>,
     /// `014` SessionToken store for admin/UI bearer sessions.
     pub sessions: Arc<std::sync::RwLock<spacestorage_authz::SessionTokenStore>>,
+    /// In-process audit log for `audit_list` (018); cluster-log apply deferred.
+    pub audit: Arc<spacestorage_authz::SharedAuditLog>,
     /// Kafka / syslog ingest (009 slice 11).
     pub ingest: Arc<spacestorage_ingest::IngestRuntime>,
     /// Later-not-first product surfaces (L0, legal-hold, CDC, compositions, billing).
@@ -157,6 +159,7 @@ impl Node {
         let sessions = Arc::new(std::sync::RwLock::new(
             spacestorage_authz::SessionTokenStore::new(),
         ));
+        let audit = Arc::new(spacestorage_authz::SharedAuditLog::new());
         let sessions_for_ui = Arc::clone(&sessions);
         let admin_ui = {
             let st = if slice11 {
@@ -218,6 +221,7 @@ impl Node {
             jobs,
             admin_ui,
             sessions,
+            audit,
             ingest,
             later: LaterSurfaces::new(),
             drain_started: CancellationToken::new(),

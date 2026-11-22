@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-11-22T18:47:00Z",
+  "limit": 50,
+  "next_cursor": "cursor-page-2",
+  "namespaces": [
+    {
+      "name": "acme",
+      "container_count": 12,
+      "container_count_complete": true,
+      "quota": { "bytes": 1073741824 },
+      "health": "ok"
+    },
+    {
+      "name": "other",
+      "container_count": 0,
+      "container_count_complete": true,
+      "quota": null,
+      "health": "unknown"
+    }
+  ]
+}

@@ -1,3 +1,10 @@
+## 2026-11-22 — specs/018-admin-ui-modernization
+
+- Modern admin shell on `/ui` (Overview, Namespaces, Nodes, Monitoring, Jobs, Audit) with permanent redirects from `/ui/cluster` and `/ui/console` into hosted `009` map/browse views.
+- Product goal fixed as Cerebro/Kibana-class operator capability over SpaceStorage entities (namespace, container, shard, replica, job, principal) — not an Elasticsearch UI clone.
+- Session moves to an `HttpOnly; Secure; SameSite=Strict` cookie with Origin/CSRF on cookie-authenticated mutations; `audit_list` and drain/undrain admin ops; server-side tenant isolation for namespace-scoped principals.
+- Converge clean after Phases 11–14; UI conformance suites under `crates/conformance/tests/ui_*.rs`.
+
 ## 2026-10-28 — specs/015-compatibility-and-limits
 
 - Stock-client wire conformance for Cassandra native, Elasticsearch HTTP, ClickHouse native and HTTP, S3 SigV4, and WebDAV, beside the existing dispatch checks.

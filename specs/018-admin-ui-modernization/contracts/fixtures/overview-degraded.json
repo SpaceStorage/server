@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-11-22T18:47:00Z",
+  "source": "controller",
+  "readiness": { "status": "ok", "value": "not_ready" },
+  "members": {
+    "status": "ok",
+    "ready": 2,
+    "not_ready": 1,
+    "pending": 1,
+    "unknown": 0,
+    "degraded": [
+      {
+        "node_id": "018f2c6e-7b1a-7c3d-8e4f-1a2b3c4d5e6f",
+        "node_name": "n3",
+        "readiness": "not_ready"
+      }
+    ],
+    "degraded_omitted": 0
+  },
+  "controller": { "status": "ok", "available": true, "raft": "leader" },
+  "counts": {
+    "status": "ok",
+    "namespaces": 50,
+    "containers": 500,
+    "container_count_complete": true
+  },
+  "replicas": {
+    "status": "ok",
+    "healthy": 9999,
+    "degraded": 0,
+    "lagging": 1,
+    "named": [
+      {
+        "namespace": "acme",
+        "container": "orders",
+        "replica": "r2",
+        "lag_ms": 4200
+      }
+    ],
+    "named_omitted": 0
+  },
+  "jobs": { "status": "ok", "active": 1, "failed": 0, "recently_completed": 0 }
+}

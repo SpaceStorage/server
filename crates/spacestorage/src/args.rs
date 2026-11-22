@@ -195,6 +195,33 @@ pub enum Command {
         #[arg(long, default_value = "http://127.0.0.1:8080")]
         endpoint: String,
     },
+    /// Mint a one-time join token (011).
+    JoinToken {
+        #[command(subcommand)]
+        action: JoinTokenAction,
+    },
+    /// Show membership roster (011).
+    Membership {
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+        #[arg(long, default_value = "json")]
+        output: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum JoinTokenAction {
+    Mint {
+        #[arg(long)]
+        name: String,
+        /// TTL in seconds (default 43200 = 12h). Range 3600–259200.
+        #[arg(long)]
+        ttl_secs: Option<u64>,
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        endpoint: String,
+        #[arg(long, default_value = "json")]
+        output: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
