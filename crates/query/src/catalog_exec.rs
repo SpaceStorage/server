@@ -7,7 +7,7 @@ use crate::request::CopyFormat;
 use crate::request::{AggFn, JoinKind};
 use serde_json::{Map, Value};
 use spacestorage_types::{
-    ContainerCatalog, ContainerSchema, Field, L3Model, StorageModeChoice, ValueDomain,
+    ContainerCatalog, ContainerSchema, Field, L3Model, StorageModeChoice, TypeDescriptor, ValueDomain,
 };
 use std::sync::{Arc, RwLock};
 
@@ -352,7 +352,10 @@ fn insert_row(
         .map_err(|e| ExecError::Msg(e.to_string()))?;
     let id = c.id;
     // Document Store / K/V: canonical blob path (key, value) — same as Redis G11.
-    if matches!(c.model, L3Model::DocumentStore | L3Model::KvStore) {
+    if matches!(
+        c.model,
+        L3Model::DocumentStore | L3Model::KvStore | L3Model::ObjectCollection
+    ) {
         let key = values
             .first()
             .cloned()
@@ -429,7 +432,10 @@ fn select_rows(
             .describe(namespace, &name)
             .map_err(|e| ExecError::Msg(e.to_string()))?;
         let id = c.id;
-        if matches!(c.model, L3Model::DocumentStore | L3Model::KvStore) {
+        if matches!(
+        c.model,
+        L3Model::DocumentStore | L3Model::KvStore | L3Model::ObjectCollection
+    ) {
             let where_eq = parse_simple_where(sql);
             let keys = cat.keys(id).map_err(|e| ExecError::Msg(e.to_string()))?;
             let mut rows = Vec::new();
@@ -711,11 +717,12 @@ pub fn ensure_container(
         Err(e) => return Err(ExecError::Msg(e.to_string())),
     }
     let (l3, schema) = match model {
-        "kv" | "kv_store" | "KvStore" => (L3Model::KvStore, None),
+        "kv" | "kv_store" | "kv_collection" | "KvStore" => (L3Model::KvStore, None),
         "doc" | "document" | "DocumentStore" | "document_store" | "log_stream" => {
             (L3Model::DocumentStore, None)
         }
-        _ => (
+        "object_collection" | "object" | "ObjectCollection" => (L3Model::ObjectCollection, None),
+        "relational_table" | "table" => (
             L3Model::RelationalTable,
             Some(ContainerSchema {
                 fields: vec![
@@ -732,7 +739,14 @@ pub fn ensure_container(
                 ],
             }),
         ),
+        other => return Err(ExecError::Msg(format!("unknown_type:{other}"))),
     };
+    if l3 == L3Model::ObjectCollection && cat.types.resolve("object_collection").is_none() {
+        let mut descriptor =
+            TypeDescriptor::l3_model("object_collection", "Object Collection", false);
+        descriptor.introduced_in = cat.product_version();
+        cat.types.register_descriptor(descriptor);
+    }
     cat.create(
         namespace,
         name,

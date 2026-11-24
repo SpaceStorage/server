@@ -62,6 +62,9 @@ pub fn operations_for_type(ty: &str) -> &'static [&'static str] {
         ],
         "KvStore" | "kv_store" | "K/V Store" => &["get", "set", "del", "exists", "scan"],
         "DocumentStore" | "document_store" => &["put", "get", "delete", "search"],
+        "ObjectCollection" | "object_collection" | "Object Collection" => &[
+            "put", "get", "delete", "head", "scan", "copy", "list_prefix",
+        ],
         _ => &[],
     }
 }

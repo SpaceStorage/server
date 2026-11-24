@@ -43,6 +43,8 @@ pub enum L3Model {
     KvStore,
     RelationalTable,
     DocumentStore,
+    /// Complete-product byte-object bucket (`019`). Not in the first-binary creatable set.
+    ObjectCollection,
 }
 
 impl L3Model {
@@ -51,6 +53,7 @@ impl L3Model {
             Self::KvStore => "kv_store",
             Self::RelationalTable => "relational_table",
             Self::DocumentStore => "document_store",
+            Self::ObjectCollection => "object_collection",
         }
     }
 
@@ -59,6 +62,7 @@ impl L3Model {
             Self::KvStore => "K/V Store",
             Self::RelationalTable => "Relational Table",
             Self::DocumentStore => "Document Store",
+            Self::ObjectCollection => "Object Collection",
         }
     }
 
@@ -77,9 +81,10 @@ impl L3Model {
 
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            "kv_store" | "K/V Store" => Some(Self::KvStore),
+            "kv_store" | "K/V Store" | "kv_collection" => Some(Self::KvStore),
             "relational_table" | "Relational Table" => Some(Self::RelationalTable),
             "document_store" | "Document Store" => Some(Self::DocumentStore),
+            "object_collection" | "Object Collection" => Some(Self::ObjectCollection),
             _ => None,
         }
     }

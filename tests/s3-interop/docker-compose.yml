@@ -1,0 +1,73 @@
+# Suite B clients. The S3 server is external (FR-051): these images do not build spacestoraged.
+x-s3: &s3
+  S3_ENDPOINT_DOCKER: ${S3_ENDPOINT_DOCKER:-http://host.docker.internal:19001}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-demo}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-demo}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_BUCKET: ${S3_BUCKET:-suiteb}
+  S3_VHOST_SUFFIX: ${S3_VHOST_SUFFIX:-}
+  AWS_EC2_METADATA_DISABLED: "true"
+  AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-demo}
+  AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-demo}
+  AWS_DEFAULT_REGION: ${S3_REGION:-us-east-1}
+  AWS_PAGER: ""
+
+x-hosts: &hosts
+  - "host.docker.internal:host-gateway"
+  - "suiteb.s3.local:host-gateway"
+  - "s3.local:host-gateway"
+
+services:
+  rclone:
+    build: ./clients/rclone
+    environment: *s3
+    extra_hosts: *hosts
+
+  awscli:
+    build: ./clients/awscli
+    environment: *s3
+    extra_hosts: *hosts
+
+  boto3:
+    build: ./clients/boto3
+    environment: *s3
+    extra_hosts: *hosts
+
+  s3fs:
+    build: ./clients/s3fs
+    privileged: true
+    devices:
+      - "/dev/fuse"
+    cap_add:
+      - SYS_ADMIN
+    environment: *s3
+    extra_hosts: *hosts
+
+  clickhouse-backup:
+    build: ./clients/clickhouse-backup
+    environment: *s3
+    extra_hosts: *hosts
+
+  elasticsearch:
+    build: ./clients/elasticsearch
+    environment:
+      <<: *s3
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    extra_hosts: *hosts
+
+  pgbackrest:
+    build: ./clients/pgbackrest
+    environment: *s3
+    extra_hosts: *hosts
+
+  restic:
+    build: ./clients/restic
+    environment: *s3
+    extra_hosts: *hosts
+
+  aws-sdk-go-v2:
+    build: ./clients/aws-sdk-go-v2
+    environment: *s3
+    extra_hosts: *hosts

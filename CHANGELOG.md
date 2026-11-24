@@ -1,3 +1,10 @@
+## 2026-11-23 — specs/019-s3-protocol
+
+- Complete-product S3 dialect on a dedicated entrypoint: SigV4 (header, presigned, streaming payload modes), namespace-bound credentials, path-style and virtual-hosted addressing, bucket/object CRUD, listing, CopyObject, DeleteObjects, and multipart with a durable upload registry.
+- Streaming puts/gets and UploadPart in chunk windows without requiring a full-object buffer; fail-closed quorum/timeout options and durable `exec` acknowledgements on supported writes and deletes.
+- Suite A `dialect_s3_*` conformance against a live server; Suite B Docker harness for rclone, AWS CLI, boto3, s3fs, clickhouse-backup, Elasticsearch snapshots, pgBackRest, Restic, plus aws-sdk-go-v2 smoke, with SHA256 verify on writes.
+- Three-status compatibility matrix (`docs/s3-compatibility-matrix.{md,json}`) regenerated from the capability table and harness results. FirstBinary still forbids S3. Converge clean through Phase 19.
+
 ## 2026-11-22 — specs/018-admin-ui-modernization
 
 - Modern admin shell on `/ui` (Overview, Namespaces, Nodes, Monitoring, Jobs, Audit) with permanent redirects from `/ui/cluster` and `/ui/console` into hosted `009` map/browse views.

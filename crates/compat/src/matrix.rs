@@ -246,12 +246,38 @@ fn classify_s3(profile: DialectProfile, v: &str) -> ClassifyOutcome {
         return ClassifyOutcome::MustNot(generic_must_not(ProtocolId::S3, v));
     }
     match v {
-        "LISTBUCKETS" | "CREATEBUCKET" | "PUTOBJECT" | "GETOBJECT" | "DELETEOBJECT"
-        | "CREATEMULTIPARTUPLOAD" | "UPLOADPART" | "COMPLETEMULTIPARTUPLOAD"
-        | "LISTOBJECTSV2" | "HEADOBJECT" => ClassifyOutcome::Must,
-        "VERSIONING" | "OBJECTLOCK" | "REPLICATION" | "SELECT" | "ACL" => {
-            ClassifyOutcome::MustNot(generic_must_not(ProtocolId::S3, v))
-        }
+        "LISTBUCKETS"
+        | "HEADBUCKET"
+        | "CREATEBUCKET"
+        | "DELETEBUCKET"
+        | "GETBUCKETLOCATION"
+        | "PUTOBJECT"
+        | "GETOBJECT"
+        | "HEADOBJECT"
+        | "DELETEOBJECT"
+        | "DELETEOBJECTS"
+        | "COPYOBJECT"
+        | "LISTOBJECTSV2"
+        | "LISTOBJECTS"
+        | "CREATEMULTIPARTUPLOAD"
+        | "UPLOADPART"
+        | "COMPLETEMULTIPARTUPLOAD"
+        | "ABORTMULTIPARTUPLOAD"
+        | "LISTPARTS"
+        | "LISTMULTIPARTUPLOADS"
+        | "PRESIGNED" => ClassifyOutcome::Must,
+        "VERSIONING"
+        | "OBJECTLOCK"
+        | "REPLICATION"
+        | "SELECT"
+        | "ACL"
+        | "LIFECYCLE"
+        | "CORS"
+        | "TAGGING"
+        | "SSEKMS"
+        | "SIGV2"
+        | "UPLOADPARTCOPY"
+        | "GETOBJECTATTRIBUTES" => ClassifyOutcome::MustNot(generic_must_not(ProtocolId::S3, v)),
         _ => ClassifyOutcome::MustNot(generic_must_not(ProtocolId::S3, v)),
     }
 }
@@ -439,5 +465,64 @@ mod tests {
             ),
             VerbClass::MustNot
         );
+    }
+
+    #[test]
+    fn hc_s3_supported_must_verbs() {
+        let p = DialectProfile::HandlersComplete;
+        for v in [
+            "HEADBUCKET",
+            "DELETEBUCKET",
+            "DELETEOBJECTS",
+            "COPYOBJECT",
+            "LISTOBJECTS",
+            "LISTPARTS",
+            "ABORTMULTIPARTUPLOAD",
+            "LISTMULTIPARTUPLOADS",
+            "GETBUCKETLOCATION",
+            "PRESIGNED",
+        ] {
+            assert_eq!(
+                classify_outcome(p, ProtocolId::S3, v),
+                ClassifyOutcome::Must,
+                "{v}"
+            );
+        }
+    }
+
+    #[test]
+    fn fb_s3_handler_absent_must_not() {
+        let p = DialectProfile::FirstBinary;
+        assert!(matches!(
+            classify_outcome(p, ProtocolId::S3, "PUTOBJECT"),
+            ClassifyOutcome::MustNot(_)
+        ));
+    }
+
+    #[test]
+    fn hc_s3_unsupported_by_design_must_not() {
+        let p = DialectProfile::HandlersComplete;
+        for v in [
+            "VERSIONING",
+            "OBJECTLOCK",
+            "REPLICATION",
+            "SELECT",
+            "ACL",
+            "LIFECYCLE",
+            "CORS",
+            "TAGGING",
+            "SSEKMS",
+            "SIGV2",
+            "UPLOADPARTCOPY",
+            "GETOBJECTATTRIBUTES",
+        ] {
+            assert!(
+                matches!(
+                    classify_outcome(p, ProtocolId::S3, v),
+                    ClassifyOutcome::MustNot(_)
+                ),
+                "{v}"
+            );
+        }
     }
 }

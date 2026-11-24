@@ -58,6 +58,10 @@ impl TypeCatalog {
                 t.types.insert((*name).into(), d);
             }
         }
+        t.types.insert(
+            "object_collection".into(),
+            TypeDescriptor::l3_model("object_collection", "Object Collection", false),
+        );
         t
     }
 

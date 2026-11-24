@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use spacestorage_compat::LimitServices;
+use spacestorage_config::model::S3ProtocolDecl;
 use spacestorage_handler_s3::S3Handler;
 use spacestorage_types::ContainerCatalog;
 use tokio_util::sync::CancellationToken;
@@ -32,6 +33,25 @@ impl S3PortHandler {
         tenancy: Arc<spacestorage_tenancy::Tenancy>,
     ) -> Self {
         speak(S3Handler::with_limits(catalog, limit_services).with_tenancy(tenancy))
+    }
+
+    pub fn with_tenancy_and_protocol(
+        catalog: Arc<RwLock<ContainerCatalog>>,
+        limit_services: LimitServices,
+        tenancy: Arc<spacestorage_tenancy::Tenancy>,
+        proto: S3ProtocolDecl,
+    ) -> Self {
+        speak(
+            S3Handler::with_limits(catalog, limit_services)
+                .with_tenancy(tenancy)
+                .with_protocol_config(
+                    proto.region,
+                    proto.virtual_host_suffix,
+                    proto.multipart_idle,
+                    proto.multipart_min_part,
+                    proto.multipart_max_parts,
+                ),
+        )
     }
 }
 

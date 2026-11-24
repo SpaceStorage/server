@@ -1,6 +1,7 @@
 //! AuthZ — principals, SCRAM, permissions, sessions, bootstrap, audit (014).
 //! Master-key / envelope live in `spacestorage-crypto`, not here.
 
+pub mod access_key;
 pub mod affordances;
 pub mod audit;
 pub mod bootstrap;
@@ -10,6 +11,7 @@ pub mod principal;
 pub mod scram;
 pub mod session;
 
+pub use access_key::{AccessKeyRecord, AccessKeyStore};
 pub use error::AuthzError;
 pub use permission::{role_put_custom, Authorizer, CustomRole, Resource, Verb};
 pub use principal::{LoginName, PrincipalId, PrincipalRecord};

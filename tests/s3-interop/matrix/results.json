@@ -1,0 +1,58 @@
+{
+  "rows": [
+    {
+      "id": "rclone",
+      "pass": true,
+      "exit": 0,
+      "detail": " Container s3-interop-rclone-run-420d7661722b Created  2026/11/24 06:41:51 Unsolicited response received on idle HTTP channel starting with \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><Error><Code>NoSuchKey</Code><Message>rclone/fixture.bin</Message><Resource>/suiteb/rclone/fixture.bin</Resource><RequestId>0000000000000002</RequestId></Error>\"; err=<nil> 2026/11/24 06:41:51 Unsolicited response received on idle HTTP channel starting with \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><Error><Code>NoSuchKey</Code><Message>rclone</Message><Resource>/suiteb/rclone</Resource><RequestId>0000000000000006</RequestId></Error>\"; err=<nil>        15 fixture.bin rclone sha256 ok 574cc004a25f5a932ef1f54e5a5ba5ba6d32ed61f6c117e2f24247d25cef83a3"
+    },
+    {
+      "id": "awscli",
+      "pass": true,
+      "exit": 0,
+      "detail": "Completed 4.8 MiB/5.0 MiB (39.1 MiB/s) with 1 file(s) remaining   Completed 4.8 MiB/5.0 MiB (38.6 MiB/s) with 1 file(s) remaining   Completed 5.0 MiB/5.0 MiB (39.6 MiB/s) with 1 file(s) remaining   download: s3://suiteb/aws/big.bin to tmp/aws-big-out.bin          awscli multipart sha256 ok 5242912"
+    },
+    {
+      "id": "boto3",
+      "pass": true,
+      "exit": 0,
+      "detail": " Container s3-interop-boto3-run-1bc8718638c7 Creating   Container s3-interop-boto3-run-1bc8718638c7 Created  unsupported compat_must_not boto3 vhost ok boto3 sha256 ok ca49857a4a7a5da4bb3feecca6125ce0e4de4b839ca51d49a4b001d1efdb0794"
+    },
+    {
+      "id": "s3fs",
+      "pass": true,
+      "exit": 0,
+      "detail": "#10 DONE 0.0s  Image s3-interop-s3fs Built   Container s3-interop-s3fs-run-887e558bc766 Creating   Container s3-interop-s3fs-run-887e558bc766 Created  s3fs sha256 ok 6f27d2c5aa1f59242f0cc01be2d1fd2577544452428e262af5ee10049a242cb5"
+    },
+    {
+      "id": "clickhouse-backup",
+      "pass": true,
+      "exit": 0,
+      "detail": "2026-11-24 06:42:20.407 ??? log/log.go:245 > 2026/11/24 06:42:20 Unsolicited response received on idle HTTP channel starting with \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><Error><Code>NoSuchKey</Code><Message>clickhouse/tiny/access.tar</Message><Resource>/suiteb/clickhouse/tiny/access.tar</Resource><RequestId>0000000000000046</RequestId></Error>\"; err=<nil> 2026-11-24 06:42:20.408 ??? log/log.go:245 > 2026/11/24 06:42:20 Unsolicited response received on idle HTTP channel starting with \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?><Error><Code>NoSuchKey</Code><Message>clickhouse/tiny/configs.tar</Message><Resource>/suiteb/clickhouse/tiny/configs.tar</Resource><RequestId>0000000000000047</RequestId></Error>\"; err=<nil> 2026-11-24 06:42:20.408 INF pkg/backup/download.go:280 > done backup=tiny download_size=606B duration=35ms object_disk_size=0B operation=download version=2.6.5 2026-11-24 06:42:20.409 INF pkg/clickhouse/clickhouse.go:327 > clickhouse connection closed clickhouse-backup sha256 ok 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "id": "elasticsearch",
+      "pass": true,
+      "exit": 0,
+      "detail": "\"at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1144) [?:?]\", \"at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:642) [?:?]\", \"at java.lang.Thread.run(Thread.java:1570) [?:?]\"] } {\"type\": \"server\", \"timestamp\": \"2026-11-24T06:42:34,343Z\", \"level\": \"INFO\", \"component\": \"o.e.i.g.DatabaseReaderLazyLoader\", \"cluster.name\": \"docker-cluster\", \"node.name\": \"8e08a96f7da9\", \"message\": \"evicted [0] entries from cache after reloading database [/tmp/elasticsearch-7513926059611027270/geoip-databases/_j9Zr0V6QwuZ7Qgd9dT16Q/GeoLite2-ASN.mmdb]\", \"cluster.uuid\": \"CBr3cDvATFSPMz7lIQ_aVQ\", \"node.id\": \"_j9Zr0V6QwuZ7Qgd9dT16Q\"  } {\"type\": \"server\", \"timestamp\": \"2026-11-24T06:42:34,345Z\", \"level\": \"INFO\", \"component\": \"o.e.n.Node\", \"cluster.name\": \"docker-cluster\", \"node.name\": \"8e08a96f7da9\", \"message\": \"closed\", \"cluster.uuid\": \"CBr3cDvATFSPMz7lIQ_aVQ\", \"node.id\": \"_j9Zr0V6QwuZ7Qgd9dT16Q\"  }"
+    },
+    {
+      "id": "pgbackrest",
+      "pass": true,
+      "exit": 0,
+      "detail": "2026-11-24 06:42:41.532 P00   INFO: backup command end: completed successfully (2935ms) 2026-11-24 06:42:41.532 P00   INFO: expire command begin 2.60.1: --exec-id=91-032d0fee --log-level-console=info --repo1-path=/pgbackrest/1795502556-1 --repo1-retention-full=1 --repo1-s3-bucket=suiteb --repo1-s3-endpoint=127.0.0.1 --repo1-s3-key=<redacted> --repo1-s3-key-secret=<redacted> --repo1-s3-region=us-east-1 --repo1-s3-uri-style=path --repo1-storage-port=9443 --no-repo1-storage-verify-tls --repo1-type=s3 --stanza=demo 2026-11-24 06:42:41.548 P00   INFO: repo1: 16-1 remove archive, start = 000000010000000000000001, stop = 000000010000000000000001 2026-11-24 06:42:41.549 P00   INFO: expire command end: completed successfully (17ms) pgbackrest sha256 ok pgbackrest/1795502556-1/archive/demo/16-1/0000000100000000/000000010000000000000002-77cb9c21ccce0e52c4c98583b2734a766543da69.gz cf46b00aac57d6a0e41a82dad1cf95182fad38ff6073280430a1c216bb1f48db 16521"
+    },
+    {
+      "id": "restic",
+      "pass": true,
+      "exit": 0,
+      "detail": " no errors were found restoring <Snapshot 4799d3ec of [/tmp/fixture.txt] at 2026-11-24 06:42:46.793313797 +0000 UTC by root@cf009ed0b4f9> to /restore Summary: Restored 2 files/dirs (15 B) in 0:00 restic sha256 ok 9020d6fd3154901b12b98b82134f5d1ba6cbe915a56754f85dc26c687626d2d5"
+    },
+    {
+      "id": "aws-sdk-go-v2",
+      "pass": true,
+      "exit": 0,
+      "detail": " Image s3-interop-aws-sdk-go-v2 Built   Container s3-interop-aws-sdk-go-v2-run-b82390e292f6 Creating   Container s3-interop-aws-sdk-go-v2-run-b82390e292f6 Created  create-bucket: operation error S3: CreateBucket, https response error StatusCode: 409, RequestID: 00000000000004c8, HostID: f09556aac5408c86cd1c09500b8e0499b9e219b0bbd80153304bac2fea0d7f9f, BucketAlreadyOwnedByYou: suiteb aws-sdk-go-v2 sha256 ok"
+    }
+  ]
+}

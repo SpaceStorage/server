@@ -9,6 +9,13 @@ publish = false
 
 [features]
 default = ["migration-backup"]
+# Suite A dialect tests are compiled into the default conformance crate (zero
+# mandatory `#[ignore]`). This feature exists so
+# `cargo test -p spacestorage-conformance --features handlers-complete --test dialect_s3_ops`
+# selects the same binaries. T017: `aws-sdk-s3` is not a dev-dependency; presign
+# coverage is live HTTP in `dialect_s3_sigv4`, not an SDK substitute (R11).
+handlers-complete = []
+complete-product = ["handlers-complete"]
 tenancy-quotas = [
     "spacestorage-node/tenancy-quotas",
     "spacestorage-query/tenancy-quotas",
@@ -59,7 +66,7 @@ spacestorage-handler-redis = { path = "../handler-redis" }
 spacestorage-handler-cassandra = { path = "../handler-cassandra" }
 spacestorage-handler-elasticsearch = { path = "../handler-elasticsearch" }
 spacestorage-handler-clickhouse = { path = "../handler-clickhouse" }
-spacestorage-handler-s3 = { path = "../handler-s3" }
+spacestorage-handler-s3 = { path = "../handler-s3", features = ["suite-a-demo-auth"] }
 spacestorage-handler-webdav = { path = "../handler-webdav" }
 spacestorage-protocol-core = { path = "../protocol-core" }
 spacestorage-observability = { path = "../observability" }

@@ -149,10 +149,10 @@ fn s3_must_smoke_and_versioning_refuse() {
     assert!(matches!(s3(&mut s, "CREATEBUCKET", &["b"]), S3Reply::Ok));
     assert!(matches!(
         s3(&mut s, "PUTOBJECT", &["b", "k", "v"]),
-        S3Reply::Ok
+        S3Reply::OkHeaders(_)
     ));
     match s3(&mut s, "GETOBJECT", &["b", "k"]) {
-        S3Reply::Body(b) => assert_eq!(b, b"v"),
+        S3Reply::Body(b) => assert_eq!(b.bytes, b"v"),
         other => panic!("{other:?}"),
     }
     assert!(matches!(

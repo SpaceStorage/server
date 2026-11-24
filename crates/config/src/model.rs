@@ -37,6 +37,9 @@ pub struct NodeConfig {
     /// Bootstrap namespace declarations (`007`); quota blocks are slice-7 gated.
     #[serde(default)]
     pub namespaces: Vec<NamespaceDecl>,
+    /// `protocols { s3 { … } }` knobs (019).
+    #[serde(default)]
+    pub protocols: ProtocolsDecl,
 }
 
 impl NodeConfig {
@@ -160,6 +163,42 @@ impl Default for QueryDecl {
             max_memory: None,
             spill: None,
             default_concurrency: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProtocolsDecl {
+    #[serde(default)]
+    pub s3: S3ProtocolDecl,
+}
+
+impl Default for ProtocolsDecl {
+    fn default() -> Self {
+        Self {
+            s3: S3ProtocolDecl::default(),
+        }
+    }
+}
+
+/// `protocols.s3` directives (019 contracts/config-directives.md).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct S3ProtocolDecl {
+    pub virtual_host_suffix: Option<String>,
+    pub region: String,
+    pub multipart_idle: Duration,
+    pub multipart_min_part: u64,
+    pub multipart_max_parts: u32,
+}
+
+impl Default for S3ProtocolDecl {
+    fn default() -> Self {
+        Self {
+            virtual_host_suffix: None,
+            region: "us-east-1".into(),
+            multipart_idle: Duration::from_secs(24 * 3600),
+            multipart_min_part: 5 * 1024 * 1024,
+            multipart_max_parts: 10_000,
         }
     }
 }

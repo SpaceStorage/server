@@ -838,6 +838,7 @@ mod tests {
             jobs: crate::model::JobsDecl::default(),
             kafka_ingests: Vec::new(),
             namespaces: Vec::new(),
+            protocols: crate::model::ProtocolsDecl::default(),
         }
     }
 

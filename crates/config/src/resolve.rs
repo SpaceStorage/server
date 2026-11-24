@@ -2,8 +2,8 @@ use crate::ast::{Arg, Document, Item};
 use crate::error::{ConfigError, ErrorCode};
 use crate::model::{
     ClusterDecl, DriveDecl, EntrypointDecl, JobsDecl, KafkaIngestDecl, KeysDecl, LogKafkaDecl,
-    LogSyslogDecl, MetricsDecl, NamespaceDecl, NodeConfig, QueryDecl, QueryDefaults, StorageDecl,
-    SyslogIngestDecl, TlsDecl, Transport,
+    LogSyslogDecl, MetricsDecl, NamespaceDecl, NodeConfig, ProtocolsDecl, QueryDecl, QueryDefaults,
+    S3ProtocolDecl, StorageDecl, SyslogIngestDecl, TlsDecl, Transport,
 };
 use spacestorage_compat::{EffectiveLimits, Limits};
 use std::collections::BTreeMap;
@@ -40,6 +40,7 @@ pub fn resolve(
         jobs: JobsDecl::default(),
         kafka_ingests: Vec::new(),
         namespaces: Vec::new(),
+        protocols: ProtocolsDecl::default(),
     };
 
     for item in &doc.items {
@@ -554,6 +555,47 @@ pub fn resolve(
                                 ErrorCode::Slice7Required,
                                 "controller_exclusive_data on requires controlplane-ops (slice 7)",
                             ));
+                        }
+                    }
+                }
+                "protocols" => {
+                    for it in &b.items {
+                        if let Item::Block(pb) = it {
+                            if pb.name == "s3" {
+                                let mut s3 = S3ProtocolDecl::default();
+                                for pit in &pb.items {
+                                    if let Item::Directive(d) = pit {
+                                        match d.name.as_str() {
+                                            "virtual_host_suffix" => {
+                                                s3.virtual_host_suffix =
+                                                    d.args.first().map(|a| a.as_str());
+                                            }
+                                            "region" => {
+                                                if let Some(a) = d.args.first() {
+                                                    s3.region = a.as_str();
+                                                }
+                                            }
+                                            "multipart_idle" => {
+                                                if let Some(Arg::DurationMs(ms)) = d.args.first() {
+                                                    s3.multipart_idle = Duration::from_millis(*ms);
+                                                }
+                                            }
+                                            "multipart_min_part" => {
+                                                if let Some(Arg::Size(n)) = d.args.first() {
+                                                    s3.multipart_min_part = *n;
+                                                }
+                                            }
+                                            "multipart_max_parts" => {
+                                                if let Some(Arg::Number(n)) = d.args.first() {
+                                                    s3.multipart_max_parts = *n as u32;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                cfg.protocols.s3 = s3;
+                            }
                         }
                     }
                 }

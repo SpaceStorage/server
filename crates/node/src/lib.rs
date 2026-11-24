@@ -319,10 +319,12 @@ impl Node {
                 ),
             ))
             .unwrap();
-            reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_tenancy(
+            let s3_proto = node.config.load().protocols.s3.clone();
+            reg.register(Arc::new(crate::handler::s3::S3PortHandler::with_tenancy_and_protocol(
                 Arc::clone(&node.catalog),
                 limit_services.clone(),
                 Arc::clone(&node.tenancy),
+                s3_proto,
             )))
             .unwrap();
             reg.register(Arc::new(

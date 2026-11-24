@@ -7,8 +7,14 @@ rust-version.workspace = true
 description = "S3 SigV4 handler (002 HandlersComplete / slice 6)"
 publish = false
 
+[features]
+default = []
+# Suite A conformance uses `x-spacestorage-demo-auth` without SigV4 (research R4).
+suite-a-demo-auth = []
+
 [dependencies]
 spacestorage-types = { path = "../types" }
+spacestorage-authz = { path = "../authz" }
 spacestorage-compat = { path = "../compat" }
 spacestorage-protocol-core = { path = "../protocol-core" }
 spacestorage-query = { path = "../query" }
@@ -22,6 +28,9 @@ hex = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
+quick-xml = { version = "0.37", features = ["serialize"] }
+md-5 = "0.10"
+crc32fast = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }

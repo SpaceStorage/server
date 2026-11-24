@@ -29,6 +29,8 @@ pub enum SigV4Error {
     MissingPayloadHash,
     BadSignature,
     UnknownAccessKey,
+    Expired,
+    Skewed,
 }
 
 /// Parsed HTTP fields needed to verify SigV4.
@@ -125,10 +127,30 @@ fn canonical_uri(path: &str) -> String {
         return "/".into();
     }
     path.split('/')
-        .map(|seg| uri_encode(seg, true))
+        .map(|seg| uri_encode(&percent_decode(seg), true))
         .collect::<Vec<_>>()
         .join("/")
         .prepend_if_not_empty()
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 trait PrependSlash {
@@ -156,7 +178,10 @@ fn canonical_query(query: Option<&str>) -> String {
         .split('&')
         .filter_map(|pair| {
             let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-            Some((uri_encode(k, true), uri_encode(v, true)))
+            Some((
+                uri_encode(&percent_decode(k), true),
+                uri_encode(&percent_decode(v), true),
+            ))
         })
         .collect();
     pairs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -257,15 +282,34 @@ pub fn secret_for_access_key(access_key: &str) -> Option<&'static str> {
     }
 }
 
-pub fn verify_sigv4(req: &SigV4Request<'_>, authorization: &str, amz_date: &str) -> Result<(), SigV4Error> {
+pub fn verify_sigv4_with_secret(
+    req: &SigV4Request<'_>,
+    authorization: &str,
+    amz_date: &str,
+    secret: &str,
+) -> Result<(), SigV4Error> {
     let auth = parse_authorization(authorization)?;
-    let secret = secret_for_access_key(&auth.access_key).ok_or(SigV4Error::UnknownAccessKey)?;
     let canonical = canonical_request(req, &auth.signed_headers);
     let expected = compute_signature(secret, amz_date, &auth, &canonical);
-    if expected.as_bytes().ct_eq(auth.signature.as_bytes()).unwrap_u8() != 1 {
+    if expected
+        .as_bytes()
+        .ct_eq(auth.signature.as_bytes())
+        .unwrap_u8()
+        != 1
+    {
         return Err(SigV4Error::BadSignature);
     }
     Ok(())
+}
+
+pub fn verify_sigv4(
+    req: &SigV4Request<'_>,
+    authorization: &str,
+    amz_date: &str,
+) -> Result<(), SigV4Error> {
+    let auth = parse_authorization(authorization)?;
+    let secret = secret_for_access_key(&auth.access_key).ok_or(SigV4Error::UnknownAccessKey)?;
+    verify_sigv4_with_secret(req, authorization, amz_date, secret)
 }
 
 /// Build Authorization header value for tests and clients.
@@ -298,6 +342,291 @@ pub fn sign_request(
     format!(
         "AWS4-HMAC-SHA256 Credential={access_key}/{credential_date}/{region}/{service}/aws4_request, SignedHeaders={sh}, Signature={sig}"
     )
+}
+
+/// `(amz_datetime, credential_date)` in UTC.
+pub fn amz_now() -> (String, String) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    amz_from_unix(secs)
+}
+
+pub fn amz_from_unix(secs: u64) -> (String, String) {
+    let days = (secs / 86400) as i64;
+    let tod = (secs % 86400) as u32;
+    let (y, m, d) = civil_from_days(days);
+    let hh = tod / 3600;
+    let mm = (tod % 3600) / 60;
+    let ss = tod % 60;
+    let date = format!("{y:04}{m:02}{d:02}");
+    let amz = format!("{date}T{hh:02}{mm:02}{ss:02}Z");
+    (amz, date)
+}
+
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m as u32, d as u32)
+}
+
+pub fn parse_amz_date(amz: &str) -> Option<u64> {
+    let amz = amz.trim();
+    if amz.len() < 16 {
+        return None;
+    }
+    let y: i32 = amz.get(0..4)?.parse().ok()?;
+    let mo: u32 = amz.get(4..6)?.parse().ok()?;
+    let d: u32 = amz.get(6..8)?.parse().ok()?;
+    if amz.as_bytes().get(8) != Some(&b'T') {
+        return None;
+    }
+    let hh: u32 = amz.get(9..11)?.parse().ok()?;
+    let mm: u32 = amz.get(11..13)?.parse().ok()?;
+    let ss: u32 = amz.get(13..15)?.parse().ok()?;
+    crate::meta::parse_http_date(&format!(
+        "Thu, {d:02} {} {y:04} {hh:02}:{mm:02}:{ss:02} GMT",
+        match mo {
+            1 => "Jan",
+            2 => "Feb",
+            3 => "Mar",
+            4 => "Apr",
+            5 => "May",
+            6 => "Jun",
+            7 => "Jul",
+            8 => "Aug",
+            9 => "Sep",
+            10 => "Oct",
+            11 => "Nov",
+            12 => "Dec",
+            _ => return None,
+        }
+    ))
+}
+
+/// Header-auth clock skew. Presigned expiry is a separate window.
+pub fn request_time_skewed(amz_date: &str, now_unix: u64) -> bool {
+    let Some(req) = parse_amz_date(amz_date) else {
+        return true;
+    };
+    now_unix.abs_diff(req) > 15 * 60
+}
+
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresignOk {
+    pub access_key: String,
+    pub session_token: Option<String>,
+}
+
+fn query_pairs(raw: &str) -> Vec<(String, String)> {
+    raw.split('&')
+        .filter(|p| !p.is_empty())
+        .map(|pair| {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            (percent_decode(k), percent_decode(v))
+        })
+        .collect()
+}
+
+fn query_get<'a>(pairs: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    pairs
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+/// Verify a presigned query-string request. `raw_query` is the request target query.
+pub fn verify_presigned(
+    method: &str,
+    uri_path: &str,
+    raw_query: &str,
+    headers: &[(&str, &str)],
+    secret: &str,
+    now_unix: u64,
+) -> Result<PresignOk, SigV4Error> {
+    let pairs = query_pairs(raw_query);
+    let algo = query_get(&pairs, "X-Amz-Algorithm").ok_or(SigV4Error::BadAuthorization)?;
+    if algo != "AWS4-HMAC-SHA256" {
+        return Err(SigV4Error::BadAuthorization);
+    }
+    let credential = query_get(&pairs, "X-Amz-Credential").ok_or(SigV4Error::BadAuthorization)?;
+    let amz_date = query_get(&pairs, "X-Amz-Date").ok_or(SigV4Error::MissingDate)?;
+    let expires: u64 = query_get(&pairs, "X-Amz-Expires")
+        .unwrap_or("0")
+        .parse()
+        .map_err(|_| SigV4Error::BadAuthorization)?;
+    let signed_headers = query_get(&pairs, "X-Amz-SignedHeaders")
+        .ok_or(SigV4Error::BadAuthorization)?
+        .split(';')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    let signature = query_get(&pairs, "X-Amz-Signature")
+        .ok_or(SigV4Error::BadAuthorization)?
+        .to_string();
+    let session_token = query_get(&pairs, "X-Amz-Security-Token").map(str::to_string);
+
+    let mut segs = credential.split('/');
+    let access_key = segs.next().ok_or(SigV4Error::BadAuthorization)?.to_string();
+    let date = segs.next().ok_or(SigV4Error::BadAuthorization)?.to_string();
+    let region = segs.next().ok_or(SigV4Error::BadAuthorization)?.to_string();
+    let service = segs.next().ok_or(SigV4Error::BadAuthorization)?.to_string();
+    let term = segs.next().ok_or(SigV4Error::BadAuthorization)?;
+    if term != "aws4_request" || service != "s3" {
+        return Err(SigV4Error::BadAuthorization);
+    }
+
+    let req_unix = parse_amz_date(amz_date).ok_or(SigV4Error::MissingDate)?;
+    if now_unix > req_unix.saturating_add(expires) {
+        return Err(SigV4Error::Expired);
+    }
+
+    let canonical_query = {
+        let mut kept: Vec<(String, String)> = pairs
+            .iter()
+            .filter(|(k, _)| !k.eq_ignore_ascii_case("X-Amz-Signature"))
+            .map(|(k, v)| (uri_encode(k, true), uri_encode(v, true)))
+            .collect();
+        kept.sort();
+        kept.into_iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("&")
+    };
+    let payload_hash = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("x-amz-content-sha256"))
+        .map(|(_, v)| (*v).to_string())
+        .unwrap_or_else(|| "UNSIGNED-PAYLOAD".into());
+    let auth = ParsedAuthorization {
+        access_key: access_key.clone(),
+        date,
+        region,
+        service,
+        signed_headers,
+        signature: String::new(),
+    };
+    let (hdrs, signed_list) = canonical_headers(headers, &auth.signed_headers);
+    let canonical = format!(
+        "{}\n{}\n{canonical_query}\n{hdrs}\n{signed_list}\n{payload_hash}",
+        method.to_ascii_uppercase(),
+        canonical_uri(uri_path),
+    );
+    let expected = compute_signature(secret, amz_date, &auth, &canonical);
+    if expected.as_bytes().ct_eq(signature.as_bytes()).unwrap_u8() != 1 {
+        return Err(SigV4Error::BadSignature);
+    }
+    Ok(PresignOk {
+        access_key,
+        session_token,
+    })
+}
+
+pub fn sign_presigned_query(
+    secret: &str,
+    access_key: &str,
+    method: &str,
+    uri_path: &str,
+    extra_query: &str,
+    host: &str,
+    amz_date: &str,
+    credential_date: &str,
+    region: &str,
+    expires_secs: u64,
+    session_token: Option<&str>,
+) -> String {
+    let mut parts = vec![
+        format!("X-Amz-Algorithm={}", uri_encode("AWS4-HMAC-SHA256", true)),
+        format!(
+            "X-Amz-Credential={}",
+            uri_encode(
+                &format!("{access_key}/{credential_date}/{region}/s3/aws4_request"),
+                true
+            )
+        ),
+        format!("X-Amz-Date={}", uri_encode(amz_date, true)),
+        format!("X-Amz-Expires={expires_secs}"),
+        format!("X-Amz-SignedHeaders={}", uri_encode("host", true)),
+    ];
+    if let Some(tok) = session_token {
+        parts.push(format!("X-Amz-Security-Token={}", uri_encode(tok, true)));
+    }
+    if !extra_query.is_empty() {
+        parts.push(extra_query.to_string());
+    }
+    let raw = parts.join("&");
+    let headers = [("host", host)];
+    let payload_hash = "UNSIGNED-PAYLOAD";
+    let signed = vec!["host".to_string()];
+    let auth = ParsedAuthorization {
+        access_key: access_key.into(),
+        date: credential_date.into(),
+        region: region.into(),
+        service: "s3".into(),
+        signed_headers: signed,
+        signature: String::new(),
+    };
+    let pairs = query_pairs(&raw);
+    let mut kept: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(k, v)| (uri_encode(k, true), uri_encode(v, true)))
+        .collect();
+    kept.sort();
+    let canonical_query = kept
+        .into_iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let (hdrs, signed_list) = canonical_headers(&headers, &auth.signed_headers);
+    let canonical = format!(
+        "{}\n{}\n{canonical_query}\n{hdrs}\n{signed_list}\n{payload_hash}",
+        method.to_ascii_uppercase(),
+        canonical_uri(uri_path),
+    );
+    let sig = compute_signature(secret, amz_date, &auth, &canonical);
+    format!("{raw}&X-Amz-Signature={sig}")
+}
+
+pub fn chunk_string_to_sign(
+    amz_date: &str,
+    scope: &str,
+    previous_sig: &str,
+    chunk: &[u8],
+) -> String {
+    let empty = sha256_hex(b"");
+    let data = sha256_hex(chunk);
+    format!("AWS4-HMAC-SHA256-PAYLOAD\n{amz_date}\n{scope}\n{previous_sig}\n{empty}\n{data}")
+}
+
+pub fn sign_chunk(
+    secret: &str,
+    credential_date: &str,
+    region: &str,
+    service: &str,
+    string_to_sign: &str,
+) -> String {
+    let key = signing_key(secret, credential_date, region, service);
+    hex::encode(hmac_sha256(&key, string_to_sign.as_bytes()))
+}
+
+pub fn sha256_hex_bytes(data: &[u8]) -> String {
+    sha256_hex(data)
 }
 
 #[cfg(test)]
@@ -382,6 +711,57 @@ mod tests {
             payload_hash: "UNSIGNED-PAYLOAD",
         };
         let auth = "AWS4-HMAC-SHA256 Credential=demo/20220301/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=deadbeef";
-        assert_eq!(verify_sigv4(&req, auth, amz_date), Err(SigV4Error::BadSignature));
+        assert_eq!(
+            verify_sigv4(&req, auth, amz_date),
+            Err(SigV4Error::BadSignature)
+        );
+    }
+
+    #[test]
+    fn presign_roundtrip_and_expiry() {
+        let (amz, date) = amz_from_unix(1_700_000_000);
+        let q = sign_presigned_query(
+            DEMO_SECRET_KEY,
+            DEMO_ACCESS_KEY,
+            "GET",
+            "/b/k",
+            "",
+            "localhost",
+            &amz,
+            &date,
+            "us-east-1",
+            60,
+            None,
+        );
+        let headers = [("host", "localhost")];
+        verify_presigned("GET", "/b/k", &q, &headers, DEMO_SECRET_KEY, 1_700_000_000).unwrap();
+        assert_eq!(
+            verify_presigned(
+                "GET",
+                "/b/k",
+                &q,
+                &headers,
+                DEMO_SECRET_KEY,
+                1_700_000_000 + 120
+            )
+            .unwrap_err(),
+            SigV4Error::Expired
+        );
+    }
+
+    #[test]
+    fn skew_window() {
+        let (amz, _) = amz_from_unix(1_700_000_000);
+        assert!(!request_time_skewed(&amz, 1_700_000_000 + 60));
+        assert!(request_time_skewed(&amz, 1_700_000_000 + 16 * 60));
+    }
+
+    #[test]
+    fn unicode_key_canonical_uri() {
+        let uri = canonical_uri("/bucket/a b");
+        assert_eq!(uri, "/bucket/a%20b");
+        assert_eq!(canonical_uri("/bucket/a%20b"), "/bucket/a%20b");
+        let q = canonical_query(Some("prefix=a%20b&marker=x"));
+        assert!(q.contains("prefix=a%20b"), "{q}");
     }
 }

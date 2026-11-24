@@ -855,6 +855,13 @@ async fn spawn_s3_tcp(handler: S3Handler, cancel: CancellationToken) -> std::net
                         namespace: handler.namespace.clone(),
                         limit_services: handler.limit_services.clone(),
                         tenancy: handler.tenancy.clone(),
+                        region: handler.region.clone(),
+                        virtual_host_suffix: handler.virtual_host_suffix.clone(),
+                        multipart_idle: handler.multipart_idle,
+                        multipart_min_part: handler.multipart_min_part,
+                        multipart_max_parts: handler.multipart_max_parts,
+                        credentials: Arc::clone(&handler.credentials),
+                        multipart_registry: Arc::clone(&handler.multipart_registry),
                     };
                     let c = cancel.child_token();
                     tokio::spawn(async move { h.serve(sock, c).await });
