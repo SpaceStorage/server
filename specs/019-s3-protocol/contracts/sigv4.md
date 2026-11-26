@@ -35,7 +35,7 @@ Query parameters: `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Ex
 | `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` | aws-chunked; per-chunk signatures verified |
 | `STREAMING-UNSIGNED-PAYLOAD-TRAILER` | streaming unsigned with trailer support used by matrix clients |
 
-Out of scope: CRC64NVME; trailer checksum modes not required by the eight tools.
+Out of scope (trailer checksum modes not required by the eight tools). `x-amz-checksum-crc64nvme` is **accepted but not verified** — it is not a routing key and MUST NOT cause a refusal, since modern AWS SDK/CLI clients send it by default.
 
 ## Clock skew
 

@@ -17,7 +17,7 @@ Record of specification decisions encoded during this expansion (no open `[NEEDS
 | AWS S3 scope | **Compatibility profile**, not parity: only operations in the mandatory set and matrix-driven extras are required; everything else is **Unsupported by design** or **Not yet implemented** with documented errors. |
 | Addressing | **Path-style** (`/{bucket}/{key}`) and **virtual-hosted-style** (`{bucket}.<configured-suffix>`) both MUST work when the entrypoint declares a virtual-host suffix; without it, path-style MUST work and vhost MAY be refused with a documented error. |
 | ListObjects | **ListObjectsV2** is mandatory (intent `15`). **ListObjects** (v1, `marker`) is mandatory because backup tools and older clients still emit it; behavior aligns with V2 where parameters overlap. |
-| Checksums | **Content-MD5** MUST be verified when the client sends it. **Supported**: `x-amz-checksum-sha256`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c` on PutObject and UploadPart where sent. **Unsupported by design**: AWS SDK checksum algorithm **CRC64NVME** and trailer checksum modes not required for the eight matrix tools (see matrix). |
+| Checksums | **Content-MD5** MUST be verified when the client sends it. **Supported**: `x-amz-checksum-sha256`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c` on PutObject and UploadPart where sent. **Accepted but not verified**: AWS SDK checksum algorithm **CRC64NVME** (`x-amz-checksum-crc64nvme`, `x-amz-sdk-checksum-algorithm: CRC64NVME`) — current SDK/CLI clients send it by default and require it for `DeleteObjects`, so it MUST be accepted and ignored and **never** used as a routing key or a reason to refuse. Trailer checksum modes not required for the eight matrix tools remain out of scope (see matrix). |
 | ETag | ETag is **not** always raw object MD5: single-part uploads use documented content-derived hex; completed multipart uploads use the AWS **composite** form (`"<md5-of-part-md5s>-<part-count>"`); copying and multipart edge cases follow documented rules in FR-semantic block. |
 | Session tokens | **AWS STS session token** (`X-Amz-Security-Token` header or presigned query parameter) MUST be honored when present on namespace-bound credentials that issue temporary keys; invalid or cross-namespace tokens MUST fail authentication. |
 | SigV4 clock skew | Reject with `RequestTimeTooSkewed` when skew exceeds **15 minutes** (AWS-compatible default). |
@@ -103,7 +103,7 @@ Integrators and conformance tests verify checksums, MD5, and ETag rules so silen
 **Acceptance Scenarios**:
 
 1. **Given** `Content-MD5` on `PutObject`, **When** the digest matches the body, **Then** the upload succeeds; **When** it does not match, **Then** `BadDigest` or documented equivalent is returned.
-2. **Given** `x-amz-checksum-sha256` (or crc32/crc32c) on put or upload part, **When** the checksum matches, **Then** success; **When** it does not, **Then** a named checksum error is returned.
+2. **Given** `x-amz-checksum-sha256` (or crc32/crc32c) on put or upload part, **When** the checksum matches, **Then** success; **When** it does not, **Then** a named checksum error is returned. **Given** an unsupported checksum header (`x-amz-checksum-crc64nvme`), **Then** the request proceeds normally — the header is accepted and ignored, not verified, and the request is neither refused nor routed to another operation.
 3. **Given** a completed multipart object, **When** ETag is compared to documented composite rules, **Then** it is stable across `HeadObject` and `ListObjectsV2`.
 4. **Given** download after upload, **When** the client computes SHA256 of the response body, **Then** it matches the fixture SHA256 recorded at upload time in the test.
 
@@ -289,7 +289,7 @@ This section is the **S3 capability table** owned by FR-011. It extends intent `
 | ACL / canned ACL beyond authz mapping | Unsupported by design | Reject or documented ignore |
 | Bucket lifecycle configuration | Unsupported by design | Not supported |
 | Bucket CORS / website / policy XML writes | Unsupported by design | Not supported |
-| Server-side encryption product (`x-amz-server-side-encryption` as AWS KMS) | Unsupported by design | `501` until product encryption mapping (`07`/`14`) says otherwise |
+| Server-side encryption product (`x-amz-server-side-encryption` as AWS KMS) | Unsupported by design | `501` until product encryption mapping (`07`/`14`) says otherwise. Refusal is keyed on the **SSE header only**; checksum headers (e.g. `x-amz-checksum-crc64nvme`) MUST NOT trigger it. |
 | Object tagging API | Unsupported by design | `501 NotImplemented` |
 | SigV2 | Unsupported by design | `InvalidArgument` |
 | Batch operations (S3 Control / Jobs) | Unsupported by design | Out of AWS S3 data-plane scope; `NotImplemented` / `501` |
@@ -343,7 +343,7 @@ Published **compatibility matrix** artifact (human-readable + machine-readable) 
 ### Functional Requirements — data integrity
 
 - **FR-040**: When `Content-MD5` is sent, the server MUST validate before accepting the object.
-- **FR-041**: Supported AWS checksum headers (`x-amz-checksum-sha256`, `crc32`, `crc32c`) MUST be validated on put/upload part when present.
+- **FR-041**: Supported AWS checksum headers (`x-amz-checksum-sha256`, `crc32`, `crc32c`) MUST be validated on put/upload part when present. Unsupported checksum headers (e.g. `x-amz-checksum-crc64nvme`) MUST be accepted and ignored — they MUST NOT be treated as a routing key, a refusal reason, or a trigger for another operation.
 - **FR-042**: Conformance and interop suites MUST record **SHA256** of every fixture at write time and verify on read for successful paths.
 - **FR-043**: Multipart complete MUST produce integrity-consistent objects verified by SHA256 of full body in tests.
 
@@ -410,7 +410,7 @@ Feature work on S3 for the complete-product profile is **done** only when all of
 - **Harness target.** Suites assume a running SpaceStorage deployment; CI starts the server separately then runs A and B.
 - **Companion containers.** Elasticsearch and pgBackRest rows may use compose dependencies; not production topology.
 - **Credentials.** Tests use admin/role surfaces (`07`/`14`) to mint namespace-bound keys with bucket WRITE.
-- **Checksum algorithms.** See Clarifications; CRC64NVME and trailer-only modes are out of scope unless a future matrix tool requires them.
+- **Checksum algorithms.** Content-MD5, `x-amz-checksum-sha256`, `crc32`, and `crc32c` are verified when sent; **CRC64NVME is accepted but not verified** (ignored, and never used as a routing key) because modern AWS SDK/CLI clients send it by default and require it for `DeleteObjects`. Trailer-only modes remain out of scope unless a future matrix tool requires them.
 - **ListObjects v1.** Retained for older clients; new integrators should prefer V2.
 
 ## Dependencies

@@ -1,3 +1,10 @@
+## 2026-11-26 — specs/019-s3-protocol, specs/013-durability-and-recovery
+
+- Fixed an S3 routing bug: a request carrying `x-amz-checksum-crc64nvme` (sent by default by current AWS SDK/CLI clients and mandatory for `DeleteObjects`) was diverted into the SSE-KMS refusal → `501 compat_must_not`, which broke `PutObject` under default client settings and every `DeleteObjects`. The header is now accepted but not verified; the refusal stays keyed on `x-amz-server-side-encryption` alone.
+- Fixed a durable-put deadlock: the durable hook nested a sync↔async bridge (`block_in_place` + `Handle::block_on`) inside a held catalog `RwLock`, wedging the whole Tokio runtime on concurrent durable writes. Durable hooks now append and fsync in a single blocking region (`run_blocking`) with no held application lock.
+- Spec sync: `019` Checksums/SSE decisions, acceptance scenario, capability matrix, `contracts/{operations,sigv4,capability-matrix}.md`, and `artifacts/s3-compatibility-matrix.{md,json}`; `013` FR-005 and acceptance scenario now state the off-worker-pool, non-nested-bridge, no-held-lock blocking-region contract.
+- Regression tests: `dialect_s3_ops::crc64nvme_header_is_accepted_and_not_diverted_to_sse_kms` (accept-and-ignore + SSE still refused) and `durable_put_concurrency`.
+
 ## 2026-11-23 — specs/019-s3-protocol
 
 - Complete-product S3 dialect on a dedicated entrypoint: SigV4 (header, presigned, streaming payload modes), namespace-bound credentials, path-style and virtual-hosted addressing, bucket/object CRUD, listing, CopyObject, DeleteObjects, and multipart with a durable upload registry.

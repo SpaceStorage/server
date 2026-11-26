@@ -1349,9 +1349,13 @@ fn handle_http(
     {
         return dispatch(session, "UPLOADPARTCOPY", &[]);
     }
-    if header_lookup(&req.headers, "x-amz-server-side-encryption").is_some()
-        || header_lookup(&req.headers, "x-amz-checksum-crc64nvme").is_some()
-    {
+    // SSE-KMS is refused by design (019 / `classify_s3`). Only the SSE header
+    // routes here: a request-supplied `x-amz-checksum-crc64nvme` is an
+    // *additional* checksum the server accepts but does not verify (we verify
+    // content-md5 / sha256 / crc32 / crc32c), so it must NOT divert the whole
+    // request into the SSE-KMS refusal — recent AWS SDKs/CLI send it by default
+    // (`when_supported`) and mandatory for `DeleteObjects`.
+    if header_lookup(&req.headers, "x-amz-server-side-encryption").is_some() {
         return dispatch(session, "SSEKMS", &[]);
     }
 

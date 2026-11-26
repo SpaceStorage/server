@@ -20,7 +20,9 @@ pub mod ttl;
 pub mod wal;
 
 pub use content::{ContentStore, UnavailableReason};
-pub use definitions::{append_definition, load_definitions, PersistedDefinition};
+pub use definitions::{
+    append_definition, append_definition_blocking, load_definitions, PersistedDefinition,
+};
 pub use disk::{DiskState, DriveDiskState};
 pub use error::StorageError;
 pub use legal_hold::{EraseRecord, EraseRequest, LegalError, LegalHold, LegalHoldStore};
@@ -200,6 +202,85 @@ impl StorageEngine {
         content.register_mode(container_id, StorageMode::Persistent);
         content.put(container_id, key.as_bytes().to_vec(), value.to_vec());
         Ok(acks)
+    }
+
+    /// Synchronous durable put for the catalog durable hook (`013`).
+    ///
+    /// Appends + fsyncs every open drive and updates content on the calling
+    /// (blocking) thread. It never re-enters the runtime and never waits on the
+    /// Tokio timer, so it is safe to call while the caller holds the catalog
+    /// `std::sync::RwLock`: the nested-`Handle::block_on` deadlock on the
+    /// blocking pool cannot occur.
+    pub fn put_kv_durable_blocking(
+        &self,
+        container_id: uuid::Uuid,
+        key: &str,
+        value: &[u8],
+    ) -> Result<(), StorageError> {
+        let drives: Vec<Arc<DriveWal>> = {
+            let guard = self.drives.blocking_read();
+            guard.values().cloned().collect()
+        };
+        if drives.is_empty() {
+            return Err(StorageError::WalCorrupt("no drive open".into()));
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        for wal in &drives {
+            crate::kv_put::put_durable_blocking(
+                wal,
+                container_id,
+                stamp,
+                key.as_bytes(),
+                value,
+                spacestorage_types::StorageModeChoice::Persistent,
+            )?;
+        }
+        let mut content = self.content.blocking_write();
+        content.register_mode(container_id, StorageMode::Persistent);
+        content.put(container_id, key.as_bytes().to_vec(), value.to_vec());
+        Ok(())
+    }
+
+    /// Sync durable-put hook installed on the catalog (`013`).
+    ///
+    /// The hook may be invoked from a runtime worker (ingest / syslog) or from a
+    /// blocking-pool thread (S3 `execute_blocking`). [`run_blocking`] moves a
+    /// worker aside when one is present and is a no-op elsewhere, so the fsync
+    /// always runs outside the async scheduler and the append needs no runtime
+    /// driver.
+    pub fn durable_put_hook(self: &Arc<Self>) -> spacestorage_types::DurablePutHook {
+        let engine = Arc::clone(self);
+        Arc::new(move |id, _mode, key, val| {
+            let engine = Arc::clone(&engine);
+            run_blocking(move || {
+                engine
+                    .put_kv_durable_blocking(id, key, val)
+                    .map_err(|e| e.to_string())
+            })
+        })
+    }
+}
+
+/// Run `f` in a blocking region.
+///
+/// On a multi-thread runtime worker this uses [`tokio::task::block_in_place`] so
+/// the worker is handed off instead of being parked by blocking work (fsync).
+/// On the blocking pool, outside a runtime, or on a `current_thread` runtime
+/// (where `block_in_place` panics) the closure runs inline.
+pub fn run_blocking<R>(f: impl FnOnce() -> R) -> R {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle)
+            if matches!(
+                handle.runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            ) =>
+        {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
     }
 }
 

@@ -25,20 +25,7 @@ pub async fn append_definition(
     def: &PersistedDefinition,
 ) -> Result<(), StorageError> {
     let p = path(data_dir);
-    let line = format!(
-        "{}\n",
-        json!({
-            "id": def.id.to_string(),
-            "namespace": def.namespace,
-            "name": def.name,
-            "model": def.model.machine_name(),
-            "mode": match def.mode {
-                StorageMode::Memory => "memory",
-                StorageMode::Persistent => "persistent",
-                StorageMode::Hybrid => "hybrid",
-            },
-        })
-    );
+    let line = definition_line(def);
     let p2 = p.clone();
     let line2 = line.clone();
     tokio::task::spawn_blocking(move || {
@@ -56,8 +43,47 @@ pub async fn append_definition(
     })
     .await
     .map_err(|e| StorageError::Join(e.to_string()))?
-    .map_err(|e| StorageError::Io(e))?;
+    .map_err(StorageError::Io)?;
     Ok(())
+}
+
+/// Blocking twin of [`append_definition`] for the sync durable hook (`013`).
+///
+/// Appends the JSONL line and fsyncs on the calling (blocking) thread with no
+/// runtime timer or `Handle::block_on` bridging.
+pub fn append_definition_blocking(
+    data_dir: &Path,
+    def: &PersistedDefinition,
+) -> Result<(), StorageError> {
+    let p = path(data_dir);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)?;
+    f.write_all(definition_line(def).as_bytes())?;
+    f.sync_all()?;
+    Ok(())
+}
+
+fn definition_line(def: &PersistedDefinition) -> String {
+    format!(
+        "{}\n",
+        json!({
+            "id": def.id.to_string(),
+            "namespace": def.namespace,
+            "name": def.name,
+            "model": def.model.machine_name(),
+            "mode": match def.mode {
+                StorageMode::Memory => "memory",
+                StorageMode::Persistent => "persistent",
+                StorageMode::Hybrid => "hybrid",
+            },
+        })
+    )
 }
 
 pub async fn load_definitions(data_dir: &Path) -> Result<Vec<PersistedDefinition>, StorageError> {

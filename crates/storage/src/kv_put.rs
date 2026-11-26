@@ -52,3 +52,33 @@ pub async fn put_durable_in_domain(
     );
     Ok((ack.lsn, labelled))
 }
+
+/// Synchronous twin of [`put_durable_in_domain`] for the sync durable hook (`013`).
+///
+/// Runs the WAL append + fsync on the calling (blocking) thread with no runtime
+/// timer or `Handle::block_on` bridging. The catalog hook path waits only for the
+/// local drive fsync, so the ack carries no quorum domain label.
+pub fn put_durable_blocking(
+    wal: &DriveWal,
+    container_id: Uuid,
+    stamp: u64,
+    key: &[u8],
+    value: &[u8],
+    mode: StorageModeChoice,
+) -> Result<(u64, WriteAck), StorageError> {
+    let mut payload = Vec::with_capacity(4 + key.len() + value.len());
+    payload.extend_from_slice(&(key.len() as u32).to_le_bytes());
+    payload.extend_from_slice(key);
+    payload.extend_from_slice(value);
+    let ack = wal.append_durable_blocking(container_id, stamp, WalRecordType::Put, payload, None)?;
+    let labelled = WriteAck::from_wal(
+        ack.replica.clone(),
+        ack.drive_id.clone(),
+        ack.lsn,
+        ack.kind,
+        mode,
+        wal.durable_lsn(),
+        "",
+    );
+    Ok((ack.lsn, labelled))
+}

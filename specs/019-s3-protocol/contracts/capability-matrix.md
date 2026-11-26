@@ -48,7 +48,7 @@ Auth modes (Supported and tested): header SigV4; presigned; `UNSIGNED-PAYLOAD`; 
 | ACL / canned ACL beyond `014` mapping | reject or documented ignore |
 | Bucket lifecycle | not supported |
 | CORS / website / policy XML writes | not supported |
-| SSE as AWS KMS (`x-amz-server-side-encryption`) | `501` until product mapping |
+| SSE as AWS KMS (`x-amz-server-side-encryption`) | `501` until product mapping (keyed on the SSE header only, never on checksum headers) |
 | Object tagging API | `501 NotImplemented` |
 | SigV2 | `InvalidArgument` |
 | S3 Control / Batch Jobs | out of data-plane scope |

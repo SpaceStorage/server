@@ -188,21 +188,11 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
 
     // Wire sync durable hooks so client puts wait for WAL fsync (constitution II / G6 residual).
     if let Some(dir) = data_dir.clone() {
-        let eng_put = Arc::clone(&engine);
-        let eng_create = Arc::clone(&engine);
         let dir_create = dir.clone();
-        let put_hook: spacestorage_types::DurablePutHook = Arc::new(move |id, _mode, key, val| {
-            let eng = Arc::clone(&eng_put);
-            let key = key.to_string();
-            let val = val.to_vec();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async move {
-                    eng.put_kv_durable(id, &key, &val)
-                        .await
-                        .map_err(|e| e.to_string())
-                })
-            })
-        });
+        // Sync durable append + fsync on a blocking region: no nested
+        // `Handle::block_on`, and no runtime timer/IO-driver dependency, so a put
+        // that holds the catalog `std::sync::RwLock` cannot wedge the scheduler.
+        let put_hook: spacestorage_types::DurablePutHook = engine.durable_put_hook();
         let create_hook: spacestorage_types::DurableCreateHook =
             Arc::new(move |id, ns, name, model, mode| {
                 let dir = dir_create.clone();
@@ -226,13 +216,9 @@ pub async fn restore_storage(node: &Node) -> Result<(), String> {
                     model,
                     mode: smode,
                 };
-                let _ = &eng_create;
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async move {
-                        spacestorage_storage::append_definition(&dir, &def)
-                            .await
-                            .map_err(|e| e.to_string())
-                    })
+                spacestorage_storage::run_blocking(move || {
+                    spacestorage_storage::append_definition_blocking(&dir, &def)
+                        .map_err(|e| e.to_string())
                 })
             });
         {

@@ -33,7 +33,7 @@ Suite A marks are true for Supported rows when this file is regenerated after th
 | ACL / canned ACL beyond `014` mapping | Unsupported by design | false | false |
 | Bucket lifecycle | Unsupported by design | false | false |
 | CORS / website / policy XML writes | Unsupported by design | false | false |
-| SSE as AWS KMS (`x-amz-server-side-encryption`) | Unsupported by design | false | false |
+| SSE as AWS KMS (`x-amz-server-side-encryption`) | Unsupported by design (SSE header only; checksum headers never trigger) | false | false |
 | Object tagging API | Unsupported by design | false | false |
 | SigV2 | Unsupported by design | false | false |
 | S3 Control / Batch Jobs | Unsupported by design | false | false |

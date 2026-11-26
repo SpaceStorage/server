@@ -213,6 +213,18 @@ impl DriveWal {
         Ok(())
     }
 
+    /// Blocking twin of [`DriveWal::ensure_segment`] for the sync durable path.
+    fn ensure_segment_blocking(&self) -> Result<(), StorageError> {
+        let seq = self.current_seq.load(Ordering::SeqCst);
+        let path = self.segment_path(seq);
+        if path.exists() {
+            return Ok(());
+        }
+        let header = encode_segment_header(FORMAT_MAJOR, &self.drive_id, &self.node_id);
+        std::fs::write(&path, header)?;
+        Ok(())
+    }
+
     pub fn next_lsn(&self) -> u64 {
         self.next_lsn.load(Ordering::SeqCst)
     }
@@ -274,6 +286,67 @@ impl DriveWal {
         })
     }
 
+    /// Synchronous append + fsync for the sync durable hook (`013`).
+    ///
+    /// Unlike [`DriveWal::append_durable`] this never touches the Tokio time/IO
+    /// driver and never re-enters the runtime: it writes and fsyncs on the
+    /// calling thread and returns once the record is durable. The caller must
+    /// already be outside the async scheduler (a `spawn_blocking` thread or a
+    /// `block_in_place` blocking region). Callers of this path are serialized by
+    /// the catalog write lock, so the group-commit window would never batch more
+    /// than one record and is skipped.
+    pub fn append_durable_blocking(
+        &self,
+        container_id: Uuid,
+        stamp: u64,
+        ty: WalRecordType,
+        payload: Vec<u8>,
+        data_key: Option<&[u8; 32]>,
+    ) -> Result<DurableAck, StorageError> {
+        let lsn = self.next_lsn.fetch_add(1, Ordering::SeqCst);
+        let aad = wal_payload_aad(&self.drive_id, lsn, container_id);
+        let payload = maybe_encrypt_payload(&payload, data_key, &aad)?;
+        let rec = WalRecord {
+            lsn,
+            container_id,
+            stamp,
+            ty,
+            payload,
+        };
+        let bytes = encode_record(&rec);
+
+        // Serialize with the async group-commit writer so a segment is never
+        // written from two threads at once.
+        let _guard = self.flusher.blocking_lock();
+        let seq = self.current_seq.load(Ordering::SeqCst);
+        let path = self.segment_path(seq);
+        let bytes_len = bytes.len() as u64;
+        let start = std::time::Instant::now();
+        write_and_sync(&path, &bytes, self.sync)?;
+        let dur = start.elapsed();
+        if !matches!(self.sync, SyncMode::None) {
+            self.durable_lsn.store(lsn, Ordering::SeqCst);
+            self.metrics.record_fsync(bytes_len, dur);
+        }
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if size >= self.segment_max {
+            self.current_seq.fetch_add(1, Ordering::SeqCst);
+            self.ensure_segment_blocking()?;
+        }
+
+        let kind = if matches!(self.sync, SyncMode::None) {
+            AckKind::Memory
+        } else {
+            AckKind::Durable
+        };
+        Ok(DurableAck {
+            replica: self.node_id.clone(),
+            drive_id: self.drive_id.clone(),
+            lsn,
+            kind,
+        })
+    }
+
     async fn flush_group(&self) -> Result<(), StorageError> {
         let _guard = self.flusher.lock().await;
         let deadline = tokio::time::Instant::now() + self.group_max_wait;
@@ -312,24 +385,11 @@ impl DriveWal {
         let path_clone = path.clone();
 
         let start = std::time::Instant::now();
+        // Constitution II: the durability syscall runs only on the blocking pool.
         let write_result =
-            tokio::task::spawn_blocking(move || -> Result<(), StorageError> {
-                use std::io::Write;
-                let mut f = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path_clone)?;
-                f.write_all(&blob)?;
-                match sync {
-                    SyncMode::None => {}
-                    // Constitution II: durability syscall runs only on blocking pool.
-                    SyncMode::Fdatasync => f.sync_data()?,
-                    SyncMode::Fsync => f.sync_all()?,
-                }
-                Ok(())
-            })
-            .await
-            .map_err(|e| StorageError::Join(e.to_string()))?;
+            tokio::task::spawn_blocking(move || write_and_sync(&path_clone, &blob, sync))
+                .await
+                .map_err(|e| StorageError::Join(e.to_string()))?;
 
         let dur = start.elapsed();
         match write_result {
@@ -422,6 +482,25 @@ impl DriveWal {
             .fetch_add(recs.len() as u64, Ordering::Relaxed);
         Ok(recs)
     }
+}
+
+/// Append `blob` to `path` and apply the configured durability syscall.
+///
+/// Blocking by design: the async group-commit path calls this on the blocking
+/// pool and the sync durable hook calls it inside a blocking region.
+fn write_and_sync(path: &Path, blob: &[u8], sync: SyncMode) -> Result<(), StorageError> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    f.write_all(blob)?;
+    match sync {
+        SyncMode::None => {}
+        SyncMode::Fdatasync => f.sync_data()?,
+        SyncMode::Fsync => f.sync_all()?,
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -572,3 +572,60 @@ async fn content_md5_and_checksum_headers() {
     assert!(crc_bad.contains("BadDigest"), "{crc_bad}");
     cancel.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn crc64nvme_header_is_accepted_and_not_diverted_to_sse_kms() {
+    // Regression (019 / `classify_s3`): recent AWS SDKs/CLI send
+    // `x-amz-checksum-crc64nvme` (with `x-amz-sdk-checksum-algorithm: CRC64NVME`)
+    // by default, and it is mandatory for `DeleteObjects`. The server accepts the
+    // header but does not verify it (we verify content-md5/sha256/crc32/crc32c),
+    // so it MUST NOT divert the whole request into the SSE-KMS refusal.
+    let handler = demo_handler();
+    let cancel = CancellationToken::new();
+    let addr = spawn_s3_handler(handler, cancel.clone()).await;
+    assert!(demo_request(
+        addr,
+        "PUT /crc HTTP/1.1\r\nHost: localhost\r\nx-spacestorage-demo-auth: demo\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        None,
+    )
+    .await
+    .contains("200"));
+
+    let body = b"hello-crc64nvme";
+    let put = format!(
+        "PUT /crc/obj HTTP/1.1\r\nHost: localhost\r\nx-spacestorage-demo-auth: demo\r\nx-amz-sdk-checksum-algorithm: CRC64NVME\r\nx-amz-checksum-crc64nvme: AAAAAAAAAAA=\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let put_resp = demo_request(addr, &put, Some(body)).await;
+    assert!(put_resp.contains("200"), "crc64nvme PutObject: {put_resp}");
+    assert!(
+        !put_resp.contains("SSEKMS") && !put_resp.contains("compat_must_not"),
+        "{put_resp}"
+    );
+
+    // DeleteObjects carries a mandatory body checksum in modern SDKs.
+    let del_xml = "<Delete><Object><Key>obj</Key></Object></Delete>";
+    let del = format!(
+        "POST /crc?delete HTTP/1.1\r\nHost: localhost\r\nx-spacestorage-demo-auth: demo\r\nx-amz-sdk-checksum-algorithm: CRC64NVME\r\nx-amz-checksum-crc64nvme: AAAAAAAAAAA=\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        del_xml.len()
+    );
+    let del_resp = demo_request(addr, &del, Some(del_xml.as_bytes())).await;
+    assert!(
+        del_resp.contains("DeleteResult"),
+        "crc64nvme DeleteObjects: {del_resp}"
+    );
+
+    // The SSE header itself is still refused by design.
+    let sse = demo_request(
+        addr,
+        "PUT /crc/enc HTTP/1.1\r\nHost: localhost\r\nx-spacestorage-demo-auth: demo\r\nx-amz-server-side-encryption: aws:kms\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        None,
+    )
+    .await;
+    assert!(!sse.starts_with("HTTP/1.1 200"), "{sse}");
+    assert!(
+        sse.contains("501") || sse.contains("compat_must_not"),
+        "{sse}"
+    );
+    cancel.cancel();
+}

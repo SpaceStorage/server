@@ -29,7 +29,7 @@
     {"operation": "ACL / canned ACL beyond `014` mapping", "status": "Unsupported by design", "notes": "reject or documented ignore", "suite_a": false, "suite_b": false},
     {"operation": "Bucket lifecycle", "status": "Unsupported by design", "notes": "not supported", "suite_a": false, "suite_b": false},
     {"operation": "CORS / website / policy XML writes", "status": "Unsupported by design", "notes": "not supported", "suite_a": false, "suite_b": false},
-    {"operation": "SSE as AWS KMS (`x-amz-server-side-encryption`)", "status": "Unsupported by design", "notes": "`501` until product mapping", "suite_a": false, "suite_b": false},
+    {"operation": "SSE as AWS KMS (`x-amz-server-side-encryption`)", "status": "Unsupported by design", "notes": "`501` until product mapping; refusal keyed on the SSE header only (checksum headers such as `x-amz-checksum-crc64nvme` never trigger it)", "suite_a": false, "suite_b": false},
     {"operation": "Object tagging API", "status": "Unsupported by design", "notes": "`501 NotImplemented`", "suite_a": false, "suite_b": false},
     {"operation": "SigV2", "status": "Unsupported by design", "notes": "`InvalidArgument`", "suite_a": false, "suite_b": false},
     {"operation": "S3 Control / Batch Jobs", "status": "Unsupported by design", "notes": "out of data-plane scope", "suite_a": false, "suite_b": false},

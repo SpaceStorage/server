@@ -28,7 +28,7 @@
 
 ### User Story 1 - Durable acknowledgements (Priority: P1)
 
-A client writes to a persistent container at `TWO`. The coordinator does not acknowledge until two source-domain replicas (`12`) have durable WAL copies on the drive that holds that replica's copy. Each drive that holds persistent or hybrid data has its own WAL; group commit is per that drive's log. Fsync runs off the worker pool. A memory-mode write acknowledges memory only and MUST NOT be claimed crash-durable.
+A client writes to a persistent container at `TWO`. The coordinator does not acknowledge until two source-domain replicas (`12`) have durable WAL copies on the drive that holds that replica's copy. Each drive that holds persistent or hybrid data has its own WAL; group commit is per that drive's log. Fsync runs off the worker pool: the durable path appends and fsyncs inside a single blocking region and MUST NOT bridge back into the async runtime (no nested `block_in_place` + `Handle::block_on`), and MUST NOT hold an application lock (catalog/container `RwLock`) across that blocking region. A memory-mode write acknowledges memory only and MUST NOT be claimed crash-durable.
 
 **Why this priority**: Quorum without durability lies to clients.
 
@@ -39,7 +39,7 @@ A client writes to a persistent container at `TWO`. The coordinator does not ack
 1. **Given** a persistent container, **When** a write is acknowledged at a counted level, **Then** a crash and restart of those acknowledging replicas still returns the value after WAL replay.
 2. **Given** a memory-mode container, **When** a write is acknowledged, **Then** the description MUST NOT claim crash-durability; restart without replicas loses content (`03`).
 3. **Given** mixed replica sets, **When** a write completes, **Then** the execution record distinguishes durable vs memory acknowledgements (`04`).
-4. **Given** fsync, **When** it runs, **Then** it does not occupy a database worker thread.
+4. **Given** fsync, **When** it runs, **Then** it does not occupy a database worker thread, is not invoked through a nested sync↔async bridge from a held lock, and a burst of concurrent durable writes completes without wedging the runtime.
 5. **Given** a node with two drives that each hold persistent or hybrid data, **When** a write is durably acknowledged for a container on drive 1, **Then** that acknowledgement is a durable record in drive 1's WAL and MUST NOT require a durable record in drive 2's WAL.
 
 ---
@@ -121,7 +121,7 @@ An operator takes a snapshot that records a WAL position **per involved drive** 
 - **FR-002**: For memory-mode, a counted ack is memory-only and MUST NOT be claimed crash-durable. Mixed sets MUST report which acks were durable.
 - **FR-003**: WAL MUST be one stream **per drive** that holds persistent or hybrid data. A node with several such drives MUST keep several WALs (one per those drives), not one shared node-wide log and not one log per container or namespace. Rotation and retention MUST cover replica catch-up and `gc_grace`. Each drive's WAL is replayed on start. Checkpoints MAY truncate a covered prefix of **that drive's** WAL.
 - **FR-004**: WAL records of encrypted containers MUST be encrypted with that container's data key (`14`). Unencrypted containers yield plaintext records.
-- **FR-005**: Blocking durability syscalls MUST run off the async worker pool.
+- **FR-005**: Blocking durability syscalls MUST run off the async worker pool on a dedicated blocking region (the sanctioned `run_blocking` bridge). The durable put path MUST NOT nest a second runtime bridge (`block_in_place` + `Handle::block_on`) and MUST NOT hold an application lock (catalog/container `RwLock`) across the blocking region — nested bridging from inside a held lock wedges the whole runtime under concurrent durable writes.
 - **FR-006**: On start: restore definitions/options always; persistent/hybrid content from drives; memory-mode content empty unless replication re-populates.
 - **FR-007**: Corrupt files MUST be isolated; rebuild from replica or degrade. Disk-full on a drive MUST refuse new durable writes for containers whose copy on this node lives on that drive, keep servable reads, set degraded, and MUST NOT refuse durable writes for containers on other drives that still have room; MUST NOT crash-loop or silently drop acks.
 - **FR-008**: Every durable file and WAL segment MUST carry a format version. Unknown major → refuse start. Old node MUST NOT write a newer format (`15`).

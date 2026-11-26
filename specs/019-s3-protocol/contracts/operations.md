@@ -41,7 +41,7 @@ Returns configured region constant (default `us-east-1`).
 
 ### PutObject — `PUT /{bucket}/{key}`
 
-Body streamed. Supports `Content-Type`, `x-amz-meta-*`, `Cache-Control`, `Content-Disposition`/`Encoding`, `Content-MD5`, `x-amz-checksum-sha256|crc32|crc32c`, `If-None-Match: *`. Success → `200` + ETag. Zero-length body allowed.
+Body streamed. Supports `Content-Type`, `x-amz-meta-*`, `Cache-Control`, `Content-Disposition`/`Encoding`, `Content-MD5`, `x-amz-checksum-sha256|crc32|crc32c`, `If-None-Match: *`. An unsupported checksum header (`x-amz-checksum-crc64nvme`) is accepted and ignored — it never rejects the request or routes it elsewhere. Success → `200` + ETag. Zero-length body allowed.
 
 ### GetObject — `GET /{bucket}/{key}`
 
