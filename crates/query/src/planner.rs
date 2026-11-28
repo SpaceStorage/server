@@ -156,6 +156,21 @@ fn analyze(req: &LogicalRequest) -> Result<(Vec<String>, Vec<String>, Vec<Task>)
             ops.push("object".into());
             tasks.push(simple(EngineKind::Mutate));
         }
+        LogicalRequest::KeyGet { container, .. } => {
+            containers.push(container.clone());
+            ops.push("key_get".into());
+            tasks.push(simple(EngineKind::Point));
+        }
+        LogicalRequest::KeyDelete { container, .. } => {
+            containers.push(container.clone());
+            ops.push("key_delete".into());
+            tasks.push(simple(EngineKind::Mutate));
+        }
+        LogicalRequest::KeyScan { container, .. } => {
+            containers.push(container.clone());
+            ops.push("key_scan".into());
+            tasks.push(simple(EngineKind::Scan));
+        }
         LogicalRequest::Batch { requests } => {
             for r in requests {
                 let (c, o, t) = analyze(r)?;

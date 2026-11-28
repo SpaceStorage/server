@@ -56,7 +56,9 @@ pub use limits::{
 };
 pub use matrix::{
     classify, classify_outcome, classify_pg_copy, classify_pg_cursor, classify_pg_verb,
-    classify_redis_verb, ClassifyOutcome, VerbClass,
+    classify_redis_verb, redis_capability, redis_is_not_supported, redis_option_supported,
+    CapabilityCommand, ClassifyOutcome, ResourceGroup, VerbClass, REDIS_CAPABILITY_TABLE,
+    REDIS_NOT_SUPPORTED,
 };
 pub use metrics::{must_not_count, must_not_snapshot, record_must_not};
 pub use profile::{active_profile, profile_from_release, DialectProfile};

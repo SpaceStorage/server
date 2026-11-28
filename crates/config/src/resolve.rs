@@ -595,6 +595,31 @@ pub fn resolve(
                                     }
                                 }
                                 cfg.protocols.s3 = s3;
+                            } else if pb.name == "redis" {
+                                let mut redis = crate::model::RedisProtocolConfig::default();
+                                for pit in &pb.items {
+                                    if let Item::Directive(d) = pit {
+                                        if d.name == "max_block" {
+                                            match d.args.first() {
+                                                Some(Arg::DurationMs(ms)) => {
+                                                    redis.max_block =
+                                                        Some(Duration::from_millis(*ms));
+                                                }
+                                                Some(Arg::Number(n)) => {
+                                                    redis.max_block = Some(Duration::from_secs(*n));
+                                                }
+                                                Some(arg) => {
+                                                    let s = arg.as_str();
+                                                    if s.starts_with('-') {
+                                                        redis.max_block_negative = true;
+                                                    }
+                                                }
+                                                None => {}
+                                            }
+                                        }
+                                    }
+                                }
+                                cfg.protocols.redis = redis;
                             }
                         }
                     }

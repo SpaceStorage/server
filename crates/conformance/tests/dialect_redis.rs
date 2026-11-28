@@ -1,5 +1,6 @@
 //! G5/G5b Redis first-binary dialect.
 
+use spacestorage_compat::DialectProfile;
 use spacestorage_handler_redis::{RedisReply, SessionState, dispatch};
 use spacestorage_types::ContainerCatalog;
 use std::sync::{Arc, RwLock};
@@ -58,5 +59,31 @@ fn g5b_off_list_verbs_error_never_silent() {
             matches!(r, RedisReply::Error(_)),
             "{cmd} must error, got {r:?}"
         );
+    }
+}
+
+/// `017` T067: the new complete-product MUST verbs stay errors on both the
+/// first-binary and handlers-complete profiles — no new MUST verb leaks into
+/// `016` (SC-006 / FR-005 preserved, research R13).
+#[test]
+fn g5c_new_must_verbs_error_before_complete_product() {
+    for profile in [DialectProfile::FirstBinary, DialectProfile::HandlersComplete] {
+        let catalog = Arc::new(RwLock::new(ContainerCatalog::new()));
+        let mut s = SessionState::demo(catalog);
+        s.profile = profile;
+        assert!(matches!(
+            dispatch(&mut s, "AUTH", &["demo", "demo"]),
+            RedisReply::Ok
+        ));
+        for cmd in [
+            "HGET", "XADD", "MULTI", "SUBSCRIBE", "PFADD", "SETBIT", "INFO", "COMMAND", "TYPE",
+            "DBSIZE",
+        ] {
+            let r = dispatch(&mut s, cmd, &["a", "b"]);
+            assert!(
+                matches!(r, RedisReply::Error(_)),
+                "{cmd} on {profile:?} must error, got {r:?}"
+            );
+        }
     }
 }

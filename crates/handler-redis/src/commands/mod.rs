@@ -1,4 +1,19 @@
-//! Command dispatch for first-binary Redis K/V MUST list.
+//! Command dispatch for the first-binary Redis K/V MUST list and (from `017`)
+//! the complete-product command surface. Submodules are created by `017` T002;
+//! behavior lands per user story.
+
+pub mod bitmap;
+pub mod hash;
+pub mod hll;
+pub mod list;
+pub mod pubsub;
+pub mod server;
+pub mod set;
+pub mod ss;
+pub mod strings;
+pub mod stream;
+pub mod txn;
+pub mod zset;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -8,7 +23,12 @@ use spacestorage_compat::{
     ClassifyOutcome, DialectProfile, LimitServices, PrincipalHold, ProtocolId, classify_outcome,
 };
 use spacestorage_query::{CancelToken, LogicalRequest, PlannerEngine, QueryOptions, QueryResult};
-use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, StorageModeChoice, TypeError};
+use spacestorage_types::{ContainerCatalog, ContainerId, L3Model, TypeError};
+
+use crate::{lower, render};
+use crate::block::BlockRegistry;
+use crate::pubsub::PubSubBus;
+use crate::session::{ConnectionId, Subscription};
 
 pub const MUST_COMMANDS: &[&str] = &[
     "AUTH", "PING", "GET", "SET", "DEL", "EXISTS", "SCAN", "SELECT", "TTL", "EXPIRE", "PTTL",
@@ -18,9 +38,16 @@ pub const MUST_COMMANDS: &[&str] = &[
 pub enum RedisReply {
     Ok,
     Pong,
+    /// RESP2 simple string (`+...`), used by the `+QUEUED` receipt.
+    Simple(String),
     Bulk(Option<Vec<u8>>),
     Integer(i64),
     Array(Vec<RedisReply>),
+    /// Several independent frames written back-to-back: subscribe/unsubscribe
+    /// confirmations and the subscribe-mode `PING` array.
+    Frames(Vec<RedisReply>),
+    /// RESP2 null array (`*-1`); used by `EXEC` when `WATCH` aborts.
+    NullArray,
     Error(String),
 }
 
@@ -96,6 +123,36 @@ pub struct SessionState {
     pub tenancy: Option<Arc<spacestorage_tenancy::Tenancy>>,
     pub connection_quota: Option<spacestorage_tenancy::ConnectionQuotaHold>,
     pub principal: Option<String>,
+    /// Active dialect profile (`017` T012). The complete-product table is
+    /// consulted only when this is `CompleteProduct`.
+    pub profile: DialectProfile,
+    /// Shared blocking wake registry (`017` T027); every write wakes parked
+    /// connections so a blocking command re-checks its keys.
+    pub block_registry: Arc<BlockRegistry>,
+    /// Per-stream-key total-order leadership lease (`017` T038). Shared across
+    /// connections; the node (`006`) grants it. Default dev/harness single-node
+    /// holder; a running node injects a `controlplane`-backed provider.
+    pub stream_leases: Arc<dyn spacestorage_protocol_core::StreamLeaseProvider>,
+    /// Connection-local transaction state (`017` US3, data-model §6).
+    pub txn: txn::TransactionSession,
+    /// This connection's RESP2 identity (`CLIENT ID`) — the pub/sub bus key.
+    pub connection_id: ConnectionId,
+    /// `Some` while in subscribe mode (`017` data-model §5).
+    pub subscriptions: Option<Subscription>,
+    /// Process-local, namespace-scoped pub/sub bus (`017` US3). Shared across
+    /// every connection of one handler, never durable.
+    pub pubsub: Arc<PubSubBus>,
+    /// Handler-local `INFO` counters (`017` US4 T051/T055). Shared across every
+    /// connection of one handler; records real connections/commands/hits/misses.
+    pub stats: Arc<crate::stats::RedisStats>,
+    /// Node facts for `INFO server`/`memory`/`replication` (`017` US4 T051).
+    /// Defaults to the standalone provider; the running node injects real facts.
+    pub node_info: Arc<dyn spacestorage_protocol_core::NodeInfoProvider>,
+    /// Configured blocking cap (`017` US4): surfaced and updated by
+    /// `CONFIG GET|SET max_block`; applied in `run_block`.
+    pub max_block: Option<Duration>,
+    /// This connection's `CLIENT SETNAME` label (`017` US4), if any.
+    pub client_name: Option<String>,
 }
 
 impl SessionState {
@@ -114,7 +171,24 @@ impl SessionState {
             tenancy: None,
             connection_quota: None,
             principal: None,
+            profile: DialectProfile::FirstBinary,
+            block_registry: Arc::new(BlockRegistry::new()),
+            stream_leases: Arc::new(crate::lease::StreamLeaseAuthority::single_node()),
+            txn: txn::TransactionSession::default(),
+            connection_id: ConnectionId(0),
+            subscriptions: None,
+            pubsub: Arc::new(PubSubBus::new()),
+            stats: Arc::new(crate::stats::RedisStats::new()),
+            node_info: Arc::new(spacestorage_protocol_core::StandaloneNodeInfo::new()),
+            max_block: None,
+            client_name: None,
         }
+    }
+
+    /// `Some` subscriptions ⇒ subscribe mode (`017` US3): only the allowed
+    /// pub/sub verbs, `PING`, `QUIT`, and `RESET` are served.
+    pub fn subscribe_mode(&self) -> bool {
+        self.subscriptions.is_some()
     }
 
     /// K/V MUST path: auto-create `K/V Store` when missing (T053 seam).
@@ -139,26 +213,34 @@ impl SessionState {
         allowed: &[L3Model],
         auto_create_kv: bool,
     ) -> Result<ContainerId, RedisReply> {
-        let mut cat = self.catalog.write().expect("catalog");
-        match cat.describe(&self.namespace, &self.container) {
-            Ok(c) => {
-                if !allowed.contains(&c.model) {
+        // Metadata lookup only (a `describe`, not a data op): resolve the
+        // existing key-space container without holding the lock across the IR.
+        let existing = {
+            let cat = self.catalog.read().expect("catalog");
+            cat.describe(&self.namespace, &self.container)
+                .map(|c| (c.id, c.model))
+        };
+        match existing {
+            Ok((id, model)) => {
+                if !allowed.contains(&model) {
                     return Err(RedisReply::Error(
                         "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
                     ));
                 }
-                Ok(c.id)
+                Ok(id)
             }
-            Err(TypeError::NotFound) if auto_create_kv => cat
-                .create(
-                    &self.namespace,
-                    &self.container,
-                    L3Model::KvStore,
-                    false,
-                    None,
-                    StorageModeChoice::Persistent,
-                )
-                .map_err(|e| RedisReply::Error(format!("ERR {e:?}"))),
+            Err(TypeError::NotFound) if auto_create_kv => {
+                // Auto-create through the shared engine (`002` FR-035): the
+                // `ensure_kv` TypeOp maps to the L3 `KvStore` model.
+                self.planner_exec(LogicalRequest::TypeOp {
+                    container: self.container.clone(),
+                    op: "ensure_kv".into(),
+                })?;
+                let cat = self.catalog.read().expect("catalog");
+                cat.describe(&self.namespace, &self.container)
+                    .map(|c| c.id)
+                    .map_err(|e| RedisReply::Error(format!("ERR {e:?}")))
+            }
             Err(TypeError::NotFound) => Err(RedisReply::Error(
                 "ERR no such container (admin-create Document Store / K/V first)".into(),
             )),
@@ -167,10 +249,14 @@ impl SessionState {
     }
 
     fn purge_if_expired(&self, id: ContainerId, key: &str) {
-        let mut ttls = self.ttls.write().expect("ttl");
-        if ttls.expired(id, key) {
-            let mut cat = self.catalog.write().expect("catalog");
-            let _ = cat.delete_row(id, key);
+        let expired = {
+            let mut ttls = self.ttls.write().expect("ttl");
+            ttls.expired(id, key)
+        };
+        if expired {
+            let _ = self.delete_entry(id, key);
+            // `017` US4: a purge-on-read is a real expired-key deletion.
+            self.stats.record_expired();
         }
     }
 
@@ -194,11 +280,140 @@ impl SessionState {
             )
             .map_err(|e| RedisReply::Error(format!("ERR {e}")))
     }
+
+    /// Complete-product (`017`): the key-space container id, auto-created on
+    /// first use (`002` auto-create / T030).
+    pub(crate) fn keyspace_id(&self) -> Result<ContainerId, RedisReply> {
+        self.ensure_data()
+    }
+
+    /// Read + decode one canonical entry. Expired keys purge-on-read and appear
+    /// absent (data-model §7). Raw (non-canonical) blobs degrade to a string.
+    pub(crate) fn load_entry(
+        &self,
+        id: ContainerId,
+        key: &str,
+    ) -> Result<Option<lower::RedisEntry>, RedisReply> {
+        let bytes = match self
+            .planner_exec(LogicalRequest::KeyGet {
+                container: self.container.clone(),
+                key: key.to_string(),
+            })?
+            .blob
+        {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        let key_bytes = bytes::Bytes::from(key.as_bytes().to_vec());
+        let mut entry = match lower::decode_entry(key_bytes, &bytes) {
+            Some(e) => e,
+            None => lower::RedisEntry::new(
+                bytes::Bytes::from(key.as_bytes().to_vec()),
+                lower::EntryPayload::Bytes(bytes),
+            ),
+        };
+        if let Some(d) = entry.expire_at {
+            if d.is_past(crate::expiry::TtlInstant::now()) {
+                let _ = self.delete_entry(id, key)?;
+                // `017` US4: an expired key purged on read is counted for `INFO stats`.
+                self.stats.record_expired();
+                return Ok(None);
+            }
+        }
+        entry.key = bytes::Bytes::from(key.as_bytes().to_vec());
+        Ok(Some(entry))
+    }
+
+    /// Write one canonical entry (durable hook runs for Persistent/Hybrid).
+    ///
+    /// Data-model §2: `version` is bumped on every mutation so `WATCH` can
+    /// detect a concurrent write. A first write keeps the incoming version; an
+    /// overwrite advances the stored one.
+    pub(crate) fn store_entry(
+        &self,
+        id: ContainerId,
+        entry: &lower::RedisEntry,
+    ) -> Result<(), RedisReply> {
+        let key = String::from_utf8_lossy(&entry.key).into_owned();
+        let mut stored = entry.clone();
+        if let Some(prev) = self.load_entry(id, &key)? {
+            stored.version = prev.version.wrapping_add(1);
+        }
+        let blob = lower::encode_entry(&stored);
+        self.planner_exec(LogicalRequest::Object {
+            container: self.container.clone(),
+            key,
+            bytes: blob,
+        })?;
+        self.block_registry.wake();
+        Ok(())
+    }
+
+    pub(crate) fn delete_entry(
+        &self,
+        _id: ContainerId,
+        key: &str,
+    ) -> Result<bool, RedisReply> {
+        let r = self.planner_exec(LogicalRequest::KeyDelete {
+            container: self.container.clone(),
+            key: key.to_string(),
+        })?;
+        self.block_registry.wake();
+        Ok(r.tag == "DELETE 1")
+    }
+
+    pub(crate) fn entry_exists(
+        &self,
+        id: ContainerId,
+        key: &str,
+    ) -> Result<bool, RedisReply> {
+        Ok(self.load_entry(id, key)?.is_some())
+    }
 }
 
 pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisReply {
+    // `017` US4: every dispatched command is counted once with its measured
+    // wall-clock time — the top-level command and each `EXEC`-replayed
+    // sub-command (which re-enters through this same seam).
+    let started = Instant::now();
+    let reply = dispatch_inner(session, cmd, args);
+    session
+        .stats
+        .record_command(cmd, started.elapsed().as_micros() as u64);
+    reply
+}
+
+fn dispatch_inner(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisReply {
     let upper = cmd.to_ascii_uppercase();
-    match classify_outcome(DialectProfile::FirstBinary, ProtocolId::Redis, &upper) {
+
+    // `017` US3: queue-time interception runs before classification so that a
+    // queuing-time error (unknown command, arity, blocking/subscribe verb) is
+    // reported against the offending command and marks the transaction dirty.
+    if session.profile == DialectProfile::CompleteProduct {
+        if let Some(reply) = txn::intercept(session, &upper, args) {
+            return reply;
+        }
+    }
+
+    // `017` US4: `OBJECT`/`CONFIG` are two-word commands whose capability row is
+    // keyed on the pair (`OBJECT ENCODING`, `CONFIG GET`), not the bare verb.
+    // When the bare token is not `Must`, retry with `<VERB> <ARG>` and keep the
+    // bare verdict if the pair is not `Must` either (the capability table is
+    // unchanged; this only closes the lookup gap).
+    let outcome = match classify_outcome(session.profile, ProtocolId::Redis, &upper) {
+        ClassifyOutcome::Must => ClassifyOutcome::Must,
+        other => match args.first() {
+            Some(arg) => {
+                let two_word = format!("{upper} {}", arg.to_ascii_uppercase());
+                match classify_outcome(session.profile, ProtocolId::Redis, &two_word) {
+                    ClassifyOutcome::Must => ClassifyOutcome::Must,
+                    _ => other,
+                }
+            }
+            None => other,
+        },
+    };
+    match outcome {
         ClassifyOutcome::Must => {}
         ClassifyOutcome::MustNot(_) => {
             return RedisReply::Error(format!("ERR unknown command '{cmd}'"));
@@ -209,6 +424,23 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
         // Allow PING before AUTH (common health); AUTH required for data verbs.
         if upper != "PING" {
             return RedisReply::Error("NOAUTH Authentication required.".into());
+        }
+    }
+
+    // `017` US3: while subscribed, only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE /
+    // PING / QUIT / RESET are allowed. PING answers with the array form.
+    if session.subscribe_mode() {
+        match upper.as_str() {
+            "SUBSCRIBE" | "UNSUBSCRIBE" | "PSUBSCRIBE" | "PUNSUBSCRIBE" | "SSUBSCRIBE"
+            | "SUNSUBSCRIBE" => {}
+            "PING" => return ping_in_subscribe_mode(args),
+            "QUIT" | "RESET" => {}
+            _ => {
+                return RedisReply::Error(format!(
+                    "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
+                    cmd.to_ascii_lowercase()
+                ));
+            }
         }
     }
 
@@ -253,9 +485,89 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             _ => RedisReply::Error("ERR wrong number of arguments for 'ping'".into()),
         },
         "SELECT" => {
-            // First-binary: no-op inside bound namespace (index ignored when 0; others still no-op per dialect).
-            RedisReply::Ok
+            // `016` first-binary: no-op inside the bound namespace (index ignored).
+            // `017` complete product: the dialect binds one namespace per
+            // credential (`002`), so only index 0 (already bound) is a no-op;
+            // `SELECT n>0` is the documented not-supported exception
+            // (contracts/not-supported.md §11).
+            if session.profile == DialectProfile::CompleteProduct {
+                match args.first().copied() {
+                    Some("0") => RedisReply::Ok,
+                    Some(_) => RedisReply::Error(
+                        "ERR SELECT is not supported: namespaces are bound to credentials".into(),
+                    ),
+                    None => render::arity("select"),
+                }
+            } else {
+                RedisReply::Ok
+            }
         }
+        _ => {
+            if session.profile == DialectProfile::CompleteProduct {
+                complete_dispatch(session, &upper, args)
+            } else {
+                first_binary_dispatch(session, &upper, args)
+            }
+        }
+    }
+}
+
+/// Subscribe-mode `PING` (`017` US3): a single `[pong, message]` array frame.
+fn ping_in_subscribe_mode(args: &[&str]) -> RedisReply {
+    let payload = match args {
+        [] => Vec::new(),
+        [m] => m.as_bytes().to_vec(),
+        _ => return render::arity("ping"),
+    };
+    RedisReply::Frames(vec![RedisReply::Array(vec![
+        RedisReply::Bulk(Some(b"pong".to_vec())),
+        RedisReply::Bulk(Some(payload)),
+    ])])
+}
+
+/// `017` T012: the complete-product dispatch seam. Classification already ran
+/// in [`dispatch`]; here in-table commands lower onto the shared key-space entry
+/// model. Returns a protocol error (never `+OK`) for an unhandled verb.
+fn complete_dispatch(session: &mut SessionState, upper: &str, args: &[&str]) -> RedisReply {
+    if let Some(reply) = txn::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = pubsub::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = server::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = strings::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = hash::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = list::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = set::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = zset::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = bitmap::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = hll::dispatch(session, upper, args) {
+        return reply;
+    }
+    if let Some(reply) = stream::dispatch(session, upper, args) {
+        return reply;
+    }
+    render::unknown_command(upper)
+}
+
+/// `016` first-binary K/V string subset (unchanged).
+fn first_binary_dispatch(session: &mut SessionState, upper: &str, args: &[&str]) -> RedisReply {
+    match upper {
         "SET" => {
             let Some(key) = args.first() else {
                 return RedisReply::Error("ERR wrong number of arguments for 'set'".into());
@@ -319,23 +631,20 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 Err(e) => return e,
             };
             session.purge_if_expired(id, key);
-            match session.planner_exec(LogicalRequest::Point {
+            match session.planner_exec(LogicalRequest::KeyGet {
                 container: session.container.clone(),
                 key: (*key).into(),
             }) {
-                Ok(r) if r.rows.is_empty() => RedisReply::Bulk(None),
-                Ok(r) => {
-                    let v = r.rows[0]
-                        .get(1)
-                        .and_then(|x| x.as_ref())
-                        .map(|s| s.as_bytes().to_vec());
-                    if let Some(ref bytes) = v {
+                Ok(r) => match r.blob {
+                    Some(bytes) => {
                         if let Err(e) = limits.check_result(bytes.len() as u64) {
-                            return RedisReply::Error(format!("ERR {e}"));
+                            RedisReply::Error(format!("ERR {e}"))
+                        } else {
+                            RedisReply::Bulk(Some(bytes))
                         }
                     }
-                    RedisReply::Bulk(v)
-                }
+                    None => RedisReply::Bulk(None),
+                },
                 Err(e) => e,
             }
         }
@@ -350,12 +659,11 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let mut n = 0i64;
             let mut ttls = session.ttls.write().expect("ttl");
             for key in args {
-                match session.planner_exec(LogicalRequest::Mutate {
+                match session.planner_exec(LogicalRequest::KeyDelete {
                     container: session.container.clone(),
-                    op: "delete".into(),
-                    sql: (*key).into(),
+                    key: (*key).into(),
                 }) {
-                    Ok(r) if r.tag.contains('1') => {
+                    Ok(r) if r.tag == "DELETE 1" => {
                         ttls.clear(id, key);
                         n += 1;
                     }
@@ -373,11 +681,10 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
             let mut n = 0i64;
             for key in args {
                 session.purge_if_expired(id, key);
-                let cat = session.catalog.read().expect("catalog");
-                match cat.exists(id, key) {
+                match session.entry_exists(id, key) {
                     Ok(true) => n += 1,
                     Ok(false) => {}
-                    Err(e) => return RedisReply::Error(format!("ERR {e:?}")),
+                    Err(e) => return e,
                 }
             }
             RedisReply::Integer(n)
@@ -385,7 +692,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
         "SCAN" => {
             let cursor: u64 = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
             let mut count = 10usize;
-            let mut pattern: Option<&str> = None;
+            let mut pattern: Option<String> = None;
             let mut i = 1;
             while i < args.len() {
                 let opt = args[i].to_ascii_uppercase();
@@ -395,27 +702,35 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                     }
                     i += 2;
                 } else if opt == "MATCH" {
-                    pattern = args.get(i + 1).copied();
+                    pattern = args.get(i + 1).map(|s| s.to_string());
                     i += 2;
                 } else {
                     i += 1;
                 }
             }
-            let id = match session.ensure_data() {
+            let _id = match session.ensure_data() {
                 Ok(id) => id,
                 Err(e) => return e,
             };
-            let cat = session.catalog.read().expect("catalog");
-            match cat.scan(id, cursor, count, pattern) {
-                Ok((next, keys)) => RedisReply::Array(vec![
-                    RedisReply::Bulk(Some(next.to_string().into_bytes())),
-                    RedisReply::Array(
-                        keys.into_iter()
-                            .map(|k| RedisReply::Bulk(Some(k.into_bytes())))
-                            .collect(),
-                    ),
-                ]),
-                Err(e) => RedisReply::Error(format!("ERR {e:?}")),
+            match session.planner_exec(LogicalRequest::KeyScan {
+                container: session.container.clone(),
+                cursor,
+                count,
+                pattern,
+            }) {
+                Ok(r) => {
+                    let keys: Vec<RedisReply> = r
+                        .rows
+                        .iter()
+                        .filter_map(|row| row.first().and_then(|k| k.clone()))
+                        .map(|k| RedisReply::Bulk(Some(k.into_bytes())))
+                        .collect();
+                    RedisReply::Array(vec![
+                        RedisReply::Bulk(Some(r.tag.into_bytes())),
+                        RedisReply::Array(keys),
+                    ])
+                }
+                Err(e) => e,
             }
         }
         "EXPIRE" => {
@@ -429,10 +744,8 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 Ok(id) => id,
                 Err(e) => return e,
             };
-            let cat = session.catalog.read().expect("catalog");
-            match cat.exists(id, key) {
+            match session.entry_exists(id, key) {
                 Ok(true) => {
-                    drop(cat);
                     session
                         .ttls
                         .write()
@@ -441,7 +754,7 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                     RedisReply::Integer(1)
                 }
                 Ok(false) => RedisReply::Integer(0),
-                Err(e) => RedisReply::Error(format!("ERR {e:?}")),
+                Err(e) => e,
             }
         }
         "TTL" => {
@@ -453,14 +766,13 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 Err(e) => return e,
             };
             session.purge_if_expired(id, key);
-            let cat = session.catalog.read().expect("catalog");
-            match cat.exists(id, key) {
+            match session.entry_exists(id, key) {
                 Ok(false) => RedisReply::Integer(-2),
                 Ok(true) => {
                     let t = session.ttls.read().expect("ttl").ttl_secs(id, key);
                     RedisReply::Integer(if t == -1 { -1 } else { t })
                 }
-                Err(e) => RedisReply::Error(format!("ERR {e:?}")),
+                Err(e) => e,
             }
         }
         "PTTL" => {
@@ -472,23 +784,23 @@ pub fn dispatch(session: &mut SessionState, cmd: &str, args: &[&str]) -> RedisRe
                 Err(e) => return e,
             };
             session.purge_if_expired(id, key);
-            let cat = session.catalog.read().expect("catalog");
-            match cat.exists(id, key) {
+            match session.entry_exists(id, key) {
                 Ok(false) => RedisReply::Integer(-2),
                 Ok(true) => {
                     let t = session.ttls.read().expect("ttl").pttl_ms(id, key);
                     RedisReply::Integer(if t == -1 { -1 } else { t })
                 }
-                Err(e) => RedisReply::Error(format!("ERR {e:?}")),
+                Err(e) => e,
             }
         }
-        _ => RedisReply::Error(format!("ERR unknown command '{cmd}'")),
+        _ => RedisReply::Error(format!("ERR unknown command '{upper}'")),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use spacestorage_types::StorageModeChoice;
 
     #[test]
     fn set_rejects_oversized_key() {

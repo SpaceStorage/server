@@ -10,7 +10,11 @@ use crate::definition::StorageModeChoice;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Creatable L0 data-structure machine names (15).
+/// Creatable L0 data-structure machine names (16).
+///
+/// `hyperloglog` is the `017` Redis-dialect cardinality-sketch extension
+/// (registered through the `003` FR-045–FR-049 path; it changes no baseline
+/// descriptor).
 pub const L0_CREATABLE: &[&str] = &[
     "tuple",
     "vector",
@@ -27,6 +31,7 @@ pub const L0_CREATABLE: &[&str] = &[
     "hnsw",
     "scann",
     "bitmap",
+    "hyperloglog",
 ];
 
 /// Non-creatable L0 storage primitives + layout.
@@ -42,6 +47,17 @@ pub fn is_l0_not_creatable(name: &str) -> bool {
 
 pub fn l0_descriptor(name: &str) -> Option<TypeDescriptor> {
     if is_l0_creatable(name) {
+        // `017` extension path: `hyperloglog` declares its operation set and
+        // documented standard error here, changing no baseline descriptor.
+        let (operations, standard_error): (Vec<&'static str>, Option<&'static str>) =
+            if name == "hyperloglog" {
+                (
+                    vec!["add", "count", "merge", "clear"],
+                    Some("1.04/sqrt(2^precision)"),
+                )
+            } else {
+                (Vec::new(), None)
+            };
         Some(TypeDescriptor {
             name: name.into(),
             display_name: display_for(name).into(),
@@ -51,6 +67,9 @@ pub fn l0_descriptor(name: &str) -> Option<TypeDescriptor> {
             schema_required: matches!(name, "kd_tree" | "hnsw" | "scann"),
             snapshot_capable: false,
             introduced_in: crate::descriptor::ProductVersion::FIRST_BINARY,
+            operations,
+            standard_error,
+            canonical_version: 1,
         })
     } else if is_l0_not_creatable(name) {
         Some(TypeDescriptor {
@@ -66,6 +85,9 @@ pub fn l0_descriptor(name: &str) -> Option<TypeDescriptor> {
             schema_required: false,
             snapshot_capable: false,
             introduced_in: crate::descriptor::ProductVersion::FIRST_BINARY,
+            operations: Vec::new(),
+            standard_error: None,
+            canonical_version: 1,
         })
     } else {
         None
@@ -89,6 +111,7 @@ fn display_for(name: &str) -> &'static str {
         "hnsw" => "HNSW",
         "scann" => "ScaNN",
         "bitmap" => "Bitmap / Bitset",
+        "hyperloglog" => "HyperLogLog",
         "memtable" => "MemTable",
         "sstable" => "SSTable",
         "wal" => "WAL",
@@ -96,6 +119,170 @@ fn display_for(name: &str) -> &'static str {
         "lsm_tree" => "LSM Tree",
         _ => "L0",
     }
+}
+
+/// Default HyperLogLog precision — `2^14` registers, matching Redis (`017` FR-017).
+pub const HLL_DEFAULT_PRECISION: u8 = 14;
+/// Lower bound of a usable precision (`m = 16` registers).
+pub const HLL_MIN_PRECISION: u8 = 4;
+/// Upper bound of a usable precision (`m = 65536` registers).
+pub const HLL_MAX_PRECISION: u8 = 16;
+
+/// HyperLogLog cardinality sketch — the registered L0 `hyperloglog` primitive
+/// (`017` US5, data-model §8). The algorithm lives here as the shared abstract
+/// interface; the Redis handler only encodes/decodes the entry payload built
+/// from this type (no protocol-private encoding).
+///
+/// Hashing is a fixed MurmurHash64A (never `DefaultHasher`), so estimates are
+/// run-stable and the documented `1.04/sqrt(m)` accuracy bound is directly
+/// testable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HyperLogLog {
+    /// Frozen at create; register count is `1 << precision`.
+    precision: u8,
+    /// `1 << precision` registers holding the max observed rank + 1 (`0` = empty).
+    registers: Vec<u8>,
+}
+
+impl Default for HyperLogLog {
+    fn default() -> Self {
+        Self::new(HLL_DEFAULT_PRECISION)
+    }
+}
+
+impl HyperLogLog {
+    /// New sketch at `precision` (clamped to `4..=16`, default 14).
+    pub fn new(precision: u8) -> Self {
+        let p = precision.clamp(HLL_MIN_PRECISION, HLL_MAX_PRECISION);
+        let m = 1usize << p;
+        Self {
+            precision: p,
+            registers: vec![0u8; m],
+        }
+    }
+
+    /// Rebuild from an existing `precision`/`registers` pair (handler entry
+    /// decode). Registers shorter/longer than `1 << precision` are zero-padded
+    /// or truncated so the invariant always holds.
+    pub fn from_registers(precision: u8, mut registers: Vec<u8>) -> Self {
+        let p = precision.clamp(HLL_MIN_PRECISION, HLL_MAX_PRECISION);
+        let m = 1usize << p;
+        registers.resize(m, 0);
+        Self {
+            precision: p,
+            registers,
+        }
+    }
+
+    pub fn precision(&self) -> u8 {
+        self.precision
+    }
+
+    pub fn registers(&self) -> &[u8] {
+        &self.registers
+    }
+
+    /// Documented standard error `1.04/sqrt(m)` for the current register count.
+    pub fn standard_error(&self) -> f64 {
+        1.04 / (self.registers.len() as f64).sqrt()
+    }
+
+    /// Add one element. Returns `true` when a register grew (the estimate may
+    /// have changed), matching Redis `PFADD`'s return semantics.
+    pub fn add(&mut self, elem: &[u8]) -> bool {
+        let p = u32::from(self.precision);
+        let h = hll_hash64(elem);
+        let idx = (h & ((1u64 << p) - 1)) as usize;
+        let w = h >> p;
+        // Rank = position (1-based) of the leftmost 1 in the `64 - p` remaining
+        // bits; an all-zero tail reports `64 - p + 1`.
+        let rank = if w == 0 {
+            (65 - p) as u8
+        } else {
+            (w.leading_zeros() - p + 1) as u8
+        };
+        if rank > self.registers[idx] {
+            self.registers[idx] = rank;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Approximate cardinality. Uses the raw harmonic estimate, falling back to
+    /// linear counting (`m * ln(m/V)`) while the estimate is small — which keeps
+    /// the error well inside `1.04/sqrt(m)` at precision 14.
+    pub fn count(&self) -> u64 {
+        let m = self.registers.len() as f64;
+        let mut sum = 0.0f64;
+        let mut zeros = 0usize;
+        for &r in &self.registers {
+            sum += 2f64.powi(-(i32::from(r)));
+            if r == 0 {
+                zeros += 1;
+            }
+        }
+        let alpha = match self.registers.len() {
+            16 => 0.673,
+            32 => 0.697,
+            64 => 0.709,
+            _ => 0.7213 / (1.0 + 1.079 / m),
+        };
+        let raw = alpha * m * m / sum;
+        if raw <= 2.5 * m && zeros > 0 {
+            (m * ((m / zeros as f64).ln())).round() as u64
+        } else {
+            raw.round() as u64
+        }
+    }
+
+    /// Register-wise max (union) over the shared buckets. Equal precision gives
+    /// the exact union estimate; differing precision keeps self's buckets.
+    pub fn merge(&mut self, other: &HyperLogLog) {
+        for (a, b) in self.registers.iter_mut().zip(other.registers.iter()) {
+            if *b > *a {
+                *a = *b;
+            }
+        }
+    }
+
+    /// Zero every register (Redis `PFMERGE` dest reset / L0 clear).
+    pub fn clear(&mut self) {
+        for r in &mut self.registers {
+            *r = 0;
+        }
+    }
+}
+
+/// Deterministic MurmurHash64A (the same hash Redis uses for HyperLogLog),
+/// stable across runs and platforms. A fixed algorithm keeps the accuracy bound
+/// testable; FNV-1a was rejected because its low-order bits are not uniform
+/// enough for a 14-bit bucket index.
+fn hll_hash64(bytes: &[u8]) -> u64 {
+    const M: u64 = 0xc6a4a7935bd1e995;
+    const R: u32 = 47;
+    const SEED: u64 = 0xadc83b19;
+    let mut h: u64 = SEED ^ (bytes.len() as u64).wrapping_mul(M);
+    let mut chunks = bytes.chunks_exact(8);
+    for chunk in &mut chunks {
+        let mut k = u64::from_le_bytes(chunk.try_into().expect("8-byte chunk"));
+        k = k.wrapping_mul(M);
+        k ^= k >> R;
+        k = k.wrapping_mul(M);
+        h ^= k;
+        h = h.wrapping_mul(M);
+    }
+    let rem = chunks.remainder();
+    if !rem.is_empty() {
+        for (i, b) in rem.iter().enumerate() {
+            h ^= u64::from(*b) << (8 * i);
+        }
+        h = h.wrapping_mul(M);
+    }
+    h ^= h >> R;
+    h = h.wrapping_mul(M);
+    h ^= h >> R;
+    h
 }
 
 /// In-memory L0 container instance (user-supported workflow surface).
@@ -117,6 +304,7 @@ enum L0Store {
         bits: Vec<u64>,
         inserts: u64,
     },
+    HyperLogLog(HyperLogLog),
     /// Generic opaque store for remaining creatable L0 types (ops subset).
     Kv(HashMap<String, Vec<u8>>),
 }
@@ -141,6 +329,7 @@ impl L0Container {
                 bits: vec![0; 64],
                 inserts: 0,
             },
+            "hyperloglog" => L0Store::HyperLogLog(HyperLogLog::default()),
             _ => L0Store::Kv(HashMap::new()),
         };
         Ok(Self {
@@ -177,6 +366,12 @@ impl L0Container {
                 let _ = value;
                 Ok(())
             }
+            L0Store::HyperLogLog(hll) => {
+                // `put` = add one element (the key bytes); the value is ignored,
+                // mirroring `bloom_filter`. `get`/`len` report the estimate.
+                hll.add(key.as_bytes());
+                Ok(())
+            }
         }
     }
 
@@ -194,6 +389,7 @@ impl L0Container {
                     b"0".to_vec()
                 }))
             }
+            L0Store::HyperLogLog(hll) => Ok(Some(hll.count().to_string().into_bytes())),
         }
     }
 
@@ -212,6 +408,11 @@ impl L0Container {
             L0Store::BloomFilter { .. } => Err(TypeError::Msg(
                 "bloom_filter delete unsupported; use clear".into(),
             )),
+            L0Store::HyperLogLog(hll) => {
+                // `delete` = clear the sketch (Redis `PFMERGE` dest reset).
+                hll.clear();
+                Ok(true)
+            }
         }
     }
 
@@ -220,6 +421,7 @@ impl L0Container {
             L0Store::HashTable(m) | L0Store::Kv(m) => m.len(),
             L0Store::Vector(v) => v.len(),
             L0Store::BloomFilter { inserts, .. } => *inserts as usize,
+            L0Store::HyperLogLog(hll) => hll.count() as usize,
         }
     }
 }
@@ -343,8 +545,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn creatable_count_is_15() {
-        assert_eq!(L0_CREATABLE.len(), 15);
+    fn creatable_count_is_16() {
+        assert_eq!(L0_CREATABLE.len(), 16);
         assert_eq!(L0_NOT_CREATABLE.len(), 5);
     }
 
@@ -378,6 +580,25 @@ mod tests {
             cat.create("ns", format!("c{i}"), t, StorageModeChoice::Memory)
                 .unwrap_or_else(|e| panic!("{t}: {e}"));
         }
-        assert_eq!(cat.containers.len(), 15);
+        assert_eq!(cat.containers.len(), 16);
+    }
+
+    #[test]
+    fn hyperloglog_workflow_add_count_clear() {
+        let mut cat = L0Catalog::new();
+        cat.create("acme", "hll", "hyperloglog", StorageModeChoice::Memory)
+            .unwrap();
+        let c = cat.get_mut("acme", "hll").unwrap();
+        for i in 0..1000 {
+            c.put(&format!("elem-{i}"), Vec::new()).unwrap();
+        }
+        let got = c.get("ignored").unwrap().unwrap();
+        let est: f64 = String::from_utf8(got).unwrap().parse().unwrap();
+        assert!(
+            (est - 1000.0).abs() <= 1000.0 * 0.02,
+            "estimate {est} off for 1000 distinct"
+        );
+        assert!(c.delete("ignored").unwrap());
+        assert_eq!(c.len(), 0);
     }
 }

@@ -18,6 +18,8 @@ pub struct QueryResult {
     pub tag: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Option<String>>>,
+    /// Raw bytes for a byte-safe point read (`KeyGet`). `None` = absent key.
+    pub blob: Option<Vec<u8>>,
 }
 
 pub fn execute_adhoc_sql(
@@ -457,6 +459,7 @@ fn select_rows(
                 tag: format!("SELECT {}", rows.len()),
                 columns: vec!["id".into(), "value".into()],
                 rows,
+                ..Default::default()
             });
         }
         let cols: Vec<String> = c
@@ -491,12 +494,14 @@ fn select_rows(
             tag: format!("SELECT {}", rows.len()),
             columns: cols,
             rows,
+            ..Default::default()
         })
     } else {
         Ok(QueryResult {
             tag: "SELECT 1".into(),
             columns: vec!["?column?".into()],
             rows: vec![vec![Some("1".into())]],
+            ..Default::default()
         })
     }
 }
@@ -805,11 +810,13 @@ pub fn object_get(
                 Some(key.into()),
                 Some(String::from_utf8_lossy(v).into_owned()),
             ]],
+            ..Default::default()
         }),
         None => Ok(QueryResult {
             tag: "GET 0".into(),
             columns: vec!["key".into(), "value".into()],
             rows: vec![],
+            ..Default::default()
         }),
     }
 }
@@ -876,6 +883,88 @@ pub fn object_scan(
         tag: format!("SCAN {}", rows.len()),
         columns: vec!["key".into(), "value".into()],
         rows,
+        ..Default::default()
+    })
+}
+
+/// Byte-safe point read of one key-space entry (`KeyGet`, `002` FR-035).
+///
+/// Unlike [`object_get`] this never coerces the stored value to UTF-8: the raw
+/// bytes are returned in [`QueryResult::blob`] (`None` = absent key).
+pub fn key_get(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    key: &str,
+) -> Result<QueryResult, ExecError> {
+    let cat = catalog.read().expect("catalog");
+    let id = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+        .id;
+    match cat
+        .get(id, key)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+    {
+        Some(v) => Ok(QueryResult {
+            tag: "GET 1".into(),
+            blob: Some(v.to_vec()),
+            ..Default::default()
+        }),
+        None => Ok(QueryResult {
+            tag: "GET 0".into(),
+            ..Default::default()
+        }),
+    }
+}
+
+/// Byte-safe delete of one key-space entry (`KeyDelete`). `tag` is
+/// `DELETE {n}` with `n = 1` when a row was removed, else `0`.
+pub fn key_delete(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    key: &str,
+) -> Result<QueryResult, ExecError> {
+    let mut cat = catalog.write().expect("catalog");
+    let id = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+        .id;
+    let n = if cat.delete_row(id, key).unwrap_or(false) {
+        1
+    } else {
+        0
+    };
+    Ok(QueryResult {
+        tag: format!("DELETE {n}"),
+        ..Default::default()
+    })
+}
+
+/// Byte-safe key scan (`KeyScan`). `tag` is the next cursor; `rows` carries the
+/// keys as a single `key` column (never read as values).
+pub fn key_scan(
+    catalog: &SharedCatalog,
+    namespace: &str,
+    container: &str,
+    cursor: u64,
+    count: usize,
+    pattern: Option<&str>,
+) -> Result<QueryResult, ExecError> {
+    let cat = catalog.read().expect("catalog");
+    let id = cat
+        .describe(namespace, container)
+        .map_err(|e| ExecError::Msg(e.to_string()))?
+        .id;
+    let (next, keys) = cat
+        .scan(id, cursor, count, pattern)
+        .map_err(|e| ExecError::Msg(e.to_string()))?;
+    Ok(QueryResult {
+        tag: next.to_string(),
+        columns: vec!["key".into()],
+        rows: keys.into_iter().map(|k| vec![Some(k)]).collect(),
+        ..Default::default()
     })
 }
 
@@ -940,6 +1029,7 @@ pub fn copy_out(
         tag: format!("COPY {}", scan.rows.len()),
         columns: scan.columns,
         rows: scan.rows,
+        ..Default::default()
     })
 }
 

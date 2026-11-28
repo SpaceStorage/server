@@ -117,6 +117,8 @@ pub enum ErrorCode {
     IngestMissingTarget,
     /// `private_metrics` / `private_logs on` before observability export (007 R11).
     ObservabilityRequired,
+    /// `protocols.redis.max_block` declared negative (`017`).
+    RedisMaxBlockNegative,
 }
 
 impl ErrorCode {
@@ -174,6 +176,7 @@ impl ErrorCode {
             Self::IngestKafkaNoBrokers => "ingest_kafka_no_brokers",
             Self::IngestMissingTarget => "ingest_missing_target",
             Self::ObservabilityRequired => "ObservabilityRequired",
+            Self::RedisMaxBlockNegative => "redis_max_block_negative",
         }
     }
 }

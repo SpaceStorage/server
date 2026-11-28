@@ -60,5 +60,6 @@ pub fn result_from_job(sub: &Subscription) -> QueryResult {
             Some(sub.exec_id.to_string()),
             Some(format!("{:?}", sub.state)),
         ]],
+        ..Default::default()
     }
 }

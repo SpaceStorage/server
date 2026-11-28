@@ -1,3 +1,11 @@
+## 2026-11-27 — specs/017-redis-dialect-coverage
+
+- Complete-product Redis dialect (RESP2) on the Redis port, gated by `REDIS_CAPABILITY_TABLE` (191 rows MUST on `CompleteProduct`, MUST NOT on earlier profiles): strings/expiry, hashes, lists, sets, sorted sets, streams with consumer groups, transactions (`MULTI`/`EXEC`/`WATCH`), namespace-scoped pub/sub, `INFO`/introspection, bitmaps, and HyperLogLog.
+- HyperLogLog is a registered L0 `hyperloglog` cardinality-sketch primitive (`add`/`count`/`merge`/`clear`, `1.04/√m` bound at precision 14), reachable only through the shared type interface; `bitmap`/`hyperloglog` keys report `TYPE string`.
+- New `protocols.redis.max_block` knob (unset = stock timeout 0) now caps indefinite blocking commands and is surfaced via `CONFIG GET|SET max_block`; non-UTF-8 wire arguments remain out of scope.
+- Conformance: per-family `redis_*` suites, a 191-row capability walk, a `quickstart` mirror, a not-supported walk, and a limits suite, all against unmodified stock `redis` clients. Converge clean at 70/70 tasks.
+- Post-converge cleanup: fixed the two `quickstart.md` doc defects (Step 3 `HGETALL` order note; Step 4 group created at `0`), removed the unused `render` reply helpers (zero warnings), and tightened the `BITFIELD`/`resolve_offset` cap to `2^32 − 1`.
+
 ## 2026-11-26 — specs/019-s3-protocol, specs/013-durability-and-recovery
 
 - Fixed an S3 routing bug: a request carrying `x-amz-checksum-crc64nvme` (sent by default by current AWS SDK/CLI clients and mandatory for `DeleteObjects`) was diverted into the SSE-KMS refusal → `501 compat_must_not`, which broke `PutObject` under default client settings and every `DeleteObjects`. The header is now accepted but not verified; the refusal stays keyed on `x-amz-server-side-encryption` alone.

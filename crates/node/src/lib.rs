@@ -278,11 +278,24 @@ impl Node {
                 ),
             ))
             .unwrap();
-            reg.register(Arc::new(redis::RedisPortHandler::with_tenancy(
-                Arc::clone(&node.catalog),
-                limit_services.clone(),
-                Arc::clone(&node.tenancy),
-            )))
+            // `017` US4 T051/T054: real node facts for `INFO` and the configured
+            // `max_block` cap for blocking commands.
+            let redis_info: Arc<dyn spacestorage_handler_redis::NodeInfoProvider> =
+                Arc::new(redis::NodeRedisInfo::new(
+                    node.metrics.started,
+                    node.stats.workers(),
+                ));
+            let redis_max_block = node.config.load().protocols.redis.max_block;
+            reg.register(Arc::new(
+                redis::RedisPortHandler::with_controlplane(
+                    Arc::clone(&node.catalog),
+                    limit_services.clone(),
+                    Arc::clone(&node.controlplane),
+                    Arc::clone(&node.tenancy),
+                )
+                .with_node_info(redis_info)
+                .with_max_block(redis_max_block),
+            ))
             .unwrap();
             reg.register(Arc::new(
                 crate::handler::cassandra::CassandraPortHandler::with_namespace_control(

@@ -6,6 +6,8 @@ Machine names are `snake_case` and unique across levels. Modes: **bold** is the 
 
 Counts: **55 types** = 20 L0 (15 data structures + 4 storage primitives + 1 layout) + 18 L2 + 10 L3 + 7 L4, of which **50 are directly creatable**. L1 contributes 13 capabilities, which are not types (§L1 below).
 
+Types registered by later features through the extension path (FR-045–FR-049) are listed in [Registered extensions](#registered-extensions); they do not alter any baseline descriptor or the baseline counts above (FR-046).
+
 ---
 
 ## L0 — Foundation primitives
@@ -135,3 +137,13 @@ They are declared on containers of any level and validated against the per-type 
 | `ordered_map` | L2 `ordered_map` | same name; `002`'s WebDAV lock container keeps working |
 
 The in-memory-only implementations are deleted. This is the commit where data first survives a restart.
+
+## Registered extensions
+
+Types added after the baseline 55, through the extension path (FR-045–FR-049). Each registers a complete descriptor at exactly one level and changes no baseline type or container (FR-046).
+
+| Name | Display | Level / kind | Modes | Schema | Default layout | Key operations | Registered by |
+|---|---|---|---|---|---|---|---|
+| `hyperloglog` | HyperLogLog | L0 data structure (creatable) | **memory**, persistent, hybrid | O (`precision`) | self | `add`, `count`, `merge`, `clear` | `017` (Redis dialect) |
+
+`hyperloglog` is an approximate distinct-count (cardinality) sketch. `precision` defaults to `14` (`2^14` registers), matching the Redis default, and the descriptor carries the documented standard error (`1.04/√m`; ≈`0.81%` at the default). Redis clients see it as type `string`; `PFADD`/`PFCOUNT`/`PFMERGE` map onto `add`/`count`/`merge` (`017` FR-017).

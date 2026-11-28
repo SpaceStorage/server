@@ -92,6 +92,7 @@ pub fn run(
         tag: format!("SELECT {}", rows.len()),
         columns: out_cols,
         rows,
+        ..Default::default()
     })
 }
 

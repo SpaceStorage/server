@@ -106,12 +106,13 @@ Error shape: PostgreSQL `ERRCODE_FEATURE_NOT_SUPPORTED` (`0A000`), never empty s
 
 | Verb | FirstBinary | CompleteProduct |
 |------|-------------|-----------------|
-| AUTH, PING, GET, SET, DEL, EXISTS, SCAN | MUST on `K/V Store` | MUST (and type-specific ops as `015`) |
+| AUTH, PING, GET, SET, DEL, EXISTS, SCAN | MUST on `K/V Store` | MUST (full dialect per `017`) |
 | SELECT | no-op inside bound namespace | same |
 | TTL mapped to container TTL | MUST on KV | MUST |
 | Type-specific verbs off KV (`HGET`, `JSON.GET`, …) | **error** (unknown command or not-supported); never success/no-op | documented type-specific ops |
 | Other types (incl. Document Store) | canonical blob only | native mapping or canonical blob (`002`) |
-| Cluster slots, modules, Lua, Streams-as-product | not-supported | not-supported |
+| Cluster slots, modules, Lua | not-supported | not-supported |
+| Collections, Streams + consumer groups, bitmaps, HyperLogLog, pub/sub, transactions | not-supported | MUST (`017` capability table); geo/`XAUTOCLAIM`/Lua/modules/`CLUSTER`/Sentinel/ACL still not-supported |
 
 ## 6. ProductNonGoal
 

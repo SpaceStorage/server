@@ -171,14 +171,28 @@ impl Default for QueryDecl {
 pub struct ProtocolsDecl {
     #[serde(default)]
     pub s3: S3ProtocolDecl,
+    #[serde(default)]
+    pub redis: RedisProtocolConfig,
 }
 
 impl Default for ProtocolsDecl {
     fn default() -> Self {
         Self {
             s3: S3ProtocolDecl::default(),
+            redis: RedisProtocolConfig::default(),
         }
     }
+}
+
+/// `protocols.redis` directives (`017`). The only knob is `max_block`:
+/// `None` = stock indefinite timeout 0; `Some(d)` caps every blocking command.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedisProtocolConfig {
+    pub max_block: Option<Duration>,
+    /// Set when the config declared a negative `max_block`; `validate` emits the
+    /// named error (`std::time::Duration` cannot hold a negative value).
+    #[serde(default)]
+    pub max_block_negative: bool,
 }
 
 /// `protocols.s3` directives (019 contracts/config-directives.md).

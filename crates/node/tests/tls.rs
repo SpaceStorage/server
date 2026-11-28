@@ -120,6 +120,7 @@ fn base_cfg(
         jobs: spacestorage_config::model::JobsDecl::default(),
         kafka_ingests: Vec::new(),
         namespaces: Vec::new(),
+        protocols: Default::default(),
     }
 }
 

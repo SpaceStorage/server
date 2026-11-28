@@ -21,11 +21,14 @@ Profile columns: FB = FirstBinary, HC = HandlersComplete, CP = CompleteProduct. 
 
 ## Redis (RESP2)
 
+Complete-product dialect surface is owned by `017` (capability table); `015` FR-016 pins that ownership, and this table is the merged matrix. First-binary (`016`) Redis stays the narrow `K/V Store` string list.
+
 | Verb | FB | HC | CP |
 |------|----|----|-----|
 | AUTH, PING, GET, SET, DEL, EXISTS, SCAN, SELECT (no-op in bound ns), TTL mapped to container TTL | MUST on KV | MUST on KV | MUST |
+| `017` capability table: introspection (`INFO`, `DBSIZE`, `TYPE`, `SCAN`, `OBJECT`), strings + expiry, hashes, lists, sets, sorted sets, Streams + consumer groups, bitmaps, HyperLogLog, pub/sub, transactions | not-supported off the `016` list | not-supported off the `016` list | MUST |
 | Type-specific commands via `002` mapping | not required off KV | not required off KV | MUST where mapped |
-| CLUSTER slots, modules, Lua, Redis Streams as a product | MUST NOT | MUST NOT | MUST NOT |
+| Geo family, `XAUTOCLAIM`, Lua/`EVAL`/functions, modules, `CLUSTER` slots, Sentinel roles, ACL-management | MUST NOT | MUST NOT | MUST NOT |
 | RESP3 | MUST NOT | MUST NOT | MAY later (spec change) |
 
 ## Cassandra (native v4 and v5)

@@ -31,7 +31,10 @@ pub use definition::{
 pub use descriptor::{Kind, Level, ProductVersion, TypeDescriptor};
 pub use error::TypeError;
 pub use ident::{new_container_id, ContainerId, ContainerName, NamespaceName};
-pub use l0::{L0Catalog, L0Container, L0ContainerSummary, L0CreateRequest, L0_CREATABLE, L0_NOT_CREATABLE};
+pub use l0::{
+    HyperLogLog, L0Catalog, L0Container, L0ContainerSummary, L0CreateRequest, L0_CREATABLE,
+    L0_NOT_CREATABLE,
+};
 pub use schema::{ContainerSchema, Field, ValueDomain};
 pub use validate::{
     refuse_inplace_codec_rewrite, refuse_inplace_key_rewrite, refuse_inplace_reencode_existing,

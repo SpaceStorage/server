@@ -3,8 +3,9 @@
 use crate::admission::{AdmissionController, AdmissionLimits};
 use crate::cancel::{CancelToken, check_deadline};
 use crate::catalog_exec::{
-    QueryResult, SharedCatalog, copy_in, copy_out, ensure_container, execute_adhoc_sql,
-    object_delete, object_get, object_put, object_scan, parse_set_transaction_isolation,
+    QueryResult, SharedCatalog, copy_in, copy_out, ensure_container, execute_adhoc_sql, key_delete,
+    key_get, key_scan, object_delete, object_get, object_put, object_scan,
+    parse_set_transaction_isolation,
 };
 use crate::error::ExecError;
 use crate::options::{IsolationLevel, QueryOptions};
@@ -225,6 +226,7 @@ impl PlannerEngine {
             tag: format!("SELECT {}", rows.len()),
             columns: vec!["id".into(), "v".into()],
             rows,
+            ..Default::default()
         }))
     }
 
@@ -259,6 +261,7 @@ impl PlannerEngine {
                 tag: "EXPLAIN".into(),
                 columns: vec!["QUERY PLAN".into()],
                 rows: text.lines().map(|l| vec![Some(l.to_string())]).collect(),
+                ..Default::default()
             });
         }
 
@@ -632,6 +635,25 @@ impl PlannerEngine {
                 key,
                 bytes,
             } => object_put(&self.catalog, namespace, &container, &key, bytes),
+            LogicalRequest::KeyGet { container, key } => {
+                key_get(&self.catalog, namespace, &container, &key)
+            }
+            LogicalRequest::KeyDelete { container, key } => {
+                key_delete(&self.catalog, namespace, &container, &key)
+            }
+            LogicalRequest::KeyScan {
+                container,
+                cursor,
+                count,
+                pattern,
+            } => key_scan(
+                &self.catalog,
+                namespace,
+                &container,
+                cursor,
+                count,
+                pattern.as_deref(),
+            ),
             LogicalRequest::Scan { container, filter } => {
                 // Relational SQL scan when filter looks like a column predicate; else KV scan.
                 if filter

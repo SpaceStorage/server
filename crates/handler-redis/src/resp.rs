@@ -10,6 +10,8 @@ pub enum RespValue {
     Integer(i64),
     BulkString(Option<Vec<u8>>),
     Array(Vec<RespValue>),
+    /// RESP2 null array (`*-1`).
+    NullArray,
 }
 
 #[derive(Debug, Error)]
@@ -54,6 +56,9 @@ pub fn encode(value: &RespValue, out: &mut BytesMut) {
             for it in items {
                 encode(it, out);
             }
+        }
+        RespValue::NullArray => {
+            out.put_slice(b"*-1\r\n");
         }
     }
 }

@@ -53,6 +53,7 @@ fn lab_config(admin_port: u16, http_port: u16, token_path: &str) -> NodeConfig {
         jobs: spacestorage_config::model::JobsDecl::default(),
         kafka_ingests: Vec::new(),
         namespaces: Vec::new(),
+        protocols: Default::default(),
     }
 }
 

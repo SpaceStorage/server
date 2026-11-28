@@ -45,6 +45,15 @@ pub struct TypeDescriptor {
     pub snapshot_capable: bool,
     /// Product major that introduced this type (015 R13). Default 1 for first-binary types.
     pub introduced_in: ProductVersion,
+    /// Registered operation set (`003` FR-045 extension metadata). Empty for
+    /// baseline descriptors; populated for registered extensions such as
+    /// `hyperloglog` (`017`). Never changes a baseline descriptor.
+    pub operations: Vec<&'static str>,
+    /// Documented standard error for approximate types (`1.04/sqrt(2^precision)`
+    /// for `hyperloglog`). `None` for exact types.
+    pub standard_error: Option<&'static str>,
+    /// Canonical representation version (`003` FR-045); defaults to 1.
+    pub canonical_version: u32,
 }
 
 impl TypeDescriptor {
@@ -59,6 +68,9 @@ impl TypeDescriptor {
             schema_required,
             snapshot_capable,
             introduced_in: ProductVersion::FIRST_BINARY,
+            operations: Vec::new(),
+            standard_error: None,
+            canonical_version: 1,
         }
     }
 }

@@ -37,5 +37,6 @@ pub fn run(
         tag: format!("MAPREDUCE {n}"),
         columns: vec!["count".into()],
         rows: vec![vec![Some(n.to_string())]],
+        ..Default::default()
     })
 }

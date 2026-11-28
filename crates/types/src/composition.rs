@@ -39,6 +39,9 @@ pub fn l4_descriptor(name: &str) -> Option<TypeDescriptor> {
         schema_required: false,
         snapshot_capable: false,
         introduced_in: crate::descriptor::ProductVersion::FIRST_BINARY,
+        operations: Vec::new(),
+        standard_error: None,
+        canonical_version: 1,
     })
 }
 

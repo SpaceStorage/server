@@ -68,6 +68,22 @@ pub enum LogicalRequest {
         key: String,
         bytes: Vec<u8>,
     },
+    /// Byte-safe single-key entry ops on the shared key-space container
+    /// (`002` FR-035). `Object` already covers the byte-safe put.
+    KeyGet {
+        container: ContainerRef,
+        key: String,
+    },
+    KeyDelete {
+        container: ContainerRef,
+        key: String,
+    },
+    KeyScan {
+        container: ContainerRef,
+        cursor: u64,
+        count: usize,
+        pattern: Option<String>,
+    },
     Batch {
         requests: Vec<LogicalRequest>,
     },

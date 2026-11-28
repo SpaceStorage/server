@@ -6,6 +6,8 @@
 pub mod errors;
 pub mod handshake;
 pub mod http;
+pub mod info;
+pub mod lease;
 pub mod namespace;
 pub mod options;
 pub mod session;
@@ -15,6 +17,8 @@ pub mod stats;
 pub use errors::{MismatchRefusal, ProtocolCoreError};
 pub use handshake::{default_timeout, peek_signature};
 pub use http::{parse_http_request_line, split_target, HttpRequestLine};
+pub use info::{NodeInfoProvider, NodeInfoSnapshot, StandaloneNodeInfo};
+pub use lease::{StreamLeaseError, StreamLeaseProvider};
 pub use session::{ClientSession, SessionCloseReason, SessionState};
 pub use signature::{
     detect_signature, expect_signature, ProtocolFamily, SignatureMatch, DEFAULT_HANDSHAKE_TIMEOUT,

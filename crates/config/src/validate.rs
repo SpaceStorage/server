@@ -633,6 +633,18 @@ pub fn validate(
         ));
     }
 
+    // 017: protocols.redis.max_block must be non-negative.
+    if cfg.protocols.redis.max_block_negative {
+        errors.push(ConfigError::new(
+            file,
+            0,
+            0,
+            "protocols.redis.max_block",
+            ErrorCode::RedisMaxBlockNegative,
+            "protocols.redis.max_block must be >= 0 (unset = stock timeout 0)",
+        ));
+    }
+
     // 008: observability config
     if let Some(ref ep) = cfg.metrics.otel_endpoint {
         let e = ep.trim();

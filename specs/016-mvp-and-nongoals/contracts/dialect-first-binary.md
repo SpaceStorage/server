@@ -34,7 +34,7 @@ On a container of type `K/V Store`:
 | SELECT | no-op inside the bound namespace |
 | TTL / EXPIRE / PTTL mapped to container TTL | MUST |
 
-Off `K/V Store`: canonical JSON/blob only (`002`), including first-binary `Document Store`. Type-specific Redis verbs (`HGET`, `XADD`, `JSON.GET`, …) MUST return a Redis error (unknown command or not-supported) and MUST NOT succeed or no-op (SC-006). Redis Cluster slots, modules, Lua, Redis Streams-as-product: not-supported (`015`).
+Off `K/V Store`: canonical JSON/blob only (`002`), including first-binary `Document Store`. Type-specific Redis verbs (`HGET`, `XADD`, `JSON.GET`, …) MUST return a Redis error (unknown command or not-supported) and MUST NOT succeed or no-op (SC-006). Redis Cluster slots, modules, and Lua are not-supported. Streams, collections, geo, bitmaps, and HyperLogLog are outside the first binary; the complete-product Redis dialect that adds them (including Streams + consumer groups) is owned by `017` and does not change this first-binary subset.
 
 ## Other client protocols
 
